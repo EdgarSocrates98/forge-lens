@@ -92,6 +92,8 @@ was sent; `null`s render as `n/a`.
 
 The trace detail **evidence** tab ends with an **eval** panel that auto-loads `GET /v1/traces/:id/eval` and can run any of the built-in evaluators via `POST /v1/eval/run` (`score: null` renders as `n/a` with the evaluator's reason). Checking a param-taking evaluator reveals its inputs — `*` marks params the evaluator requires, `allowed` takes a comma-separated list, `expected` accepts a JSON value, and a malformed value blocks the run before POST (an omitted param instead comes back as an `evaluator_error` row). A collapsible **replay** panel below it renders `GET /v1/traces/:id/replay` — the recorded span/event timeline in server order (offset, kind, name, event, status), capped at 200 rows behind a show-more button, with honest empty/error states.
 
+The **operations** view (`/ops`, linked in the header) renders `GET /v1/ops/summary`: the store `stats` map as cards (traces, spans, error spans, db size, schema — extra keys a store adds still render), the bounded-window trace/failure counts, and the recent-failure trace ids linked to `/traces/{id}`; the payload's own `bounded window (200 traces)` note is shown verbatim. Below it, an **alerts** panel posts `POST /v1/alerts/evaluate` with `{use_saved: true}` and lists the fired rules (metric, op, threshold, observed, severity, message). The response only reports fired rules plus an `evaluated` count — there is no rules-listing GET, so passing rules are summarized ("none fired"), never rowed; rule management stays on `POST`/`DELETE /v1/alerts/rules`. A manual **refresh** button re-issues both calls — nothing polls.
+
 ## API connection
 
 The Studio talks to `forge-lens serve` (default `http://localhost:7777`).
@@ -105,3 +107,5 @@ Note: the API key is stored in `localStorage`, which is readable by any
 script running in the page — acceptable for a local-first tool bound to
 loopback, but do not reuse a high-value key here if Studio is ever
 served from a shared origin.
+
+The **graph** view (`/graph`, deep-linkable via `?trace_id=`/`?session_id=`) renders `GET /v1/graph/…` responses as a hand-rolled SVG DAG — longest-path layered layout, edge-kind strokes (parent solid / sequence dashed / link dotted, dangling edges as stubs), drag-pan + zoom/fit controls, a critical-path highlight toggle, a self-time bottlenecks table, and a 500-node cap with an honest truncation banner.

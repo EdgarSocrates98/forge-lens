@@ -27,6 +27,20 @@ export interface OpsSummary {
   project_id: string | null; stats: Record<string, unknown>;
   recent_traces: number; recent_failures: string[]; note: string;
 }
+/** One fired rule in a POST /v1/alerts/evaluate response — the server
+ *  only reports rules that fired; `evaluated` on the response counts
+ *  every rule considered, so passing rules are summarized, not rowed. */
+export interface AlertEvent {
+  rule_id: string; metric: string; op: string;
+  threshold: number; observed: number;
+  severity: string; message: string;
+}
+/** POST /v1/alerts/evaluate response — `fired` events plus how many
+ *  rules were evaluated. There is no rules-listing GET; rules persist
+ *  via POST/DELETE /v1/alerts/rules and merge in via `use_saved`. */
+export interface AlertEval {
+  fired: AlertEvent[]; evaluated: number; project_id: string | null;
+}
 /** Server-side filters accepted by GET /v1/traces — empty/undefined omitted. */
 export interface TraceFilter {
   status?: string; session_id?: string; tool?: string; q?: string;
@@ -172,6 +186,47 @@ export interface CompareReport {
   gate?: CompareGateResult;
   missing_trace_ids?: unknown;
 }
+/** One node of an ExecutionGraph — a span in trace graphs, a whole
+ *  trace in session graphs (`kind: 'trace'`). Mirrors the backend's
+ *  GraphNode: `error` is the materialized `status === 'error'` flag and
+ *  `integrity_flags`/`has_token_usage` carry the stored evidence. */
+export interface GraphNode {
+  id: string; kind: string; name: string;
+  start_time: string; end_time?: string | null;
+  duration_ms?: number | null; status: string;
+  integrity_flags: string[]; has_token_usage: boolean; error: boolean;
+}
+/** One edge — `kind` is 'parent' (containment), 'sequence' (temporal
+ *  sibling succession) or 'link' (explicit SpanLink). `dangling` means
+ *  the target id is not a node in this graph (cross-trace link or a
+ *  parent that never arrived) — evidence, not an error. */
+export interface GraphEdge {
+  source: string; target: string;
+  kind: 'parent' | 'sequence' | 'link' | string;
+  dangling?: boolean;
+}
+/** GET /v1/graph/{traces,sessions}/{id} — the deterministic node/edge
+ *  projection. `stats` carries span_count/edge_count/max_depth/
+ *  dangling_edges; session graphs add `truncated` when the server's
+ *  trace-page cap was hit. */
+export interface ExecutionGraph {
+  subject_id: string; project_id: string; root_id: string | null;
+  nodes: GraphNode[]; edges: GraphEdge[];
+  stats: Record<string, unknown>;
+}
+/** GET /v1/graph/traces/{id}/critical-path — `path` is the node-id
+ *  chain maximizing summed durations; `cycles` lists parent edges the
+ *  algorithm cut (reported as evidence). */
+export interface CriticalPath {
+  path: string[]; total_ms: number;
+  cycles: { from: string; to: string }[];
+}
+/** One row of GET /v1/graph/traces/{id}/bottlenecks — node duration
+ *  minus direct-children duration, ranked by `self_ms` desc. */
+export interface Bottleneck {
+  id: string; name: string; kind: string;
+  self_ms: number; duration_ms: number | null;
+}
 
 const BASE_KEY = 'lens-api-base';
 const KEY_KEY = 'lens-api-key';
@@ -231,6 +286,26 @@ export class Api {
   getGraphAnalysis(id: string): Observable<Record<string, unknown>> {
     return this.get(`/graph/traces/${id}/analysis`);
   }
+  /** GET /v1/graph/traces/{id} — the span-level ExecutionGraph. */
+  getTraceGraph(id: string): Observable<ExecutionGraph> {
+    return this.get(`/graph/traces/${id}`);
+  }
+  /** GET /v1/graph/sessions/{id} — the session-level graph whose nodes
+   *  are traces; `stats.truncated` flags a server-side page cap. */
+  getSessionGraph(id: string): Observable<ExecutionGraph> {
+    return this.get(`/graph/sessions/${id}`);
+  }
+  /** GET /v1/graph/traces/{id}/critical-path — node-id chain only. */
+  getCriticalPath(id: string): Observable<CriticalPath> {
+    return this.get(`/graph/traces/${id}/critical-path`);
+  }
+  /** GET /v1/graph/traces/{id}/bottlenecks?top=n — self-time ranking
+   *  (`top` is clamped 0..100 server-side). */
+  getBottlenecks(id: string, top = 10): Observable<{ items: Bottleneck[] }> {
+    return this.http.get<{ items: Bottleneck[] }>(
+      `${this.base()}/graph/traces/${id}/bottlenecks`,
+      { params: new HttpParams().set('top', top), headers: this.headers() });
+  }
   getCost(id: string): Observable<Record<string, unknown>> {
     return this.get(`/traces/${id}/cost`);
   }
@@ -287,5 +362,11 @@ export class Api {
     return this.post('/eval/compare', body);
   }
   getOps(): Observable<OpsSummary> { return this.get(`/ops/summary`); }
+  /** POST /v1/alerts/evaluate — `{use_saved: true}` merges the rules
+   *  persisted via POST /v1/alerts/rules into the evaluation; metrics
+   *  are store-computed at request time. */
+  evalAlerts(): Observable<AlertEval> {
+    return this.post('/alerts/evaluate', { use_saved: true });
+  }
   getCapabilities(): Observable<Capabilities> { return this.get(`/capabilities`); }
 }

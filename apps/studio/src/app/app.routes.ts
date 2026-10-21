@@ -27,6 +27,11 @@ export const routes: Routes = [
     title: 'Trace — Forge Lens',
   },
   {
+    path: 'graph',
+    loadComponent: () => import('./graph').then(m => m.GraphComponent),
+    title: 'Graph — Forge Lens',
+  },
+  {
     path: 'ops',
     loadComponent: () => import('./ops').then(m => m.OpsComponent),
     title: 'Operations — Forge Lens',

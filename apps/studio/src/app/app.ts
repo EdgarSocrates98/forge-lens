@@ -14,6 +14,7 @@ import { Api } from './api';
         <a routerLink="/">traces</a>
         <a routerLink="/sessions">sessions</a>
         <a routerLink="/datasets">datasets</a>
+        <a routerLink="/graph">graph</a>
         <a routerLink="/ops">ops</a>
         <a routerLink="/capabilities">capabilities</a>
       </nav>
