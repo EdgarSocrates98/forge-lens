@@ -892,7 +892,8 @@ class SQLiteTraceStore:
                     name,
                     task,
                     now_ns,
-                    json.dumps(metadata or {}, sort_keys=True, default=str),
+                    json.dumps(_json_finite(metadata or {}),
+                               sort_keys=True, default=str),
                 ),
             )
 
@@ -970,7 +971,8 @@ class SQLiteTraceStore:
                     version,
                     description,
                     now_ns,
-                    json.dumps(metadata or {}, sort_keys=True, default=str),
+                    json.dumps(_json_finite(metadata or {}),
+                               sort_keys=True, default=str),
                 ),
             )
             self._conn.execute(
@@ -988,8 +990,10 @@ class SQLiteTraceStore:
                         project_id,
                         version,
                         str(c.get("case_id", "")),
-                        json.dumps(c.get("input") or {}, sort_keys=True, default=str),
-                        json.dumps(c.get("expected") or {}, sort_keys=True, default=str),
+                        json.dumps(_json_finite(c.get("input") or {}),
+                                   sort_keys=True, default=str),
+                        json.dumps(_json_finite(c.get("expected") or {}),
+                                   sort_keys=True, default=str),
                         json.dumps(c.get("allowed_tools") or [], default=str),
                         json.dumps(c.get("constraints") or {}, sort_keys=True, default=str),
                         json.dumps(c.get("rubric") or {}, sort_keys=True, default=str),
@@ -1165,7 +1169,8 @@ class SQLiteTraceStore:
                     action,
                     resource,
                     outcome,
-                    json.dumps(detail or {}, sort_keys=True, default=str),
+                    json.dumps(_json_finite(detail or {}),
+                           sort_keys=True, default=str),
                 ),
             )
 

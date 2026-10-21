@@ -8,7 +8,7 @@ Usage: python scripts/gen_sbom.py > sbom.json
 from __future__ import annotations
 
 import json
-from importlib.metadata import distributions
+from importlib.metadata import distributions, version
 
 
 def main() -> None:
@@ -29,7 +29,7 @@ def main() -> None:
         "version": 1,
         "metadata": {"component": {
             "type": "application", "name": "forge-lens",
-            "version": "0.1.0"}},
+            "version": version("forge-lens")}},
         "components": comps,
     }, indent=2))
 

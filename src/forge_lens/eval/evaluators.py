@@ -321,7 +321,10 @@ def _task_completion(
     trace: Trace, params: dict[str, Any], now: datetime | None
 ) -> EvaluationResult:
     """Task completion — trace finished and (optionally) without error."""
-    require_no_error = params.get("require_no_error", True)
+    # non-bool (e.g. the string "false", which is truthy) falls back to
+    # the safe default rather than silently inverting the check
+    _rne = params.get("require_no_error", True)
+    require_no_error = _rne if isinstance(_rne, bool) else True
     if trace.ended_at is None:
         return _result(
             "task_completion",

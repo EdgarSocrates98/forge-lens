@@ -898,8 +898,8 @@ def create_app(
             raise _reject_request(422, f"{field}: ISO datetime string required")
         try:
             return to_unix_nano(ensure_aware(datetime.fromisoformat(raw)))
-        except ValueError as exc:
-            raise _reject_request(422, f"{field}: invalid ISO datetime") from exc
+        except (ValueError, ValidationError) as exc:
+            raise _reject_request(422, f"{field}: {exc}") from exc
 
     @app.put(
         f"/{API_VERSION}/datasets/{{dataset_id}}",
@@ -1156,8 +1156,10 @@ def create_app(
                 or isinstance(older_days, bool)
                 or not math.isfinite(older_days)
                 or older_days < 0
+                or older_days > 106_000  # int64 ns ceiling ≈ 106,751 days
             ):
-                raise _reject_request(422, "older_than_days: finite non-negative number required")
+                raise _reject_request(
+                    422, "older_than_days: finite number 0..106000 required")
             cutoff = wall_clock_ns() - int(older_days * 86_400_000_000_000)
         else:
             raise _reject_request(422, "before or older_than_days required")
@@ -1220,15 +1222,16 @@ def create_app(
             v = b.get(field, default)
             if isinstance(v, bool) or not isinstance(v, (int, float, str)):
                 raise _reject_request(422, f"budget.{field} must be a number")
-            if isinstance(v, (int, float)) and not math.isfinite(v):
-                raise _reject_request(
-                    422, f"budget.{field} must be finite")
             try:
-                return cast(v)
+                out = cast(v)
             except (TypeError, ValueError, OverflowError):
                 raise _reject_request(
                     422, f"budget.{field} must be a number"
                 ) from None
+            if isinstance(out, (int, float)) and not math.isfinite(out):
+                raise _reject_request(
+                    422, f"budget.{field} must be finite")
+            return out
 
         budget = AgentBudget(
             max_iterations=_num("max_iterations", 8, int),

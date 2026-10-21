@@ -396,3 +396,42 @@ def test_doctor_no_install_dir_side_effect(tmp_path: Path) -> None:
     status(tmp_path)
     doctor(tmp_path)
     assert not (tmp_path / "install").exists()
+
+
+def test_no_progress_requires_error_evidence(synthetic_trace: Trace) -> None:
+    """no_progress_signal must not fire on repetition alone — findings
+    without evidence contradict the evidence-first rule."""
+    ok_repeats = _trace([_tool(i) for i in range(4)])
+    out = detect_loops(ok_repeats)
+    assert all(f["kind"] != "no_progress_signal"
+               for f in out["findings"])
+    # with errors present the finding carries its evidence
+    err_repeats = _trace([_tool(i, error=True) for i in range(4)])
+    kinds = {f["kind"] for f in detect_loops(err_repeats)["findings"]}
+    assert "no_progress_signal" in kinds
+
+
+def test_mcp_stats_project_filter(tmp_path: Path) -> None:
+    """lens.stats takes project_id like its siblings."""
+    store = SQLiteTraceStore(tmp_path / "m.db")
+    a = _trace([_tool(0)])
+    b = _trace([_tool(1)])
+    b = Trace(trace_id="dd" * 16, root_span_id=b.spans[0].span_id,
+              started_at=_T0, ended_at=_T0, spans=b.spans,
+              project_id="other", status=Status(code=StatusCode.OK))
+    for s in b.spans:
+        object.__setattr__(s, "trace_id", "dd" * 16)
+    store.upsert_trace(a)
+    store.upsert_trace(b)
+    assert store.stats()["traces"] == 2
+    assert store.stats(project_id="default")["traces"] == 1
+    store.close()
+
+
+def test_parse_session_oversize_rejected(tmp_path: Path) -> None:
+    from forge_lens.adapters.claude_code import parse_session
+
+    big = tmp_path / "big.jsonl"
+    big.write_bytes(b" " * (257 * 1024 * 1024))
+    with pytest.raises(ValueError, match="MiB"):
+        parse_session(big)

@@ -832,6 +832,9 @@ def import_claude(
     except OSError as exc:
         typer.echo(f"cannot read {path}: {exc}", err=True)
         raise typer.Exit(2) from None
+    except ValueError as exc:
+        typer.echo(f"invalid session file: {exc}", err=True)
+        raise typer.Exit(2) from None
     if trace is None:
         typer.echo("no usable events in file — nothing imported", err=True)
         raise typer.Exit(1)

@@ -31,6 +31,9 @@ def _hex32(raw: Any) -> str:
 
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+# bounded read: a session file is a local artifact, not a
+# stream — refuse pathological sizes rather than OOM
+_MAX_SESSION_BYTES = 256 * 1024 * 1024
 
 
 def _ts(value: Any) -> datetime | None:
@@ -52,6 +55,10 @@ def parse_session(path: Path, *, project_id: str = "claude-code") -> Trace | Non
     with zero tool_use/summary events returns None rather than a
     fabricated trace.
     """
+    if path.stat().st_size > _MAX_SESSION_BYTES:
+        raise ValueError(
+            f"session file exceeds {_MAX_SESSION_BYTES // (1 << 20)} MiB — "
+            "split it or export a range")
     events: list[dict[str, Any]] = []
     session_id: str | None = None
     with path.open(encoding="utf-8", errors="replace") as fh:

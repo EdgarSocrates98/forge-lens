@@ -190,6 +190,8 @@ def init_project(project_dir: Path, project_id: str) -> Path:
             'endpoint = "http://127.0.0.1:7777"\n'
             "# api_key = \"change-me\"  # set to require X-Forge-Lens-Key on ingest\n"
             "# auth_reads = true  # also require the key on GET query endpoints\n"
+            "# auth_mode = \"keys\"  # managed per-key RBAC + project scope\n"
+            "# retention_days = 30  # auto-prune horizon for `archive`/`prune`\n"
             "# rate_limit_per_minute = 600\n",
             encoding="utf-8",
         )

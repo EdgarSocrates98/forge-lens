@@ -58,7 +58,10 @@ def serve(db_path: str) -> int:
             t = store.get_trace(tid, project_id=pid)
             return {"trace": t.model_dump(mode="json") if t else None}
         if name == "lens.stats":
-            return store.stats()
+            pid = args.get("project_id")
+            if pid is not None and not isinstance(pid, str):
+                raise TypeError("project_id must be a string")
+            return store.stats(project_id=pid)
         return {"error": f"unknown tool {name!r}"}
 
     for line in sys.stdin:

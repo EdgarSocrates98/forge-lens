@@ -9,6 +9,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from forge_lens.core.errors import ValidationError
+
+# SQLite INTEGER is signed int64 — a datetime outside ~1678-2262
+# nanos-since-epoch can never be persisted; reject it as a domain
+# validation error (→ 4xx) rather than letting sqlite3.OverflowError
+# surface as a 500.
+_I64_MAX = 2**63 - 1
+
 NANOS_PER_SECOND = 1_000_000_000
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
@@ -18,11 +26,17 @@ def to_unix_nano(dt: datetime) -> int:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     delta = dt - _EPOCH
-    return (
+    ns = (
         delta.days * 86_400 * NANOS_PER_SECOND
         + delta.seconds * NANOS_PER_SECOND
         + delta.microseconds * 1_000
     )
+    if abs(ns) > _I64_MAX:
+        raise ValidationError(
+            f"datetime {dt.isoformat()} is outside the int64 "
+            "nanosecond range (~1678-2262)"
+        )
+    return ns
 
 
 def from_unix_nano(nanos: int) -> datetime:

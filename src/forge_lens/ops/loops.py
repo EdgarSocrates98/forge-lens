@@ -89,9 +89,10 @@ def detect_loops(trace: Trace, *, repeat_threshold: int = 3) -> dict[str, Any]:
                           " possible cyclic delegation",
             })
 
-    # 4. no-progress: repetition + errors + no completed spans after
-    if findings:
-        errored = [s for s in tools if s.status.code.value == "error"]
+    # 4. no-progress: repetition + errors — only when errored spans
+    # actually exist; an empty evidence list is not a finding
+    errored = [s for s in tools if s.status.code.value == "error"]
+    if findings and errored:
         findings.append({
             "kind": "no_progress_signal",
             "classification": "heuristic",

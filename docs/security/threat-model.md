@@ -33,5 +33,7 @@
 
 ## Resíduos aceitos / roadmap
 
-- Audit log dedicado, RBAC/tenancy, TLS embutido, assinatura de artefatos —
+- Assinatura de artefatos e SSO/OIDC —
+  seguem fora do escopo local-first; RBAC/tenancy por API key, audit
+  trail e o passthrough de TLS do `serve` já existem (ciclo 08).
   ciclos de governança/deploy. Registrados, não escondidos.

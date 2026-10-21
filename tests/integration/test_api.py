@@ -1436,3 +1436,39 @@ def test_nonfinite_boundary_numbers_422(
                 '{"budget": {"max_iterations": ' + bad + '}}'),
             headers={"content-type": "application/json"})
         assert r.status_code == 422, (bad, r.status_code)
+
+
+def test_int64_overflow_timestamps_422(
+    client: TestClient, synthetic_trace: Trace,
+) -> None:
+    """Datetimes beyond the int64 ns range (~1678-2262) must 422, never
+    reach the SQLite INTEGER bind as OverflowError."""
+    for before in ("9999-12-31T00:00:00Z", "1000-01-01T00:00:00Z"):
+        r = client.post("/v1/admin/prune", json={"before": before})
+        assert r.status_code == 422, (before, r.status_code, r.text)
+    assert client.post("/v1/admin/prune",
+                       json={"older_than_days": 1e9}).status_code == 422
+    # dataset created_at
+    assert client.put("/v1/datasets/ds-y2500", json={
+        "name": "d", "created_at": "2500-01-01T00:00:00Z"
+    }).status_code == 422
+    # native ingest — a span timestamped in year 9999
+    tr = synthetic_trace.model_dump(mode="json")
+    tr["started_at"] = "9999-12-31T00:00:00Z"
+    tr["spans"][0]["start_time"] = "9999-12-31T00:00:00Z"
+    tr["spans"][0]["end_time"] = "9999-12-31T00:00:01Z"
+    r = client.post("/v1/traces", json={"traces": [tr]})
+    assert r.status_code == 422, (r.status_code, r.text[:200])
+
+
+def test_require_no_error_non_bool_defaults_true(
+    client: TestClient, synthetic_trace: Trace,
+) -> None:
+    env = {"traces": [synthetic_trace.model_dump(mode="json")]}
+    assert client.post("/v1/traces", json=env).status_code == 200
+    r = client.post("/v1/eval/run", json={
+        "trace_ids": [synthetic_trace.trace_id],
+        "evaluators": [{"evaluator": "task_completion",
+                        "metric": "completed",
+                        "params": {"require_no_error": "false"}}]})
+    assert r.status_code == 200  # truthy string treated as default True
