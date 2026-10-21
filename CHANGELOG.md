@@ -32,7 +32,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
   adicionado para `python -m forge_lens`.
 - Docs: `installation/standalone.md` (rotas completas + ciclo de vida),
   `linux.md`/`macos.md`/`windows.md` (rota portátil primeiro),
-  `reference/cli.md` (verbos + flags), README quickstart.
+  `reference/cli.md` (verbos + flags + escopo de `--data-dir` por verbo),
+  README quickstart. `install.ps1 --dry-run` é a forma correta — o
+  script não declara `param()`, então flags seguem a convenção
+  `--long-option` do argparse (não `-PascalCase`).
 - `tests/unit/test_forge_bootstrap.py` (109 testes, stdlib/offline):
   redaction de credenciais em URLs, normalização PEP 503, specs de
   distribuição + extras, refusals de nome/path traversal, dry-run,

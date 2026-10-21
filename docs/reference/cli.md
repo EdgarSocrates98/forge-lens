@@ -192,6 +192,11 @@ forge-lens install uninstall [--data-dir <path>]   # remove arquivos rastreados
 receipt (containment por path resolvido) e deixa um receipt de
 `uninstall` — a remoção é provável, não silenciosa.
 
+Escopo das flags: `--data-dir` no grupo liga o verbo `install` sem
+subcomando; `status`/`doctor`/`uninstall` ligam o próprio `--data-dir`
+— passe a flag depois do verbo (`forge-lens install status --data-dir
+X`), não antes.
+
 ## Instalador portátil (`install.sh` / `install.ps1`)
 
 `./install.sh` (POSIX/Git Bash), `.\install.ps1` (PowerShell),

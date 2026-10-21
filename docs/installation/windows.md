@@ -6,8 +6,10 @@ Rota portátil (recomendada — instala em `~\.forge`, shim `.cmd`, variáveis
 ```powershell
 # PowerShell — dot-source para herdar PATH na sessão atual
 . .\install.ps1
-.\install.ps1 -DryRun
+.\install.ps1 --dry-run
+```
 
+```bash
 # Git Bash — a rota POSIX dentro do Git Bash, nunca spawna PowerShell
 bash install.windows.sh
 ```

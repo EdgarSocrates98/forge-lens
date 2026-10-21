@@ -24,7 +24,7 @@ bash install.windows.sh   # mesma rota POSIX, recusa shells não-bash
 
 # Windows — PowerShell (dot-source para herdar o PATH na sessão)
 . .\install.ps1
-.\install.ps1 -DryRun
+.\install.ps1 --dry-run
 ```
 
 `setup.sh`/`setup.ps1` são atalhos equivalentes que invocam o bootstrap
