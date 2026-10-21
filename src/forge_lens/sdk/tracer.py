@@ -5,14 +5,17 @@ Design: spans are accumulated in memory per trace and flushed as a
 span ends, or on explicit ``flush()``. This keeps ingestion atomic
 per-trace instead of per-span, which avoids partial-tree reads for the
 common case. Long-running traces can call ``flush()`` mid-flight —
-the store merges subsequent flushes.
+the store merges subsequent flushes, and the pending trace stays
+registered so the root end still auto-flushes.
 """
 
 from __future__ import annotations
 
+import atexit
 import functools
 import json
 import sys
+import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -42,6 +45,7 @@ R = TypeVar("R")
 
 FlushCallback = Callable[[Trace], None]
 ExportErrorCallback = Callable[[Exception, "Trace"], None]
+DeadLetterCallback = Callable[["Trace"], None]
 
 
 class LensTracer:
@@ -60,8 +64,12 @@ class LensTracer:
         exporter: Any | None = None,
         on_flush: FlushCallback | None = None,
         on_export_error: ExportErrorCallback | None = None,
+        on_dead_letter: DeadLetterCallback | None = None,
         auto_flush: bool = True,
         session_id: str | None = None,
+        project_id: str = "default",
+        max_export_failures: int = 5,
+        register_atexit: bool = True,
     ) -> None:
         self.source = TraceSource(
             system=service_name,
@@ -75,11 +83,19 @@ class LensTracer:
         self.exporter = exporter or InMemoryExporter()
         self.on_flush = on_flush
         self.on_export_error = on_export_error
+        self.on_dead_letter = on_dead_letter
         self.auto_flush = auto_flush
         self.session_id = session_id
+        self.project_id = project_id
+        self.max_export_failures = max_export_failures
         self.export_errors = 0
+        self.dead_letters: list[Trace] = []
         self._pending: dict[str, Trace] = {}
         self._root_ctx: dict[str, SpanContext] = {}
+        self._failures: dict[str, int] = {}
+        self._lock = threading.RLock()
+        if register_atexit:
+            atexit.register(self._atexit_flush)
 
     # -- span lifecycle -------------------------------------------------
 
@@ -112,28 +128,32 @@ class LensTracer:
             start_time=datetime.now(tz=UTC),
             attributes=attrs,
         )
-        trace = self._trace_for(ctx, parent is None or remote_parent is not None)
-        trace.spans.append(span_obj)
+        with self._lock:
+            trace = self._trace_for(ctx, parent is None or remote_parent is not None)
+            trace.spans.append(span_obj)
         token = push_span(ctx)
         try:
             yield span_obj
             if span_obj.status.code == StatusCode.UNSET:
-                span_obj.status = Status(code=StatusCode.OK)
+                with self._lock:
+                    span_obj.status = Status(code=StatusCode.OK)
         except Exception as exc:
-            span_obj.status = Status(code=StatusCode.ERROR, message=str(exc)[:500])
-            span_obj.events.append(
-                SpanEvent(
-                    name="exception",
-                    time=datetime.now(tz=UTC),
-                    attributes={
-                        "exception.type": type(exc).__name__,
-                        "exception.message": str(exc)[:1000],
-                    },
+            with self._lock:
+                span_obj.status = Status(code=StatusCode.ERROR, message=str(exc)[:500])
+                span_obj.events.append(
+                    SpanEvent(
+                        name="exception",
+                        time=datetime.now(tz=UTC),
+                        attributes={
+                            "exception.type": type(exc).__name__,
+                            "exception.message": str(exc)[:1000],
+                        },
+                    )
                 )
-            )
             raise
         finally:
-            span_obj.end_time = datetime.now(tz=UTC)
+            with self._lock:
+                span_obj.end_time = datetime.now(tz=UTC)
             pop_span(token)
             self._maybe_flush(trace, ctx)
 
@@ -190,9 +210,10 @@ class LensTracer:
             total_tokens=total_tokens,
             measurement_source=MeasurementSource(source),
         )
-        span_obj.attributes["forge_lens.token_usage"] = usage.model_dump(
-            mode="json", exclude_none=True
-        )
+        with self._lock:
+            span_obj.attributes["forge_lens.token_usage"] = usage.model_dump(
+                mode="json", exclude_none=True
+            )
 
     @contextmanager
     def tool_call(
@@ -221,6 +242,7 @@ class LensTracer:
         if trace is None:
             trace = Trace(
                 trace_id=ctx.trace_id,
+                project_id=self.project_id,
                 session_id=self.session_id,
                 started_at=datetime.now(tz=UTC),
                 source=self.source,
@@ -245,29 +267,139 @@ class LensTracer:
                     except Exception:
                         self.export_errors += 1
 
+    def _is_finished(self, trace: Trace) -> bool:
+        """Finished once the root span has an end_time — or, when no
+        root was registered (e.g. a continued remote trace whose remote
+        parent never lands), once every span has ended."""
+        root = next(
+            (s for s in trace.spans if s.span_id == trace.root_span_id), None
+        )
+        if root is not None:
+            return root.end_time is not None
+        return bool(trace.spans) and all(
+            s.end_time is not None for s in trace.spans
+        )
+
+    def _drop(self, trace_id: str) -> None:
+        self._pending.pop(trace_id, None)
+        self._root_ctx.pop(trace_id, None)
+        self._failures.pop(trace_id, None)
+
+    def _mark_exported(self, trace: Trace) -> None:
+        self._failures.pop(trace.trace_id, None)
+        if self._is_finished(trace):
+            self._drop(trace.trace_id)
+
+    def _bump_failure(self, trace: Trace, dead: list[Trace]) -> None:
+        """Count a failed export; a persistently-failing trace is
+        dead-lettered explicitly (visible via ``dead_letters``, reported
+        through ``on_dead_letter``) — never dropped silently."""
+        tid = trace.trace_id
+        count = self._failures.get(tid, 0) + 1
+        if count >= max(1, self.max_export_failures):
+            self._drop(tid)
+            self.dead_letters.append(trace)
+            dead.append(trace)
+            return
+        self._failures[tid] = count
+
+    def _handle_export_failure(
+        self,
+        batch: list[tuple[Trace, Trace]],
+        flushed: list[Trace],
+        dead: list[Trace],
+    ) -> None:
+        """On batch failure, salvage good traces from a poisoned batch.
+
+        A multi-trace batch can fail because of one bad apple (e.g. an
+        oversized trace → permanent 413). Re-export each trace alone so
+        the good ones still land; only the real failures count.
+        """
+        if len(batch) > 1:
+            still_failing: list[tuple[Trace, Trace]] = []
+            for live, snapshot in batch:
+                try:
+                    self.exporter.export([snapshot], source=self.source)
+                except Exception:
+                    still_failing.append((live, snapshot))
+                else:
+                    self._mark_exported(live)
+                    flushed.append(snapshot)
+            batch = still_failing
+        for live, _ in batch:
+            self._bump_failure(live, dead)
+
     def flush(self, trace_id: str | None = None) -> dict[str, Any] | None:
         """Export pending traces. Failed batches stay pending for retry.
 
+        A mid-flight ``flush()`` does **not** unregister the trace: the
+        pending trace keeps accumulating and auto-flush still fires when
+        the root span ends (the store merges the partial deliveries).
         Raises the exporter's error to the *explicit* caller — only the
-        auto-flush path swallows it.
+        auto-flush path swallows it. Traces that fail
+        ``max_export_failures`` consecutive exports move to
+        ``self.dead_letters`` (and ``on_dead_letter`` is called).
         """
-        ids = [trace_id] if trace_id else list(self._pending.keys())
-        batch: list[Trace] = []
-        for tid in ids:
-            trace = self._pending.get(tid)
-            if trace is not None:
-                _finalize(trace)
-                batch.append(trace)
-        if not batch:
-            return None
-        result = self.exporter.export(batch, source=self.source)
-        for trace in batch:
-            self._pending.pop(trace.trace_id, None)
-            self._root_ctx.pop(trace.trace_id, None)
-        if self.on_flush:
-            for trace in batch:
-                self.on_flush(trace)
+        flushed: list[Trace] = []
+        dead: list[Trace] = []
+        with self._lock:
+            ids = [trace_id] if trace_id else list(self._pending.keys())
+            batch: list[tuple[Trace, Trace]] = []
+            for tid in ids:
+                live = self._pending.get(tid)
+                if live is not None:
+                    _finalize(live)
+                    # export a snapshot so later span mutation can't leak
+                    # into the serialized (or recorded) batch
+                    batch.append((live, live.model_copy(deep=True)))
+            if not batch:
+                return None
+            err: Exception | None = None
+            try:
+                result = self.exporter.export(
+                    [snapshot for _, snapshot in batch], source=self.source
+                )
+            except Exception as exc:
+                self._handle_export_failure(batch, flushed, dead)
+                err = exc
+            else:
+                for live, snapshot in batch:
+                    self._mark_exported(live)
+                    flushed.append(snapshot)
+        self._notify(flushed, dead)
+        if err is not None:
+            raise err
         return result
+
+    def _notify(self, flushed: list[Trace], dead: list[Trace]) -> None:
+        """Fire user callbacks outside the lock so they may re-enter."""
+        if self.on_flush is not None:
+            for trace in flushed:
+                try:
+                    self.on_flush(trace)
+                except Exception:
+                    self.export_errors += 1
+        if self.on_dead_letter is not None:
+            for trace in dead:
+                try:
+                    self.on_dead_letter(trace)
+                except Exception:
+                    self.export_errors += 1
+
+    def shutdown(self) -> dict[str, Any] | None:
+        """Terminal flush for process teardown — export everything pending.
+
+        Registered on ``atexit`` by default; also callable explicitly.
+        Propagates export errors to the caller (the atexit wrapper
+        swallows them — there is no one left to report to).
+        """
+        return self.flush()
+
+    def _atexit_flush(self) -> None:
+        try:
+            self.flush()
+        except Exception:
+            self.export_errors += 1
 
 
 def _finalize(trace: Trace) -> None:
@@ -337,7 +469,12 @@ def instrument_tool(
         @functools.wraps(f)
         def wrapper(*args: P.args, **kw: P.kwargs) -> R:
             t = tracer or get_tracer()
-            with t.tool_call(tool_name, capture_args=capture_args):
+            arguments = (
+                {"args": list(args), "kwargs": dict(kw)} if capture_args else None
+            )
+            with t.tool_call(
+                tool_name, arguments=arguments, capture_args=capture_args
+            ):
                 return f(*args, **kw)
 
         return wrapper

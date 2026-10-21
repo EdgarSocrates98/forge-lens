@@ -126,3 +126,64 @@ def test_otlp_quarantine_reported_for_missing_ids() -> None:
     assert traces == []
     assert len(errors) == 1
     assert "spanId" in errors[0]
+
+
+def _span_payload(**over: object) -> dict:
+    base = {
+        "traceId": "b" * 32,
+        "spanId": "d" * 16,
+        "name": "s",
+        "startTimeUnixNano": "1767264000000000000",
+    }
+    base.update(over)
+    return {
+        "resourceSpans": [{"scopeSpans": [{"spans": [base]}]}]
+    }
+
+
+def test_otlp_enum_name_span_kind() -> None:
+    """OTLP protobuf-JSON emits enum names: 'SPAN_KIND_SERVER' must map
+    to SERVER, not silently fall back to internal."""
+    cases = {
+        "SPAN_KIND_INTERNAL": SpanKind.INTERNAL,
+        "SPAN_KIND_SERVER": SpanKind.SERVER,
+        "SPAN_KIND_CLIENT": SpanKind.CLIENT,
+        "SPAN_KIND_PRODUCER": SpanKind.PRODUCER,
+        "SPAN_KIND_CONSUMER": SpanKind.CONSUMER,
+        "span_kind_client": SpanKind.CLIENT,  # case-tolerant
+    }
+    for raw_kind, expected in cases.items():
+        trace = normalize_otlp_request(_span_payload(kind=raw_kind))[0]
+        assert trace.spans[0].kind == expected, raw_kind
+    # numeric kinds still work; unknown names degrade to internal
+    assert (
+        normalize_otlp_request(_span_payload(kind=3))[0].spans[0].kind
+        == SpanKind.CLIENT
+    )
+    assert (
+        normalize_otlp_request(_span_payload(kind="SOMETHING_ELSE"))[0]
+        .spans[0].kind
+        == SpanKind.INTERNAL
+    )
+    # OpenInference kind still wins over the OTel field
+    payload = _span_payload(kind="SPAN_KIND_SERVER")
+    payload["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"] = [
+        {"key": "openinference.span.kind", "value": {"stringValue": "LLM"}}
+    ]
+    assert (
+        normalize_otlp_request(payload)[0].spans[0].kind == SpanKind.LLM
+    )
+
+
+def test_otlp_all_zero_parent_span_id_is_absent() -> None:
+    """An all-zero parentSpanId means 'no parent' (W3C) — it must not
+    create a phantom MISSING_PARENT flag."""
+    trace = normalize_otlp_request(
+        _span_payload(parentSpanId="0000000000000000")
+    )[0]
+    span = trace.spans[0]
+    assert span.parent_span_id is None
+    assert not any(f.value == "missing_parent" for f in span.integrity_flags)
+    # a real parent id still passes through
+    trace2 = normalize_otlp_request(_span_payload(parentSpanId="c" * 16))[0]
+    assert trace2.spans[0].parent_span_id == "c" * 16

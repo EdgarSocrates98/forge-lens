@@ -32,3 +32,6 @@ prompt_inicial.md
 
 # Forge Lens runtime state
 .forge-lens/
+
+# Local graph tooling output (not part of the shipped repo)
+graphify-out/

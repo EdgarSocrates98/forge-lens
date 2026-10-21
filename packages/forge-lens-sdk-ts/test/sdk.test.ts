@@ -39,12 +39,20 @@ describe("ids", () => {
     assert.equal(parseTraceparent(`00-${tid}-${sid}-02`)!.sampled, false);
     assert.equal(parseTraceparent(`00-${tid}-${sid}-f0`)!.sampled, false);
   });
+
+  it("rejects version ff and all-zero ids (W3C)", () => {
+    const tid = newTraceId();
+    const sid = newSpanId();
+    assert.equal(parseTraceparent(`ff-${tid}-${sid}-01`), null);
+    assert.equal(parseTraceparent(`00-${"0".repeat(32)}-${sid}-01`), null);
+    assert.equal(parseTraceparent(`00-${tid}-${"0".repeat(16)}-01`), null);
+  });
 });
 
 describe("LensTracer", () => {
   it("nests spans and auto-flushes on root end", async () => {
     const exporter = new InMemoryExporter();
-    const tracer = new LensTracer({ serviceName: "test", exporter });
+    const tracer = new LensTracer({ serviceName: "test", exporter, shutdownHook: false });
     tracer.agent("root", (root) => {
       tracer.llmCall("claude-test", (llm) => {
         tracer.recordUsage(llm, { input_tokens: 10, output_tokens: 4 });
@@ -66,7 +74,7 @@ describe("LensTracer", () => {
 
   it("marks errors and records exception events", async () => {
     const exporter = new InMemoryExporter();
-    const tracer = new LensTracer({ serviceName: "t", exporter });
+    const tracer = new LensTracer({ serviceName: "t", exporter, shutdownHook: false });
     assert.throws(() =>
       tracer.span("boom", () => {
         throw new Error("nope");
@@ -80,7 +88,7 @@ describe("LensTracer", () => {
 
   it("supports async spans", async () => {
     const exporter = new InMemoryExporter();
-    const tracer = new LensTracer({ serviceName: "t", exporter });
+    const tracer = new LensTracer({ serviceName: "t", exporter, shutdownHook: false });
     await tracer.agent("root", async () => {
       await tracer.llmCall("m", async () => {
         await new Promise((r) => setTimeout(r, 5));
@@ -93,7 +101,7 @@ describe("LensTracer", () => {
 
   it("continues a remote parent trace", () => {
     const exporter = new InMemoryExporter();
-    const tracer = new LensTracer({ serviceName: "t", exporter });
+    const tracer = new LensTracer({ serviceName: "t", exporter, shutdownHook: false });
     const remote = { traceId: newTraceId(), spanId: newSpanId(), sampled: true };
     tracer.span("local", () => {}, { remoteParent: remote });
     const trace = exporter.traces[0];
@@ -110,7 +118,7 @@ describe("LensTracer", () => {
         return { accepted_spans: traces.length };
       },
     };
-    const tracer = new LensTracer({ serviceName: "t", exporter, autoFlush: false });
+    const tracer = new LensTracer({ serviceName: "t", exporter, autoFlush: false, shutdownHook: false });
     tracer.span("s", () => {});
     await assert.rejects(() => tracer.flush(), /endpoint down/);
     const ok = await tracer.flush(); // retry — batch was retained
@@ -128,6 +136,8 @@ describe("LensTracer", () => {
       serviceName: "t",
       exporter,
       onExportError: (err) => seen.push(err),
+      maxExportFailures: 100,
+      shutdownHook: false,
     });
     tracer.agent("root", () => {}); // fire-and-forget flush rejects inside
     await new Promise((r) => setTimeout(r, 10)); // let the rejection settle
@@ -142,7 +152,7 @@ describe("LensTracer", () => {
         throw new Error("endpoint down");
       },
     };
-    const tracer = new LensTracer({ serviceName: "t", exporter });
+    const tracer = new LensTracer({ serviceName: "t", exporter, shutdownHook: false });
     assert.throws(
       () =>
         tracer.span("root", () => {
@@ -152,6 +162,89 @@ describe("LensTracer", () => {
     );
     await new Promise((r) => setTimeout(r, 10));
     assert.equal(tracer.exportErrors, 1);
+  });
+
+  it("mid-flight flush() keeps root auto-flush registered", async () => {
+    const exporter = new InMemoryExporter();
+    const tracer = new LensTracer({ serviceName: "t", exporter, shutdownHook: false });
+    await tracer.span("root", async () => {
+      tracer.span("child1", () => {});
+      await tracer.flush(); // documented mid-flight flush (partial delivery)
+      assert.equal(exporter.traces.length, 1);
+      tracer.span("child2", () => {});
+    });
+    // root ended → auto-flush queued behind the chain; this await drains it
+    await tracer.flush();
+    assert.equal(exporter.traces.length, 2);
+    const names = exporter.traces[1].spans.map((s) => s.name);
+    for (const n of ["root", "child1", "child2"]) {
+      assert.ok(names.includes(n), `missing span ${n}`);
+    }
+  });
+
+  it("shutdown() exports traces still pending", async () => {
+    const exporter = new InMemoryExporter();
+    const tracer = new LensTracer({
+      serviceName: "t",
+      exporter,
+      autoFlush: false,
+      shutdownHook: false,
+    });
+    tracer.span("s", () => {});
+    await tracer.shutdown();
+    assert.equal(exporter.traces.length, 1);
+    assert.equal(exporter.traces[0].spans[0].name, "s");
+  });
+
+  it("a poison trace cannot block the rest of the batch", async () => {
+    const exporter = {
+      traces: [] as Trace[],
+      async export(batch: Trace[]) {
+        for (const t of batch) {
+          if (t.spans.some((s) => s.name === "poison")) {
+            throw new Error("simulated permanent rejection (413)");
+          }
+        }
+        this.traces.push(...batch);
+        return {};
+      },
+    };
+    const tracer = new LensTracer({
+      serviceName: "t",
+      exporter,
+      autoFlush: false,
+      maxExportFailures: 5,
+      shutdownHook: false,
+    });
+    tracer.span("good", () => {});
+    tracer.span("poison", () => {});
+    await assert.rejects(() => tracer.flush());
+    // salvage pass re-exported each trace alone — the good one landed
+    assert.equal(exporter.traces.length, 1);
+    assert.equal(exporter.traces[0].spans[0].name, "good");
+  });
+
+  it("persistent export failure dead-letters explicitly", async () => {
+    const exporter = {
+      async export(): Promise<never> {
+        throw new Error("permanent");
+      },
+    };
+    const dead: Trace[] = [];
+    const tracer = new LensTracer({
+      serviceName: "t",
+      exporter,
+      autoFlush: false,
+      maxExportFailures: 2,
+      onDeadLetter: (t) => dead.push(t),
+      shutdownHook: false,
+    });
+    tracer.span("doomed", () => {});
+    await assert.rejects(() => tracer.flush());
+    await assert.rejects(() => tracer.flush());
+    assert.equal(dead.length, 1);
+    assert.equal(dead[0].spans[0].name, "doomed");
+    assert.equal(tracer.deadLetters.length, 1);
   });
 });
 
@@ -174,7 +267,7 @@ describe("HTTPExporter", () => {
       fetchImpl: fakeFetch,
     });
     const mem = new InMemoryExporter();
-    const tracer = new LensTracer({ serviceName: "t", exporter: mem, autoFlush: false });
+    const tracer = new LensTracer({ serviceName: "t", exporter: mem, autoFlush: false, shutdownHook: false });
     tracer.span("s", () => {});
     await tracer.flush();
     await exporter.export(mem.traces, tracer.source);

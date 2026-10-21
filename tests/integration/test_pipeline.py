@@ -52,6 +52,20 @@ def test_rate_limiter() -> None:
         assert unlimited.allow()
 
 
+def test_rate_limiter_uses_injected_clock() -> None:
+    """The window boundary is deterministic: a fake clock controls when
+    the bucket resets — no sleeping in tests, no wall-clock reads."""
+    now = [1_000.0]
+    limiter = RateLimiter(per_minute=2, clock=lambda: now[0])
+    assert limiter.allow()
+    assert limiter.allow()
+    assert not limiter.allow()
+    now[0] += 59.0  # still inside the window
+    assert not limiter.allow()
+    now[0] += 1.0  # window rolled
+    assert limiter.allow()
+
+
 def test_rate_limiter_in_pipeline(tmp_store: SQLiteTraceStore, synthetic_trace: Trace) -> None:
     p = _pipeline(tmp_store, rate_limit_per_minute=1)
     p.ingest([synthetic_trace])

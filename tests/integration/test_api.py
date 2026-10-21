@@ -195,6 +195,37 @@ def test_native_ingest_reports_updated_spans(
     assert stored["spans"][0]["end_time"] is not None
 
 
+def test_envelope_project_id_fills_default_traces(
+    client: TestClient, synthetic_trace: Trace
+) -> None:
+    """A non-default envelope project applies to traces that didn't
+    name a project of their own."""
+    envelope = TraceIngest(traces=[synthetic_trace], project_id="proj-a")
+    r = client.post("/v1/traces", json=envelope.model_dump(mode="json"))
+    assert r.status_code == 200, r.text
+    stored = client.get(
+        f"/v1/traces/{synthetic_trace.trace_id}", params={"project_id": "proj-a"}
+    ).json()
+    assert stored["project_id"] == "proj-a"
+
+
+def test_default_envelope_preserves_explicit_trace_project(
+    client: TestClient, synthetic_trace: Trace
+) -> None:
+    """A per-trace project_id is authoritative: envelope 'default' must
+    not clobber it (that would silently misplace the trace)."""
+    own = synthetic_trace.model_copy(deep=True)
+    own.project_id = "proj-claimed"
+    envelope = TraceIngest(traces=[own])  # envelope project stays 'default'
+    r = client.post("/v1/traces", json=envelope.model_dump(mode="json"))
+    assert r.status_code == 200, r.text
+    stored = client.get(
+        f"/v1/traces/{synthetic_trace.trace_id}",
+        params={"project_id": "proj-claimed"},
+    ).json()
+    assert stored["project_id"] == "proj-claimed"
+
+
 def test_import_has_no_db_side_effect(tmp_path, monkeypatch) -> None:
     """importing api.app must not create .forge-lens/ or open a DB."""
     import importlib

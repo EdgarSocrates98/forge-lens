@@ -62,7 +62,12 @@ def parse_traceparent(header: str) -> tuple[str, str, bool] | None:
     match = TRACEPARENT_RE.match("-".join(parts[:4]))
     if not match:
         return None
-    _, trace_id, span_id, flags = match.groups()
+    version, trace_id, span_id, flags = match.groups()
+    # W3C: version ff is forbidden; all-zero ids are invalid
+    if version == "ff" or not is_valid_trace_id(trace_id) or not is_valid_span_id(
+        span_id
+    ):
+        return None
     # W3C: the sampled flag is bit 0x01 of the flags byte, not the last char
     # (e.g. flags=03 → 0x03 & 0x01 → sampled).
     return trace_id, span_id, bool(int(flags, 16) & 0x01)

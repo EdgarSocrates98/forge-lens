@@ -36,6 +36,7 @@ from forge_lens.contracts.v1.trace import (
     Trace,
     TraceSource,
 )
+from forge_lens.core.errors import ValidationError
 from forge_lens.core.time import from_unix_nano, to_unix_nano
 
 SCHEMA_VERSION = "1.0.0"
@@ -179,7 +180,19 @@ class SQLiteTraceStore:
         Returns ``(inserted, updated, duplicates)``: identical re-delivery
         counts as duplicate; a changed span (e.g. a late ``end_time``) is
         merged into the stored row and counted as updated.
+
+        Raises ``ValidationError`` if any span's ``trace_id`` differs from
+        the trace's — a span stored under a different trace id would be
+        unreachable through ``get_trace`` (silent data loss). The ingest
+        pipeline performs the same check earlier, per batch; this is the
+        store-level guarantee for direct callers.
         """
+        mismatched = [s.span_id for s in trace.spans if s.trace_id != trace.trace_id]
+        if mismatched:
+            raise ValidationError(
+                f"span trace_id mismatch: spans {mismatched!r} carry a "
+                f"trace_id != trace {trace.trace_id}"
+            )
         inserted = updated = duplicates = 0
         # Deterministic seen-markers derived from trace data — no wall clock.
         started_ns = _ns(trace.started_at)
@@ -263,7 +276,7 @@ class SQLiteTraceStore:
                     trace.project_id,
                     trace.session_id,
                     trace.root_span_id,
-                    started_ns or seen_ns,
+                    started_ns if started_ns is not None else seen_ns,
                     ended_ns,
                     trace.status.code.value,
                     trace.status.message,
@@ -272,7 +285,7 @@ class SQLiteTraceStore:
                     trace.provenance.value,
                     len(trace.spans),
                     sum(1 for s in trace.spans if s.status.code == StatusCode.ERROR),
-                    started_ns or seen_ns,
+                    started_ns if started_ns is not None else seen_ns,
                     seen_ns,
                 ),
             )

@@ -101,21 +101,41 @@ def _first_str(attrs: dict[str, Any], keys: tuple[str, ...]) -> str | None:
     return None
 
 
-def map_span_kind(attributes: dict[str, Any], otel_kind: int | None) -> SpanKind:
+# OTel SpanKind — protobuf-JSON may emit either the int or the enum name
+# (e.g. "SPAN_KIND_SERVER"); accept both, consistent with _parse_status.
+_OTEL_KIND_NUMBERS: dict[int, SpanKind] = {
+    1: SpanKind.INTERNAL,
+    2: SpanKind.SERVER,
+    3: SpanKind.CLIENT,
+    4: SpanKind.PRODUCER,
+    5: SpanKind.CONSUMER,
+}
+_OTEL_KIND_NAMES: dict[str, SpanKind] = {
+    "SPAN_KIND_INTERNAL": SpanKind.INTERNAL,
+    "SPAN_KIND_SERVER": SpanKind.SERVER,
+    "SPAN_KIND_CLIENT": SpanKind.CLIENT,
+    "SPAN_KIND_PRODUCER": SpanKind.PRODUCER,
+    "SPAN_KIND_CONSUMER": SpanKind.CONSUMER,
+}
+
+
+def map_span_kind(
+    attributes: dict[str, Any], otel_kind: int | str | None
+) -> SpanKind:
     """Resolve effective span kind: OpenInference kind wins over OTel kind."""
     oi = attributes.get(OI_SPAN_KIND)
     if isinstance(oi, str):
         mapped = OI_KIND_MAP.get(oi.upper())
         if mapped is not None:
             return mapped
-    otel_map = {
-        1: SpanKind.INTERNAL,
-        2: SpanKind.SERVER,
-        3: SpanKind.CLIENT,
-        4: SpanKind.PRODUCER,
-        5: SpanKind.CONSUMER,
-    }
-    return otel_map.get(otel_kind or 0, SpanKind.INTERNAL)
+    if isinstance(otel_kind, bool):
+        return SpanKind.INTERNAL
+    if isinstance(otel_kind, int):
+        return _OTEL_KIND_NUMBERS.get(otel_kind, SpanKind.INTERNAL)
+    if isinstance(otel_kind, str):
+        name = otel_kind.strip().upper()
+        return _OTEL_KIND_NAMES.get(name, SpanKind.INTERNAL)
+    return SpanKind.INTERNAL
 
 
 def extract_token_usage(attributes: dict[str, Any]) -> TokenUsage | None:

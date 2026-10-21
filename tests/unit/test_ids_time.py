@@ -43,6 +43,15 @@ def test_traceparent_sampled_is_a_bit_not_a_char() -> None:
     assert parse_traceparent(f"00-{tid}-{sid}-00") == (tid, sid, False)
 
 
+def test_traceparent_rejects_ff_version_and_zero_ids() -> None:
+    """W3C forbids version ff and all-zero trace/span ids — malformed
+    context must be rejected, not silently continued."""
+    tid, sid = new_trace_id(), new_span_id()
+    assert parse_traceparent(f"ff-{tid}-{sid}-01") is None
+    assert parse_traceparent(f"00-{'0' * 32}-{sid}-01") is None
+    assert parse_traceparent(f"00-{tid}-{'0' * 16}-01") is None
+
+
 def test_unix_nano_roundtrip() -> None:
     now = datetime(2026, 3, 1, 10, 30, tzinfo=UTC)
     ns = to_unix_nano(now)

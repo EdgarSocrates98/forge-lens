@@ -46,7 +46,8 @@ export function parseTraceparent(header: string): SpanContext | null {
   const parts = header.trim().split("-");
   if (parts.length < 4) return null;
   const [version, traceId, spanId, flags] = parts;
-  if (!/^[0-9a-f]{2}$/.test(version) || !isValidTraceId(traceId) || !isValidSpanId(spanId) || !/^[0-9a-f]{2}$/.test(flags)) {
+  // W3C: version ff is forbidden; all-zero ids are invalid
+  if (version === "ff" || !/^[0-9a-f]{2}$/.test(version) || !isValidTraceId(traceId) || !isValidSpanId(spanId) || !/^[0-9a-f]{2}$/.test(flags)) {
     return null;
   }
   // W3C: sampled is bit 0x01 of the flags byte (flags=03 → sampled).

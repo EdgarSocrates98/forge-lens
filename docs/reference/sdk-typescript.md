@@ -14,6 +14,9 @@ const tracer = new LensTracer({
   projectId: "default",
   onFlush: (trace) => {},
   onExportError: (err, trace) => {}, // falha de auto-flush
+  onDeadLetter: (trace) => {},       // trace movida a deadLetters
+  maxExportFailures: 5,              // falhas consecutivas antes de dead-letter
+  shutdownHook: true,                // flush best-effort no beforeExit
 });
 ```
 
@@ -33,13 +36,25 @@ await tracer.flush(traceId?);
 - `remoteParent: SpanContext` continua uma trace vinda de headers W3C.
 - Exceção no callback → `status=error` + evento `exception`; o erro propaga.
 
+Um `flush()` **mid-flight** (raiz ainda aberta) exporta um snapshot da
+trace parcial e **mantém** o registro — o auto-flush dispara normalmente
+quando a raiz fecha; o store faz merge das entregas parciais.
+`await tracer.shutdown()` é o flush terminal para teardown — também roda
+best-effort no `beforeExit` (`shutdownHook: false` desliga).
+
 Semântica de falha (observabilidade nunca quebra o observado):
 
 - `flush()` **preserva o lote** em `pending` quando `export()` rejeita —
   retry manual reenvia; o erro propaga só para o chamador explícito.
+- **Lote envenenado**: se um lote multi-trace falha, cada trace é
+  re-exportada sozinha — uma rejeição permanente não derruba as demais.
+- **Dead-letter explícito**: após `maxExportFailures` falhas consecutivas
+  a trace vai para `tracer.deadLetters` e `onDeadLetter` é chamado.
 - Auto-flush é fire-and-forget **com `.catch()`**: rejeição é contada em
   `tracer.exportErrors` e reportada via `onExportError` — nunca vira
   *unhandled promise rejection* no processo hospedeiro.
+- Flushes concorrentes são serializados (fila interna); snapshots usam
+  `structuredClone` — mutação posterior não vaza para o lote em voo.
 - `traceId` inválido no contexto não é corrigido silenciosamente: o span
   ganha `forge_lens.trace_id_regenerated` +
   `forge_lens.invalid_trace_id_supplied` e um id novo é gerado.

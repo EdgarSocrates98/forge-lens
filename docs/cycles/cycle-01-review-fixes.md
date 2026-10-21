@@ -57,14 +57,81 @@ funcionalidade de ciclos futuros adicionada — só correções e regressões.
 
 ## Estado pós-fix
 
-95 testes py (era 61) + 11 ts (era 7) — todos verdes; `ruff` limpo;
+97 testes py (era 61) + 11 ts (era 7) — todos verdes; `ruff` limpo;
 `mypy --strict` 0 erros; schemas sem drift; `uv build` ok.
 
 ## Declarado (não escondido)
 
-- Retry é **re-flush manual** (lote preservado) — não há backoff/dead-letter
-  automático ainda; `on_export_error` é o gancho para quem precisar.
 - Merge de status é monotônico por severidade: um `ok` tardio não apaga
   um `error` observado (pior caso prevalece — evidência não some).
 - `IntegrityFlag.PARTIAL_TRACE`/`ORPHAN`/`OUT_OF_ORDER`/`UNKNOWN_TOKENS`
   seguem reservados no enum para regras de ciclos futuros.
+
+---
+
+# Addendum 2 — Segunda rodada de review
+
+**Status**: `FIXED` · **Base**: `dc56b97` (revisado e rejeitado)
+**Escopo**: 3 achados críticos + warnings. Só correções e regressões.
+
+## Críticos
+
+| # | Achado | Correção | Regressão (teste) |
+|---|---|---|---|
+| 1 | Pacote TS não importava instalado (`exports`/`main`/`types` → `dist/index.js`, mas `rootDir:"."` emite `dist/src/`) | `package.json` aponta para `dist/src/*`; `files` = `dist/src` (testes fora do tarball); smoke `test/smoke-entry.mjs` resolve `@forge-lens/sdk` via self-reference — verificado também com `npm pack` + `npm install` + `import()` | `npm test` roda o smoke; reprodução manual em `/tmp` OK |
+| 2 | `flush()` mid-flight apagava `_root_ctx`/`roots` → auto-flush nunca mais disparava; sem `shutdown()`/`atexit` → telemetria presa em `_pending` morria no exit | Pending só sai do mapa quando a trace **termina** (raiz com `end_time`, ou todos os spans encerrados se não há raiz registrada). `shutdown()` = flush terminal; `atexit` (py) / `beforeExit` (ts) fazem flush best-effort — ambos desligáveis (`register_atexit=False`/`shutdownHook:false`) | `test_mid_flight_flush_keeps_root_auto_flush` (py), `test_shutdown_flushes_incomplete_traces`, TS `mid-flight flush() keeps root auto-flush registered`, `shutdown() exports traces still pending` |
+| 3 | `@instrument_tool(capture_args=True)` documentado mas inerte | O decorador agora encaminha `{"args":…,"kwargs":…}` para `tool_call` → `tool.parameters` (JSON ≤4 KB) | `test_instrument_tool_capture_args_records_parameters` |
+
+## Warnings endereçados
+
+- **OTLP `kind` como enum-name** (`"SPAN_KIND_SERVER"`): `map_span_kind`
+  aceita int e string (case-tolerant), consistente com `_parse_status`;
+  OpenInference segue com precedência (`test_otlp_enum_name_span_kind`).
+- **SDK Python sem thread-safety**: `RLock` em `_pending`/`_root_ctx`/
+  `trace.spans`; export usa `model_copy(deep=True)`; callbacks fora do
+  lock. TS: flushes serializados por cadeia de promises; snapshot via
+  `structuredClone` (`test_concurrent_spans_during_export_are_not_lost`).
+- **`TraceStore.upsert_trace` sem guarda própria**: agora rejeita
+  `span.trace_id != trace.trace_id` com `ValidationError` antes da
+  transação — defesa em profundidade além do pipeline
+  (`test_store_rejects_span_trace_id_mismatch`).
+- **Poison batch (413 permanente)**: lote multi-trace que falha passa por
+  *salvage* (re-export por trace); falhas consecutivas por trace são
+  contadas — após `max_export_failures` a trace vai para `dead_letters`
+  e `on_dead_letter` dispara. Explícito, inspecionável, não bloqueia o
+  resto (`test_poison_batch_salvages_good_traces`,
+  `test_persistent_failure_dead_letters_trace`, TS idem).
+- **`traceparent`**: versão `ff` e ids all-zero rejeitados nos dois SDKs
+  (`test_traceparent_rejects_ff_version_and_zero_ids` + TS).
+- **`parentSpanId` all-zero** → tratado como ausente, não gera
+  `MISSING_PARENT` fantasma (`test_otlp_all_zero_parent_span_id_is_absent`).
+- **`started_ns or seen_ns`** → `is not None` explícito: época Unix (0)
+  não é mais confundida com "sem dado"
+  (`test_epoch_zero_started_ns_is_not_treated_as_missing`).
+- **Envelope `project_id`**: a regra agora é *envelope preenche, não
+  sobrescreve*: `project_id` não-default do envelope só se aplica a traces
+  que estão `"default"`; per-trace explícito é autoritativo. `--project`
+  do CLI continua override explícito (`test_envelope_project_id_fills_*`,
+  `test_default_envelope_preserves_explicit_trace_project`).
+- **`time.monotonic()` no pipeline**: `RateLimiter`/`IngestPipeline`
+  aceitam `clock` injetável — janela determinística sob teste
+  (`test_rate_limiter_uses_injected_clock`).
+- **`graphify-out/`**: removido e git-ignorado; contagem do addendum 1
+  corrigida (97, não 95).
+
+## Estado pós-fix (rodada 2)
+
+111 testes py (era 97) + 16 ts (era 11) + smoke de entrada do pacote —
+todos verdes; `ruff` limpo; `mypy --strict` 0 erros; schemas sem drift;
+`uv build` ok; `pip-audit` 0 vulns; `npm pack`→install→import verificado.
+
+## Declarado (não escondido) — atualização
+
+- Dead-letter é por-trace com contador de falhas consecutivas — não há
+  backoff exponencial nem fila persistente em disco (o `dead_letters`
+  fica em memória; `on_dead_letter` é o gancho para persistir).
+- Flush segura o lock durante `export()` — simples e correto; um exporter
+  lento bloqueia `start_span` de outras threads (custo aceito para o
+  perfil local-first; exporters devem ter timeout próprio).
+- `atexit`/`beforeExit` são best-effort — não há garantia de flush em
+  `SIGKILL`/crash; `shutdown()` explícito é o caminho garantido.

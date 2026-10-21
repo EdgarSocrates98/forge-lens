@@ -109,7 +109,10 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         for trace in body.traces:
-            trace.project_id = body.project_id
+            # The envelope project fills traces that didn't name one;
+            # an explicit per-trace project_id stays authoritative.
+            if trace.project_id == "default" and body.project_id != "default":
+                trace.project_id = body.project_id
             # the envelope source is the declared sender — fills in only
             # when the trace itself did not identify a producer
             if body.source is not None and trace.source.system == "unknown":

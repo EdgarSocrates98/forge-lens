@@ -98,6 +98,13 @@ export interface LensTracerOptions {
   onFlush?: (trace: Trace) => void;
   /** Called when an auto-flush export fails (batch stays pending). */
   onExportError?: (err: unknown, trace: Trace) => void;
+  /** Called when a trace is dead-lettered after maxExportFailures. */
+  onDeadLetter?: (trace: Trace) => void;
+  /** Consecutive export failures before a trace is dead-lettered (default 5). */
+  maxExportFailures?: number;
+  /** Register a beforeExit hook that best-effort flushes pending traces
+   *  (default true). */
+  shutdownHook?: boolean;
 }
 
 export class LensTracer {
@@ -105,13 +112,22 @@ export class LensTracer {
   readonly projectId: string;
   /** Failed auto-flush exports — observability never breaks the host. */
   exportErrors = 0;
+  /** Traces dropped after `maxExportFailures` consecutive export failures —
+   *  explicit, inspectable, never silent. */
+  readonly deadLetters: Trace[] = [];
   private readonly exporter: Exporter;
   private readonly autoFlush: boolean;
   private readonly sessionId?: string;
   private readonly onFlush?: (trace: Trace) => void;
   private readonly onExportError?: (err: unknown, trace: Trace) => void;
+  private readonly onDeadLetter?: (trace: Trace) => void;
+  private readonly maxExportFailures: number;
   private readonly pending = new Map<string, Trace>();
   private readonly roots = new Map<string, string>();
+  private readonly failures = new Map<string, number>();
+  /** Serializes concurrent flush() calls (single-threaded, but async). */
+  private flushChain: Promise<unknown> = Promise.resolve();
+  private flushRunning = false;
 
   constructor(opts: LensTracerOptions) {
     this.source = {
@@ -127,6 +143,15 @@ export class LensTracer {
     this.projectId = opts.projectId ?? "default";
     this.onFlush = opts.onFlush;
     this.onExportError = opts.onExportError;
+    this.onDeadLetter = opts.onDeadLetter;
+    this.maxExportFailures = Math.max(1, opts.maxExportFailures ?? 5);
+    if (opts.shutdownHook !== false) {
+      process.once("beforeExit", () => {
+        void this.flush().catch(() => {
+          this.exportErrors += 1; // nothing else can be done at exit
+        });
+      });
+    }
   }
 
   /** Run `fn` inside a new span. Sync or async `fn` both supported. */
@@ -285,26 +310,127 @@ export class LensTracer {
     }
   }
 
-  /** Export pending traces. Failed batches stay pending for retry —
-   *  the error propagates to the *explicit* caller only. */
-  async flush(traceId?: string): Promise<unknown> {
-    const ids = traceId ? [traceId] : [...this.pending.keys()];
-    const batch: Trace[] = [];
-    for (const id of ids) {
-      const t = this.pending.get(id);
-      if (t) {
-        finalize(t);
-        batch.push(t);
+  private isFinished(trace: Trace): boolean {
+    const root = trace.spans.find((s) => s.span_id === trace.root_span_id);
+    if (root !== undefined) return root.end_time !== null;
+    // no registered root (e.g. a continued remote trace whose remote
+    // parent never lands): finished once every span has ended
+    return (
+      trace.spans.length > 0 && trace.spans.every((s) => s.end_time !== null)
+    );
+  }
+
+  private drop(traceId: string): void {
+    this.pending.delete(traceId);
+    this.roots.delete(traceId);
+    this.failures.delete(traceId);
+  }
+
+  private markExported(live: Trace): void {
+    this.failures.delete(live.trace_id);
+    if (this.isFinished(live)) this.drop(live.trace_id);
+  }
+
+  private bumpFailure(live: Trace): void {
+    const count = (this.failures.get(live.trace_id) ?? 0) + 1;
+    if (count >= this.maxExportFailures) {
+      // persistently failing (e.g. permanent 413) — dead-letter
+      // explicitly, inspectable via `deadLetters`, never silent
+      this.drop(live.trace_id);
+      this.deadLetters.push(live);
+      if (this.onDeadLetter) {
+        try {
+          this.onDeadLetter(live);
+        } catch {
+          this.exportErrors += 1;
+        }
+      }
+      return;
+    }
+    this.failures.set(live.trace_id, count);
+  }
+
+  /** On batch failure, salvage good traces from a poisoned batch by
+   *  re-exporting each alone — one bad apple can't sink the rest. */
+  private async handleExportFailure(
+    batch: { live: Trace; snapshot: Trace }[],
+  ): Promise<void> {
+    let failing = batch;
+    if (batch.length > 1) {
+      failing = [];
+      for (const b of batch) {
+        try {
+          await this.exporter.export([b.snapshot], this.source);
+          this.markExported(b.live);
+          if (this.onFlush) this.onFlush(b.snapshot);
+        } catch {
+          failing.push(b);
+        }
       }
     }
-    if (batch.length === 0) return undefined;
-    const result = await this.exporter.export(batch, this.source);
-    for (const t of batch) {
-      this.pending.delete(t.trace_id);
-      this.roots.delete(t.trace_id);
+    for (const b of failing) this.bumpFailure(b.live);
+  }
+
+  /** Export pending traces. Serialized through a promise chain so two
+   *  flushes never interleave their exports.
+   *
+   *  A mid-flight flush() does NOT unregister the trace: pending keeps
+   *  accumulating and auto-flush still fires on root end (the store
+   *  merges the partial deliveries). Failed batches stay pending for
+   *  retry; traces failing `maxExportFailures` consecutive exports move
+   *  to `deadLetters` (and `onDeadLetter` is called). The error
+   *  propagates to the *explicit* caller only. */
+  async flush(traceId?: string): Promise<unknown> {
+    if (this.flushRunning) {
+      // an export is in flight — serialize behind it
+      const run = this.flushChain.then(() => this.flushInternal(traceId));
+      this.flushChain = run.catch(() => undefined);
+      return run;
     }
-    if (this.onFlush) for (const t of batch) this.onFlush(t);
-    return result;
+    // fast path: runs synchronously up to the first await, so a
+    // synchronous exporter completes in the same tick as before
+    const run = this.flushInternal(traceId);
+    this.flushChain = run.catch(() => undefined);
+    return run;
+  }
+
+  private async flushInternal(traceId?: string): Promise<unknown> {
+    this.flushRunning = true;
+    try {
+      const ids = traceId ? [traceId] : [...this.pending.keys()];
+      const batch: { live: Trace; snapshot: Trace }[] = [];
+      for (const id of ids) {
+        const live = this.pending.get(id);
+        if (live) {
+          finalize(live);
+          // snapshot so later span mutation can't leak into the batch
+          batch.push({ live, snapshot: structuredClone(live) });
+        }
+      }
+      if (batch.length === 0) return undefined;
+      try {
+        const result = await this.exporter.export(
+          batch.map((b) => b.snapshot),
+          this.source,
+        );
+        for (const b of batch) {
+          this.markExported(b.live);
+          if (this.onFlush) this.onFlush(b.snapshot);
+        }
+        return result;
+      } catch (err) {
+        await this.handleExportFailure(batch);
+        throw err;
+      }
+    } finally {
+      this.flushRunning = false;
+    }
+  }
+
+  /** Terminal flush for process teardown — export everything pending.
+   *  Also runs best-effort on `beforeExit` unless shutdownHook=false. */
+  async shutdown(): Promise<unknown> {
+    return this.flush();
   }
 }
 

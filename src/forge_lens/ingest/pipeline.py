@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from forge_lens.contracts.v1.trace import IntegrityFlag, Trace
@@ -28,19 +29,29 @@ from forge_lens.storage.base import TraceStore
 
 
 class RateLimiter:
-    """Fixed-window in-process limiter (local-first single user)."""
+    """Fixed-window in-process limiter (local-first single user).
 
-    def __init__(self, per_minute: int) -> None:
+    The clock is injectable so the window logic is deterministic under
+    test — the engine itself never decides "what time it is", it only
+    compares readings from a monotonic source it was given.
+    """
+
+    def __init__(
+        self,
+        per_minute: int,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.per_minute = per_minute
+        self._clock = clock
         self._lock = threading.Lock()
-        self._window_start = time.monotonic()
+        self._window_start = clock()
         self._count = 0
 
     def allow(self) -> bool:
         if self.per_minute <= 0:
             return True
         with self._lock:
-            now = time.monotonic()
+            now = self._clock()
             if now - self._window_start >= 60.0:
                 self._window_start = now
                 self._count = 0
@@ -93,10 +104,16 @@ def flag_integrity(trace: Trace) -> list[str]:
 class IngestPipeline:
     """End-to-end ingestion for already-normalized Traces."""
 
-    def __init__(self, store: TraceStore, config: LensConfig | None = None) -> None:
+    def __init__(
+        self,
+        store: TraceStore,
+        config: LensConfig | None = None,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.store = store
         self.config = config or LensConfig()
-        self._rate = RateLimiter(self.config.rate_limit_per_minute)
+        self._rate = RateLimiter(self.config.rate_limit_per_minute, clock=clock)
 
     def ingest(
         self,

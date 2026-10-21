@@ -124,10 +124,15 @@ def _parse_span(raw: dict[str, Any], provenance: Provenance) -> Span:
         if isinstance(lk, dict)
     ]
 
+    raw_parent = raw.get("parentSpanId") or None
+    if isinstance(raw_parent, str) and raw_parent.strip("0") == "":
+        # all-zero parentSpanId means "no parent" — never a real parent
+        raw_parent = None
+
     return Span(
         trace_id=str(trace_id),
         span_id=str(span_id),
-        parent_span_id=raw.get("parentSpanId") or None,
+        parent_span_id=str(raw_parent) if raw_parent is not None else None,
         name=str(raw.get("name", "unnamed")),
         kind=map_span_kind(attributes, raw.get("kind")),
         start_time=_parse_time(raw.get("startTimeUnixNano")),

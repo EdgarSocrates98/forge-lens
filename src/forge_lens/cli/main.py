@@ -122,11 +122,14 @@ def ingest(
             )
         else:
             envelope = TraceIngest.model_validate(payload)
-            # --project overrides the envelope; otherwise the envelope wins
-            target = project or envelope.project_id
+            # --project is an explicit override; otherwise the envelope
+            # fills only traces that didn't name a project of their own.
             traces = envelope.traces
             for t in traces:
-                t.project_id = target
+                if project is not None:
+                    t.project_id = project
+                elif t.project_id == "default" and envelope.project_id != "default":
+                    t.project_id = envelope.project_id
         result = pipeline.ingest(traces)
     except Exception as exc:
         typer.echo(f"ingest failed: {exc}", err=True)
