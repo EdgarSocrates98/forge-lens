@@ -14,6 +14,19 @@ from forge_lens.storage.sqlite import SQLiteTraceStore
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    # Registered here, not in tests/bench/conftest.py: options must come
+    # from a conftest loaded during CLI preparse — an ancestor of the
+    # testpaths arg — so `--bench-report` parses on any invocation.
+    parser.addoption(
+        "--bench-report",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help="write the tests/bench timing summary as JSON to PATH",
+    )
+
+
 @pytest.fixture
 def tmp_store(tmp_path: Path) -> SQLiteTraceStore:
     store = SQLiteTraceStore(tmp_path / "lens.db")

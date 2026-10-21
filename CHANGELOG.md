@@ -38,6 +38,27 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 - Docs: `guides/operations-runbook.md`, `guides/troubleshooting.md`;
   referências `cli.md`/`mcp.md` e `security/retention.md` sincronizadas
   com o código.
+- Camada de benchmark smoke (`tests/bench`, marker `benchmark`):
+  timings de parede reais sobre ingest via `IngestPipeline`, filtros de
+  `list_traces`, roll-ups `list_sessions`/`list_tools`, `get_trace`,
+  `build_trace_graph`/`build_session_graph` e bateria de eval — corpus
+  sintético determinístico (1k traces semeadas via pipeline), sem
+  sockets nem relógio de parede nos dados; sumário impresso ao fim da
+  sessão + `--bench-report=PATH` para JSON; único teto de tempo é um
+  tripwire generoso (ingest 500 traces < 30 s). Doc em
+  `docs/reference/benchmarks.md`.
+- CLI read-parity: `forge-lens capabilities` (mesmo payload de
+  `/v1/capabilities`/`lens.capabilities`), `forge-lens stats`
+  (`/v1/ops/summary`), `forge-lens datasets list|show` (metadata +
+  versions), e as análises por trace `failure`/`loops`
+  (`--repeat-threshold`)/`efficiency`/`recommendations`/`security`/
+  `replay` espelhando os GETs `/v1/traces/{id}/…` — trace inexistente
+  → exit 2, `--json` emite o contrato da rota.
+- `forge-lens import-otel <file>`: importa dump
+  `ExportTraceServiceRequest` JSON (paridade com
+  `POST /v1/otlp/traces`) — bound `max_payload_bytes`, quarentena de
+  spans malformados como warnings, `provenance=imported`, via
+  `IngestPipeline`.
 
 ### Added — cycles 06–12
 

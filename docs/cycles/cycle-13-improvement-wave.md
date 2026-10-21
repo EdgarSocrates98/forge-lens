@@ -75,6 +75,19 @@ binary=True)` — elegíveis ao z-test de `eval/compare`. Trace sem
 - Studio `/datasets`: list/search, create dataset, create version com
   cases (input/expected JSON), e painel "compare cohorts" que posta o
   body real de `/v1/eval/compare` e renderiza deltas + gate verdict.
+- Benchmark smoke layer (`tests/bench`, marker `benchmark`): entrega a
+  promessa do ciclo-09 de "real benchmark runs" como camada contínua —
+  corpus determinístico de 1k traces semeadas pelo `IngestPipeline`
+  real (`capture=full`), timings de parede sobre ingest (500 traces,
+  `capture=metadata`), `list_traces` com cada filtro, roll-ups
+  `list_sessions`/`list_tools`, `get_trace`, `build_trace_graph`
+  (2k spans) / `build_session_graph` (40 traces) e bateria eval
+  (fetch 200 + registry completo de 12 avaliadores). Assertivas de
+  correção por seletividade exata; único teto temporal é generoso
+  (ingest < 30 s, ~10× o medido — tripwire, não SLA). Sumário via
+  `pytest_terminal_summary` + `--bench-report=PATH` (JSON com
+  ambiente). Doc em `docs/reference/benchmarks.md` com números medidos
+  nesta máquina e caveats honestos.
 - SDK Python read-side (`src/forge_lens/sdk/query.py`): `LensClient` +
   `QueryError` cobrem todas as rotas GET de leitura (`traces` com todos
   os filtros, `sessions`, `tools`, `graph/*`, `cost`/`failure`/`replay`/
@@ -87,6 +100,21 @@ binary=True)` — elegíveis ao z-test de `eval/compare`. Trace sem
   (SSE) fica fora de propósito — não é recurso JSON. Testes em
   `tests/unit/test_query_client.py` (22): uvicorn real em loopback
   (mesmo padrão do e2e) + `urlopen` fakeado para shapes/erros.
+- CLI read-parity wave (`src/forge_lens/cli/main.py` + 26 testes em
+  `tests/unit/test_cli_read_parity.py`): `capabilities` (mesmo payload
+  de `/v1/capabilities`/`lens.capabilities`, sem store), `stats`
+  (mesma composição de `/v1/ops/summary` — stats + janela de 200 +
+  recent_failures), `datasets list|show` (metadata + versions via
+  store), e as análises por trace `failure`/`loops`
+  (`--repeat-threshold` clamp 1..50 como a rota)/`efficiency`/
+  `recommendations`/`security`/`replay` chamando as mesmas funções do
+  core que as rotas usam. Trace/dataset inexistente → mensagem limpa +
+  exit 2 (desvio documentado: os comandos antigos `cost`/`incident`/
+  `traces show` usam exit 1 — os novos seguem a convenção do spec).
+  `import-otel <file>` importa `ExportTraceServiceRequest` JSON com o
+  fluxo da rota OTLP (bound `max_payload_bytes`, quarentena → warnings,
+  `provenance=imported`, `IngestPipeline`); admin/audit/alerts/eval-POST
+  ficam fora de propósito (superfície admin / já coberto por `eval`).
 
 ## Residuals — DOCUMENTED_ONLY
 

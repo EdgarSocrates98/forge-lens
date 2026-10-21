@@ -76,6 +76,7 @@ addopts = "-q"
 markers = [
     "e2e: end-to-end scenarios",
     "contract: contract and schema tests",
+    "benchmark: benchmark smoke tests (tests/bench)",
 ]
 
 [tool.coverage.run]

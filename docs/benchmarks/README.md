@@ -41,3 +41,10 @@ Observações honestas:
   por span). Caminhos de melhoria documentados: batch executemany,
   PostgreSQL/ClickHouse para escala multi-tenant (ADR pendente de
   necessidade real — o prompt exige justificativa, não especulação).
+
+## Camada smoke contínua (ciclo 13, `tests/bench`)
+
+Complemento deste script: `tests/bench/` roda a cada `pytest` e mede
+pipeline completo + superfícies de leitura/grafo/eval sobre um corpus
+determinístico de 1k traces. Ver `docs/reference/benchmarks.md` —
+como rodar, superfícies medidas e caveats.
