@@ -276,12 +276,14 @@ def test_sensitive_key_denylist_covers_credential_families() -> None:
     capture — anchored so lookalike words are never collateral."""
     sensitive = [
         "signing_key", "ssh_key", "session_key", "hmac_key",
-        "encryption_key", "master_key", "db.signing.key",
+        "encryption_key", "master_key", "db.signing.key", "license_key",
+        "auth_key", "client_key", "service_account_key", "pgp.key",
         "passphrase", "my_passphrase", "wallet.pass-phrase",
-        "pin", "user_pin", "card.pin", "pin_code",
-        "otp", "login_otp", "otp.code",
-        "cvv", "cvv2", "card_cvc", "payment.cvc",
-        "card_number", "cardNumber", "security_code", "security.code",
+        "pin", "user_pin", "card.pin", "pin_code", "pin.code",
+        "otp", "login_otp", "otp.code", "otp_code", "otp.secret",
+        "cvv", "cvv2", "card_cvc", "payment.cvc", "cvc3",
+        "card_number", "cardNumber", "card.num", "card_numbers",
+        "security_code", "security.code",
         "access_tokens", "refresh.tokens", "id_tokens",
     ]
     for key in sensitive:
@@ -296,6 +298,21 @@ def test_sensitive_key_denylist_false_positives_stay_clear() -> None:
         "service", "device", "invoice",
         "input_tokens", "output_tokens", "total_tokens",
         "llm.usage.prompt_tokens", "cardinality", "standard",
+        # metric-counter lookalikes of the plural-token pair pattern
+        "valid_tokens", "invalid_tokens", "paid_tokens", "rapid_tokens",
+        "xaccess_tokens", "reaccess.tokens",
+        # legitimate telemetry `*key` names — OTel semconv included
+        "messaging.kafka.message.key",
+        "messaging.rabbitmq.message.routing_key",
+        "partition_key", "primary_key", "sort_key", "hash_key",
+        "lookup_key", "cache_key", "correlation_key", "message_key",
+        "idempotency_key", "public_key", "wireguard.key",
+        # pin/otp counters, not credentials
+        "pin_count", "pin_retries", "login.pin_retries",
+        "otp_count", "auth.otp_attempts", "cvv_count",
+        # card/security lookalikes
+        "discard_number", "wildcard.number", "card_number_count",
+        "security_code_review", "mysecurity_code",
     ]
     for key in harmless:
         assert not _is_sensitive_key(key), f"{key!r} must stay clear"

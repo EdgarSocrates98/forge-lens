@@ -30,18 +30,21 @@ class InMemoryExporter:
 
     def __init__(self, max_traces: int = 1000) -> None:
         self.traces: list[Trace] = []
-        self.max_traces = max_traces
+        self.max_traces = max(0, max_traces)
         self.traces_dropped = 0
 
     def export(
         self, traces: list[Trace], source: TraceSource | None = None
     ) -> dict[str, Any]:
-        room = max(0, self.max_traces - len(self.traces))
-        self.traces.extend(traces[:room])
-        self.traces_dropped += len(traces) - room
+        room = self.max_traces - len(self.traces)
+        kept = traces[: max(0, room)]
+        self.traces.extend(kept)
+        dropped = len(traces) - len(kept)
+        self.traces_dropped += dropped
         return {
             "accepted_spans": sum(len(t.spans) for t in traces),
             "traces": [t.trace_id for t in traces],
+            "traces_dropped": dropped,
         }
 
 

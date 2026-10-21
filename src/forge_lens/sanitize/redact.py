@@ -35,14 +35,25 @@ SENSITIVE_KEY_RE = re.compile(
     r"auth[-_.]?header|credential|private[-_.]?key|client[-_.]?secret|"
     r"access[-_.]?key|token$|bearer$|x-api-key|private-key|"
     r"cookie|set-cookie|ssn|credit[-_.]?card|"
-    # anchored credential names — separators required so `monkey`,
-    # `spinner`, `shipping`, `keepin` are never collateral
-    r"pass[-_.]?phrase|[-_.]key$|(^|[-_.])pin([-_.]|$)|"
-    r"(^|[-_.])otp([-_.]|$)|(^|[-_.])cv[vc]2?([-_.0-9]|$)|"
-    r"card[-_.]?number|security[-_.]?code|"
-    # plural token pairs — bare `tokens$` must NOT match: `input_tokens`
-    # et al. are metric counters, not secrets (see comment above)
-    r"(access|refresh|id)[-_.]tokens$)"
+    r"pass[-_.]?phrase|"
+    # `*key` is enumerated, not wildcarded — `[-_.]key$` would also eat
+    # legitimate telemetry keys (messaging.kafka.message.key, routing_key,
+    # partition_key, primary_key, sort_key, hash_key, cache_key,
+    # idempotency_key…). Only key names that are credential-shaped.
+    r"(^|[-_.])(signing|ssh|session|hmac|encryption|decryption|master|"
+    r"license|auth|client|pgp|gpg|tls|ssl|service[-_.]?account)[-_.]?key$|"
+    # pin/otp: bare name or with an explicit credential suffix — `pin_count`,
+    # `otp_attempts`, `login.pin_retries` are counters, not secrets
+    r"(^|[-_.])pin([-_.](code|number|value|hash|secret))?$|"
+    r"(^|[-_.])otp([-_.](code|value|hash|secret))?$|"
+    r"(^|[-_.])(cvv|cvc)[0-9]?$|"
+    # both sides anchored — `discard_number`, `wildcard.number`,
+    # `card_number_count`, `security_code_review` stay clear
+    r"(^|[-_.])card[-_.]?(number|num)s?$|(^|[-_.])security[-_.]?code$|"
+    # plural token pairs — every alternative left-anchored so `valid_tokens`,
+    # `invalid_tokens`, `paid_tokens`, `xaccess_tokens` (metric counters)
+    # stay clear; bare `tokens$` must NOT match (see comment above)
+    r"(^|[-_.])(access|refresh|id)[-_.]tokens$)"
 )
 
 VALUE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (

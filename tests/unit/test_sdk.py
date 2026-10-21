@@ -575,14 +575,28 @@ def test_finalize_empty_trace_stays_unset_not_ok() -> None:
 
 def test_in_memory_exporter_is_bounded() -> None:
     """The default exporter must not accumulate telemetry forever —
-    overflow is counted, never silent."""
+    overflow is counted, never silent, never negative."""
     from datetime import UTC, datetime
 
     from forge_lens.contracts.v1.trace import Trace
 
-    exp = InMemoryExporter(max_traces=2)
-    t = lambda i: Trace(trace_id=str(i) * 32, started_at=datetime(2026, 1, 1, tzinfo=UTC))  # noqa: E731
-    exp.export([t(1), t(2)])
-    exp.export([t(3), t(4), t(5)])
-    assert len(exp.traces) == 2
-    assert exp.traces_dropped == 3
+    def t(i: int) -> Trace:
+        return Trace(
+            trace_id=str(i) * 32,
+            started_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+
+    # under capacity: the counter stays exactly 0 — no fabricated drops
+    exp = InMemoryExporter()
+    res = exp.export([t(1), t(2), t(3)])
+    assert len(exp.traces) == 3
+    assert exp.traces_dropped == 0
+    assert res["traces_dropped"] == 0
+
+    exp2 = InMemoryExporter(max_traces=2)
+    r = exp2.export([t(1), t(2)])
+    assert r["traces_dropped"] == 0
+    r = exp2.export([t(3), t(4), t(5)])
+    assert len(exp2.traces) == 2
+    assert exp2.traces_dropped == 3
+    assert r["traces_dropped"] == 3

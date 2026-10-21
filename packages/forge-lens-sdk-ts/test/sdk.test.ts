@@ -378,4 +378,15 @@ describe("InMemoryExporter bound", () => {
     assert.equal(exp.traces.length, 2);
     assert.equal(exp.tracesDropped, 3);
   });
+
+  it("never reports drops under capacity — counter stays 0", () => {
+    const exp = new InMemoryExporter();
+    const mk = (i: number) => ({
+      trace_id: `${i}`.repeat(32), spans: [] as never[],
+    });
+    const res = exp.export([mk(1), mk(2), mk(3)] as never[]);
+    assert.equal(exp.traces.length, 3);
+    assert.equal(exp.tracesDropped, 0);
+    assert.equal(res.traces_dropped, 0);
+  });
 });

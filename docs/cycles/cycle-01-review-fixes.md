@@ -846,3 +846,42 @@ agregação sanitize cobre todos os fields do dataclass).
 Testes: +8 (total-only budget verdict, denylist sensível, falsos
 positivos limpos, normalized_keys, empty-trace unset, InMemory bound Py,
 compare ordering 422, InMemory bound TS).
+
+## Round 20 — correção dos próprios fixes do r19
+
+O reviewer encontrou dois defeitos introduzidos no round-19:
+
+- **`traces_dropped`/`tracesDropped` ficava negativo em export normal**:
+  `dropped = len(traces) - room` com `room > len(traces)` → -997 num
+  export de 3 traces no exporter *default* — telemetria fabricada na
+  configuração default, a classe P0 que o projeto existe para policiar.
+  Corrigido com `kept = traces[:room]` + `dropped = len - len(kept)` em
+  ambos SDKs; o contador agora permanece exatamente 0 sob capacidade.
+  Resposta de `export()` também expõe `traces_dropped` por chamada
+  (paridade com a convenção de ingest-result), e `max_traces`/`maxTraces`
+  é clampado a ≥0.
+- **Ancoragem da denylist não cumpria o anunciado**:
+  - `(access|refresh|id)[-_.]tokens$` tinha alternativas sem âncora
+    esquerda — `valid_tokens`/`invalid_tokens`/`paid_tokens`/
+    `xaccess_tokens` casavam via substring. Agora `(^|[-_.])(access|
+    refresh|id)[-_.]tokens$`.
+  - `[-_.]key$` era amplo demais — comia atributos OTel semconv reais
+    (`messaging.kafka.message.key`, `routing_key`, `partition_key`,
+    `sort_key`, `idempotency_key`…). Substituído por enumeração de
+    nomes credential-shaped: signing/ssh/session/hmac/encryption/
+    decryption/master/license/auth/client/pgp/gpg/tls/ssl/service-account.
+  - `(^|[-_.])(pin|otp|cvv)([-_.]|$)` redigia contadores (`pin_count`,
+    `otp_attempts`, `pin_retries`) — agora pin/otp só casam sozinhos ou
+    com sufixo credential explícito (code|number|value|hash|secret);
+    cvv/cvc só no fim com dígito opcional.
+  - `card[-_.]?number`/`security[-_.]?code` ancorados nos dois lados —
+    `discard_number`, `wildcard.number`, `card_number_count`,
+    `security_code_review` ficam limpos.
+- `token_budget` volta a `total_tokens or (input+output)` — idêntico a
+  `trace_cost` (`or` em vez de `is not None`: `total=0` contraditório com
+  parts≠0 conta as parts; super-contar é a direção segura para budgets).
+
+Testes: a lista de falsos-positivos cobre todos os contraexemplos do
+reviewer (metric `*_tokens` lookalikes, OTel `*key`, pin/otp counters,
+card/security lookalikes); os dois SDKs testam `dropped == 0` sob
+capacidade.
