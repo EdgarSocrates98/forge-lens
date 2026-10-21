@@ -48,6 +48,7 @@ R = TypeVar("R")
 FlushCallback = Callable[[Trace], None]
 ExportErrorCallback = Callable[[Exception, "Trace"], None]
 DeadLetterCallback = Callable[["Trace"], None]
+RedactCallback = Callable[[Span], None]
 
 
 class LensTracer:
@@ -67,6 +68,7 @@ class LensTracer:
         on_flush: FlushCallback | None = None,
         on_export_error: ExportErrorCallback | None = None,
         on_dead_letter: DeadLetterCallback | None = None,
+        redact: RedactCallback | None = None,
         auto_flush: bool = True,
         session_id: str | None = None,
         project_id: str = "default",
@@ -86,6 +88,10 @@ class LensTracer:
         self.on_flush = on_flush
         self.on_export_error = on_export_error
         self.on_dead_letter = on_dead_letter
+        # user-supplied redaction hook (Cycle 01.6): called per-span at
+        # flush, may mutate attributes — runs before the snapshot, so a
+        # redacted value never reaches the exporter
+        self.redact = redact
         self.auto_flush = auto_flush
         self.session_id = session_id
         self.project_id = project_id
@@ -348,6 +354,12 @@ class LensTracer:
         auto-flush path swallows it. Traces that fail
         ``max_export_failures`` consecutive exports move to
         ``self.dead_letters`` (and ``on_dead_letter`` is called).
+
+        Known limitation: ``_lock`` is held for the export duration —
+        a snapshot-and-export must be consistent, so a slow exporter's
+        I/O blocks ``start_span`` on other threads (bounded by the
+        exporter's timeout). Apps that can't stall should use an
+        exporter that returns fast and ships in its own worker thread.
         """
         flushed: list[Trace] = []
         dead: list[Trace] = []
@@ -358,6 +370,13 @@ class LensTracer:
                 live = self._pending.get(tid)
                 if live is not None:
                     _finalize(live)
+                    if self.redact is not None:
+                        for s in live.spans:
+                            try:
+                                self.redact(s)
+                            except Exception:
+                                # hook errors never break the observed app
+                                self.export_errors += 1
                     # export a snapshot so later span mutation can't leak
                     # into the serialized (or recorded) batch
                     batch.append((live, live.model_copy(deep=True)))

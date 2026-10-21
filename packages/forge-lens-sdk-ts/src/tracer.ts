@@ -100,6 +100,11 @@ export interface LensTracerOptions {
   onExportError?: (err: unknown, trace: Trace) => void;
   /** Called when a trace is dead-lettered after maxExportFailures. */
   onDeadLetter?: (trace: Trace) => void;
+  /** User-supplied redaction hook: called per-span at flush before the
+   *  snapshot is taken, may mutate span attributes — a redacted value
+   *  never reaches the exporter. Hook errors are counted on
+   *  `exportErrors`, never thrown into the observed app. */
+  redact?: (span: Span) => void;
   /** Consecutive export failures before a trace is dead-lettered (default 5). */
   maxExportFailures?: number;
   /** Register a beforeExit hook that best-effort flushes pending traces
@@ -121,6 +126,7 @@ export class LensTracer {
   private readonly onFlush?: (trace: Trace) => void;
   private readonly onExportError?: (err: unknown, trace: Trace) => void;
   private readonly onDeadLetter?: (trace: Trace) => void;
+  private readonly redact?: (span: Span) => void;
   private readonly maxExportFailures: number;
   private readonly pending = new Map<string, Trace>();
   private readonly roots = new Map<string, string>();
@@ -128,6 +134,7 @@ export class LensTracer {
   /** Serializes concurrent flush() calls (single-threaded, but async). */
   private flushChain: Promise<unknown> = Promise.resolve();
   private flushRunning = false;
+  private flushQueued = 0;
 
   constructor(opts: LensTracerOptions) {
     this.source = {
@@ -144,6 +151,7 @@ export class LensTracer {
     this.onFlush = opts.onFlush;
     this.onExportError = opts.onExportError;
     this.onDeadLetter = opts.onDeadLetter;
+    this.redact = opts.redact;
     this.maxExportFailures = Math.max(1, opts.maxExportFailures ?? 5);
     if (opts.shutdownHook !== false) {
       process.once("beforeExit", () => {
@@ -382,8 +390,15 @@ export class LensTracer {
    *  propagates to the *explicit* caller only. */
   async flush(traceId?: string): Promise<unknown> {
     if (this.flushRunning) {
-      // an export is in flight — serialize behind it
-      const run = this.flushChain.then(() => this.flushInternal(traceId));
+      // an export is in flight or queued — serialize behind it.
+      // flushQueued is counted at queue time and flushRunning stays
+      // true while a queued run exists, closing the microtask gap
+      // between a run's finally and the queued run's start.
+      this.flushQueued++;
+      const run = this.flushChain.then(() => {
+        this.flushQueued--;
+        return this.flushInternal(traceId);
+      });
       this.flushChain = run.catch(() => undefined);
       return run;
     }
@@ -403,6 +418,15 @@ export class LensTracer {
         const live = this.pending.get(id);
         if (live) {
           finalize(live);
+          if (this.redact !== undefined) {
+            for (const s of live.spans) {
+              try {
+                this.redact(s);
+              } catch {
+                this.exportErrors += 1;
+              }
+            }
+          }
           // snapshot so later span mutation can't leak into the batch
           batch.push({ live, snapshot: structuredClone(live) });
         }
@@ -423,7 +447,10 @@ export class LensTracer {
         throw err;
       }
     } finally {
-      this.flushRunning = false;
+      // stay "running" while queued work exists — otherwise a flush()
+      // landing between this finally and the queued run's start would
+      // take the fast path and interleave its export with it
+      this.flushRunning = this.flushQueued > 0;
     }
   }
 

@@ -9,6 +9,9 @@ LensTracer(
     on_flush=lambda trace: ...,    # callback por trace flushada
     on_export_error=lambda exc, trace: ...,  # falha de auto-flush
     on_dead_letter=lambda trace: ...,        # trace movida a dead_letters
+    redact=lambda span: ...,       # hook de redação: por span, no flush,
+                                   # antes do snapshot — pode mutar attrs;
+                                   # erro do hook conta em export_errors
     auto_flush=True,               # flush quando o span raiz fecha
     session_id=None,
     project_id="default",          # gravado em cada Trace (envelope só preenche "default")
@@ -62,6 +65,10 @@ Semântica de falha (observabilidade nunca quebra o observado):
   (mas ainda preserva o lote para retry).
 - **Thread-safe**: mutações de `_pending`/`trace.spans`/flush usam
   `threading.RLock`. Callbacks rodam fora do lock.
+- **Lock durante o export**: `_lock` cobre o `export()` inteiro — um
+  exporter lento bloqueia `start_span` de outras threads (limitado pelo
+  timeout do exporter). Apps sensíveis a isso devem usar um exporter
+  que retorna rápido e envia em thread própria.
 
 `trace_id` inválido passado a `start_span` não é corrigido
 silenciosamente: o span ganha `forge_lens.trace_id_regenerated=true` +

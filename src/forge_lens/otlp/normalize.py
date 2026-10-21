@@ -11,6 +11,7 @@ with a non-string key count in ``"_otlp.dropped_kv_pairs"``.
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 from pydantic import ValidationError as PydanticValidationError
@@ -74,7 +75,12 @@ def _attr_value(raw: Any, depth: int = 0) -> Any:
             out["_otlp.dropped_kv_pairs"] = dropped
         return out
     if "bytesValue" in raw:
-        return {"_bytes": len(str(raw["bytesValue"]))}
+        # report the decoded byte count, not the base64 string length
+        b64 = str(raw["bytesValue"])
+        try:
+            return {"_bytes": len(base64.b64decode(b64))}
+        except Exception:
+            return {"_bytes": len(b64)}
     return raw
 
 

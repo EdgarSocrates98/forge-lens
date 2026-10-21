@@ -502,3 +502,33 @@ def test_same_key_event_attributes_merge(
     ev = loaded.spans[0].events[0]
     assert ev.attributes == {"attempt": 1, "backoff_ms": 250}
     assert len(loaded.spans[0].events) == 1  # still deduped by key
+
+
+def test_span_provenance_upgrades_on_redelivery(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """Span-level provenance keeps the strongest claim on merge — same
+    rule as the trace row (observed > imported > derived > inferred)."""
+    from forge_lens.contracts.provenance import Provenance
+
+    weak = synthetic_trace.model_copy(deep=True)
+    weak.provenance = Provenance.INFERRED
+    for s in weak.spans:
+        s.provenance = Provenance.INFERRED
+    tmp_store.upsert_trace(weak)
+
+    # same content with observed provenance — all 3 spans update, none
+    # are mislabeled duplicates
+    _, updated, _ = tmp_store.upsert_trace(synthetic_trace)
+    assert updated == 3
+
+    trace = tmp_store.get_trace(synthetic_trace.trace_id)
+    assert trace is not None
+    assert trace.provenance == Provenance.OBSERVED
+    assert all(s.provenance == Provenance.OBSERVED for s in trace.spans)
+
+    # and never regresses on a weaker re-delivery
+    tmp_store.upsert_trace(weak)
+    trace = tmp_store.get_trace(synthetic_trace.trace_id)
+    assert trace is not None
+    assert all(s.provenance == Provenance.OBSERVED for s in trace.spans)

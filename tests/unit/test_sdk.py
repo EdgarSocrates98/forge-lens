@@ -440,3 +440,34 @@ def test_tool_parameters_truncation_stays_parseable() -> None:
     params = _json.loads(tool.attributes["tool.parameters"])  # must parse
     assert params["_forge_lens.truncated"] is True
     assert params["_approx_bytes"] > 4096
+
+
+def test_redact_hook_mutates_spans_before_export() -> None:
+    """User-supplied redact runs per-span at flush, before the snapshot —
+    the redacted value is what reaches the exporter."""
+    exporter = InMemoryExporter()
+    tracer = LensTracer(
+        service_name="t",
+        exporter=exporter,
+        register_atexit=False,
+        redact=lambda s: s.attributes.update({"secret": "[REDACTED]"}),
+    )
+    with tracer.start_span("root", attributes={"secret": "sk-ant-xyz"}):
+        pass
+    assert exporter.traces[0].spans[0].attributes["secret"] == "[REDACTED]"
+
+
+def test_redact_hook_error_never_breaks_app() -> None:
+    """A throwing hook counts on export_errors — telemetry still ships."""
+    exporter = InMemoryExporter()
+
+    def bad(_s: object) -> None:
+        raise RuntimeError("hook blew up")
+
+    tracer = LensTracer(
+        service_name="t", exporter=exporter, register_atexit=False, redact=bad
+    )
+    with tracer.start_span("root"):
+        pass
+    assert tracer.export_errors == 1
+    assert len(exporter.traces) == 1

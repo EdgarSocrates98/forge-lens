@@ -13,10 +13,6 @@ NANOS_PER_SECOND = 1_000_000_000
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
-def utc_now() -> datetime:
-    return datetime.now(tz=UTC)
-
-
 def to_unix_nano(dt: datetime) -> int:
     """UTC-aware datetime → nanoseconds since epoch (exact, no float)."""
     if dt.tzinfo is None:

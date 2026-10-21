@@ -15,6 +15,9 @@ const tracer = new LensTracer({
   onFlush: (trace) => {},
   onExportError: (err, trace) => {}, // falha de auto-flush
   onDeadLetter: (trace) => {},       // trace movida a deadLetters
+  redact: (span) => {},              // hook de redação: por span, no flush,
+                                     // antes do snapshot — pode mutar attrs;
+                                     // erro do hook conta em exportErrors
   maxExportFailures: 5,              // falhas consecutivas antes de dead-letter
   shutdownHook: true,                // flush best-effort no beforeExit
 });

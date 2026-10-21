@@ -212,3 +212,40 @@ def test_serve_rejects_malformed_endpoint(tmp_path: Path, monkeypatch) -> None:
     result = CliRunner().invoke(app, ["serve", "--db", str(tmp_path / "x.db")])
     assert result.exit_code == 2
     assert "invalid endpoint" in result.output
+
+
+def test_init_project_with_quotes_writes_valid_toml(tmp_path: Path) -> None:
+    """A project_id containing quotes or control chars must not corrupt
+    config.toml — the written file must load and round-trip the id."""
+    from forge_lens.core.config import load_config
+
+    r = runner.invoke(app, ["init", str(tmp_path), "--project", 'bad"name'])
+    assert r.exit_code == 0, r.output
+    cfg = load_config(tmp_path)  # TOMLDecodeError before the fix
+    assert cfg.project_id == 'bad"name'
+
+    sub = tmp_path / "p2"
+    r = runner.invoke(app, ["init", str(sub), "--project", "a\nb\tc"])
+    assert r.exit_code == 0, r.output
+    assert load_config(sub).project_id == "a\nb\tc"
+
+
+def test_ingest_missing_file_uses_formatted_error(tmp_path: Path) -> None:
+    """File read/parse failures stay inside the `ingest failed:` path —
+    a missing file must not produce a raw traceback."""
+    r = runner.invoke(
+        app,
+        ["ingest", str(tmp_path / "nope.json"), "--db", str(tmp_path / "x.db")],
+    )
+    assert r.exit_code == 1
+    assert "ingest failed" in r.output
+    assert "Traceback" not in r.output
+
+
+def test_ingest_malformed_json_uses_formatted_error(tmp_path: Path) -> None:
+    f = tmp_path / "bad.json"
+    f.write_text("{not json at all")
+    r = runner.invoke(app, ["ingest", str(f), "--db", str(tmp_path / "x.db")])
+    assert r.exit_code == 1
+    assert "ingest failed" in r.output
+    assert "Traceback" not in r.output

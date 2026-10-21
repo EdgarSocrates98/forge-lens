@@ -340,3 +340,62 @@ conflito porque a dedupe acontece no store, abaixo do pipeline.
 
 151 testes py + 17 ts + smoke de pacote; `ruff` limpo; `mypy --strict`
 0 erros; schemas sem drift; `uv build` ok; `pip-audit` 0 vulns.
+
+## Rodada 6 — auth 500, TOML corruption, ingest try-scope
+
+### Warnings (confirmados)
+
+- **`X-Forge-Lens-Key` não-ASCII → HTTP 500**: `secrets.compare_digest`
+  em `str` levanta `TypeError` com entrada não-ASCII — header
+  controlado pelo atacante recebia 500, não 401. Comparação agora em
+  bytes (`str.encode()` dos dois lados) —
+  `test_auth_non_ascii_header_401_not_500`.
+- **`init --project 'bad"name'` corrompia o TOML**: `project_id` era
+  interpolado crú em `config.toml` → `project_id = "bad"name"` →
+  `TOMLDecodeError` em todo comando seguinte. Serialização via
+  `json.dumps` (mesmo conjunto de escapes do TOML basic string) —
+  qualquer id, incluindo aspas e chars de controle, é literal válido —
+  `test_init_project_with_quotes_writes_valid_toml`.
+- **`ingest` lia/parsava o arquivo fora do `try`**: `file.read_text` +
+  `json.loads` em arquivo inexistente/malformado produzia traceback cru
+  em vez do caminho `ingest failed: {exc}` que o próprio comando
+  estabeleceu. Ambos movidos para dentro do `try` —
+  `test_ingest_missing_file_uses_formatted_error`,
+  `test_ingest_malformed_json_uses_formatted_error`.
+
+### Sugestões
+
+- **Doc imprecisa em `api.md`**: `GET /v1/traces/{id}` sem `project_id`
+  sempre injetava `cfg.project_id` — corrigido (leitura cruzada só no
+  `Store` interno).
+- **`utc_now()` morto**: removido de `core/time.py` (nunca chamado; a
+  regra de wall-clock o tornava suspeito).
+- **Proveniência de span não subia em re-entrega**: `_merge_span` não
+  mesclava `provenance` e `_update_span` nem persistia a coluna —
+  assimetria com a linha de trace (que mantém a mais forte). Agora
+  `_stronger_provenance` + `provenance=?` no UPDATE — upgrade conta como
+  `updated`, nunca `duplicate` —
+  `test_span_provenance_upgrades_on_redelivery`.
+- **`bytesValue` `_bytes` contava chars base64**: decodifica e conta
+  bytes reais; base64 inválido cai no comprimento da string —
+  `test_otlp_bytesvalue_reports_decoded_length`.
+- **TS `flush()` race de microtask**: `flushRunning=false` no `finally`
+  de um run antes do microtask do run enfileirado iniciar — um `flush()`
+  síncrono nesse gap tomava o fast-path e intercalava. `flushQueued`
+  conta no enqueue e `flushRunning` permanece true enquanto houver
+  run na fila — `flush serialization` suite em `sdk.test.ts`.
+- **Python `flush()` segura `_lock` em I/O de rede**: correto (snapshot
+  consistente) mas pode travar `start_span` de outras threads pela
+  duração do export — documentado como limitação conhecida no docstring,
+  com a saída recomendada (exporter que retorna rápido e envia em
+  worker próprio).
+- **Redaction hooks do Cycle 01.6**: agora presentes — `redact` em
+  `LensTracer` (py) e `LensTracerOptions.redact` (ts), chamado por span
+  no flush antes do snapshot; erro do hook conta em `export_errors`,
+  nunca quebra o app — `test_redact_hook_*` (py) + `redact hook`
+  suite (ts).
+
+## Estado pós-fix (rodada 6)
+
+159 testes py + 20 ts + smoke de pacote; `ruff` limpo; `mypy --strict`
+0 erros; schemas sem drift; `uv build` ok; `pip-audit` 0 vulns.

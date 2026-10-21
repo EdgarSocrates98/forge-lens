@@ -153,12 +153,12 @@ def ingest(
     cfg = _config(db)
     if project:
         cfg = LensConfig(**{**cfg.__dict__, "project_id": project})
-    payload = json.loads(file.read_text(encoding="utf-8"))
 
     store = _store(cfg)
     pipeline = IngestPipeline(store, cfg)
     quarantine: list[str] = []
     try:
+        payload = json.loads(file.read_text(encoding="utf-8"))
         if fmt == "otlp" or (fmt == "auto" and "resourceSpans" in payload):
             # file import — weaker provenance than a live OTLP push
             traces = normalize_otlp_request(

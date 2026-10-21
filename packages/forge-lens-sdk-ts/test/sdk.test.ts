@@ -301,3 +301,68 @@ describe("HTTPExporter", () => {
     assert.equal(captured!.body.traces[0].spans[0].name, "s");
   });
 });
+
+describe("redact hook", () => {
+  it("runs the redact hook per-span before export", async () => {
+    const mem = new InMemoryExporter();
+    const tracer = new LensTracer({
+      serviceName: "t", exporter: mem, shutdownHook: false,
+      redact: (s) => { s.attributes["secret"] = "[REDACTED]"; },
+    });
+    tracer.span("s", () => {}, { attributes: { secret: "sk-ant-xyz" } });
+    await tracer.flush();
+    assert.equal(mem.traces[0].spans[0].attributes["secret"], "[REDACTED]");
+  });
+
+  it("a throwing redact hook is counted, never thrown", async () => {
+    const mem = new InMemoryExporter();
+    const tracer = new LensTracer({
+      serviceName: "t", exporter: mem, shutdownHook: false,
+      redact: () => { throw new Error("boom"); },
+    });
+    tracer.span("s", () => {});
+    await tracer.flush();
+    assert.equal(tracer.exportErrors, 1);
+    assert.equal(mem.traces.length, 1);
+  });
+});
+
+describe("flush serialization", () => {
+  it("a flush() landing between a run's end and a queued run's start does not interleave", async () => {
+    // Regression: flushRunning was cleared in run1's finally BEFORE the
+    // queued run's microtask started — a flush() called in that gap took
+    // the fast path and ran a concurrent export.
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    let releaseExport: (() => void) | null = null;
+    let releaseBody: (() => void) | null = null;
+    const gate = new Promise<void>((r) => { releaseExport = r; });
+    const holdBody = new Promise<void>((r) => { releaseBody = r; });
+    const exporter = {
+      async export(): Promise<unknown> {
+        concurrent++;
+        maxConcurrent = Math.max(maxConcurrent, concurrent);
+        // yield a microtask tick even after the gate opens — two runs
+        // starting back-to-back would overlap their exports here
+        await gate;
+        await Promise.resolve();
+        concurrent--;
+        return { accepted_spans: 0 };
+      },
+    };
+    const tracer = new LensTracer({
+      serviceName: "t", exporter, autoFlush: false, shutdownHook: false,
+    });
+    // gated async span body → trace stays pending across all three
+    // flushes (a dropped trace would export nothing and hide the race)
+    const bodyDone = tracer.span("long", async () => { await holdBody; });
+    const f1 = tracer.flush();              // run1 in-flight, export gated
+    const gapFlush = f1.then(() => tracer.flush()); // lands in the gap (old bug)
+    const f2 = tracer.flush();              // queued behind run1
+    releaseExport!();
+    await Promise.all([f1, gapFlush, f2]);
+    assert.equal(maxConcurrent, 1);
+    releaseBody!();
+    await bodyDone;
+  });
+});

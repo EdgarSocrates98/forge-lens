@@ -112,6 +112,20 @@ def _max_dt(a: datetime | None, b: datetime | None) -> datetime | None:
     return max(ensure_aware(a), ensure_aware(b))
 
 
+_PROVENANCE_RANK = {
+    Provenance.OBSERVED: 0,
+    Provenance.IMPORTED: 1,
+    Provenance.DERIVED: 2,
+    Provenance.INFERRED: 3,
+    Provenance.UNKNOWN: 4,
+}
+
+
+def _stronger_provenance(a: Provenance, b: Provenance) -> Provenance:
+    """Strongest claim wins — same rank order as the trace upsert."""
+    return a if _PROVENANCE_RANK[a] <= _PROVENANCE_RANK[b] else b
+
+
 def _span_digest(span: Span) -> str:
     """Content hash of a span, excluding integrity flags (they evolve)."""
     payload = json.dumps(
@@ -393,7 +407,7 @@ class SQLiteTraceStore:
                 parent_span_id=?, ended_ns=?, duration_ms=?,
                 status_code=?, status_message=?,
                 attributes_json=?, events_json=?, links_json=?,
-                integrity_flags_json=?, span_hash=?
+                integrity_flags_json=?, provenance=?, span_hash=?
             WHERE project_id=? AND trace_id=? AND span_id=?
             """,
             (
@@ -412,6 +426,7 @@ class SQLiteTraceStore:
                     sort_keys=True, default=str,
                 ),
                 json.dumps([f.value for f in merged.integrity_flags]),
+                merged.provenance.value,
                 _span_digest(merged),
                 trace.project_id,
                 merged.trace_id,
@@ -459,6 +474,10 @@ class SQLiteTraceStore:
                 "events": _merge_events(stored.events, incoming.events),
                 "links": _merge_links(stored.links, incoming.links),
                 "status": _merge_status(stored.status, incoming.status),
+                # same rule as the trace row: strongest provenance wins
+                "provenance": _stronger_provenance(
+                    stored.provenance, incoming.provenance
+                ),
             }
         )
         # integrity flags: union minus flags resolved by the merged data

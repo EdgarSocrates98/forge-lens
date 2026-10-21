@@ -107,8 +107,10 @@ def create_app(
 
     def check_auth(x_forge_lens_key: str | None = Header(default=None)) -> None:
         """Optional ingestion auth: only enforced when api_key is configured."""
+        # compare as bytes: compare_digest raises TypeError on non-ASCII
+        # str input — an attacker-controlled header must get 401, not 500
         if cfg.api_key and not secrets.compare_digest(
-            x_forge_lens_key or "", cfg.api_key
+            (x_forge_lens_key or "").encode(), cfg.api_key.encode()
         ):
             METRICS.inc(M_API_ERRORS)
             raise HTTPException(status_code=401, detail="invalid or missing API key")

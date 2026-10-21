@@ -266,3 +266,17 @@ def test_otlp_deeply_nested_anyvalue_does_not_crash() -> None:
     trace = normalize_otlp_request(payload)[0]
     # parses without RecursionError; the marker proves the cap fired
     assert "[DROPPED:depth-limit]" in repr(trace.spans[0].attributes["deep"])
+
+
+def test_otlp_bytesvalue_reports_decoded_length() -> None:
+    """_bytes must count the decoded bytes, not the base64 characters."""
+    import base64 as _b64
+
+    raw = b"hello-world-123"  # 15 bytes -> 20 base64 chars
+    payload = _span_payload(
+        attributes=[
+            {"key": "blob", "value": {"bytesValue": _b64.b64encode(raw).decode()}}
+        ]
+    )
+    trace = normalize_otlp_request(payload)[0]
+    assert trace.spans[0].attributes["blob"] == {"_bytes": 15}

@@ -9,6 +9,7 @@ Resolution order (highest wins):
 
 from __future__ import annotations
 
+import json
 import os
 import tomllib
 from dataclasses import dataclass, field
@@ -132,9 +133,12 @@ def init_project(project_dir: Path, project_id: str) -> Path:
     (data_dir / "artifacts").mkdir(exist_ok=True)
     cfg = data_dir / "config.toml"
     if not cfg.exists():
+        # TOML basic strings share JSON's escape set — json.dumps
+        # produces a valid literal for any project_id (quotes, control
+        # chars), where raw interpolation would corrupt the file
         cfg.write_text(
             "[lens]\n"
-            f'project_id = "{project_id}"\n'
+            f"project_id = {json.dumps(project_id)}\n"
             'capture = "metadata"\n'
             'endpoint = "http://127.0.0.1:7777"\n'
             "# api_key = \"change-me\"  # set to require X-Forge-Lens-Key on ingest\n"

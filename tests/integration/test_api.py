@@ -367,3 +367,33 @@ def test_oversized_content_length_rejected_before_read(
         },
     )
     assert r.status_code == 413
+
+
+def test_auth_non_ascii_header_401_not_500(
+    tmp_path, synthetic_trace: Trace
+) -> None:
+    """secrets.compare_digest raises TypeError on non-ASCII str input —
+    an attacker-controlled header must get 401, not an unhandled 500."""
+    store = SQLiteTraceStore(tmp_path / "auth-nonascii.db")
+    cfg = LensConfig(
+        data_dir=tmp_path, db_path=tmp_path / "auth-nonascii.db", api_key="s3cret"
+    )
+    app = create_app(store=store, config=cfg)
+    with TestClient(app) as c:
+        envelope = TraceIngest(traces=[synthetic_trace]).model_dump(mode="json")
+        # httpx ASCII-encodes str headers — a raw client sends bytes,
+        # which Starlette decodes latin-1 into a non-ASCII str
+        r = c.post(
+            "/v1/traces",
+            json=envelope,
+            headers={b"X-Forge-Lens-Key": "clé-secrète".encode()},
+        )
+        assert r.status_code == 401
+        # and a correctly-formed key still works
+        r = c.post(
+            "/v1/traces",
+            json=envelope,
+            headers={"X-Forge-Lens-Key": "s3cret"},
+        )
+        assert r.status_code == 200
+    store.close()

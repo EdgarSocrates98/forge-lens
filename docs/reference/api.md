@@ -32,9 +32,10 @@ inválida, `429` rate limit.
 ended_at, status, span_count, error_count}], limit, offset}`.
 
 ### `GET /v1/traces/{trace_id}?project_id`
-Contrato `Trace` completo ou `404`. Sem `project_id`, a leitura cruza
-projetos (modelo local single-user — `project_id` particiona dados, não
-é fronteira de segurança).
+Contrato `Trace` completo ou `404`. Sem `project_id`, usa o
+`cfg.project_id` configurado — a leitura cruzada entre projetos existe
+apenas no `Store` interno (modelo local single-user — `project_id`
+particiona dados, não é fronteira de segurança).
 
 ## Ops
 
