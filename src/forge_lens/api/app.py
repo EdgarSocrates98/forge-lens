@@ -7,6 +7,7 @@ place where HTTP is handled.
 
 from __future__ import annotations
 
+import json
 import secrets
 import threading
 from collections.abc import Awaitable, Callable
@@ -47,15 +48,32 @@ def _reject_ingest(status_code: int, detail: str) -> HTTPException:
 
 
 def _check_declared_size(request: Request, max_bytes: int) -> None:
-    """Fast-path 413 on Content-Length before buffering the body.
+    """Fast-path 413 on Content-Length before reading any body bytes.
 
-    Doesn't replace the post-read check — chunked bodies may lack the
-    header and a client can lie low — but it keeps the common oversized
-    case from being fully buffered into memory first.
+    A courtesy check only — the header can be absent (chunked) or lie;
+    the real bound is ``_read_capped_body``.
     """
     cl = request.headers.get("content-length")
     if cl is not None and cl.isdigit() and int(cl) > max_bytes:
         raise _reject_ingest(413, "payload too large")
+
+
+async def _read_capped_body(request: Request, max_bytes: int) -> bytes:
+    """Stream the body and abort the moment it exceeds ``max_bytes``.
+
+    ``request.body()``/``request.json()`` buffer the entire payload
+    before any size check can run — a chunked or headerless POST of
+    arbitrary size would be materialized first. Streaming keeps memory
+    at ≤ max_bytes + one chunk.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            raise _reject_ingest(413, "payload too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _ingest_error(exc: Exception) -> HTTPException:
@@ -139,9 +157,7 @@ def create_app(
     async def ingest_native(request: Request) -> dict[str, Any]:
         """Native ingest endpoint — accepts the versioned TraceIngest contract."""
         _check_declared_size(request, cfg.max_payload_bytes)
-        raw = await request.body()
-        if len(raw) > cfg.max_payload_bytes:
-            raise _reject_ingest(413, "payload too large")
+        raw = await _read_capped_body(request, cfg.max_payload_bytes)
         try:
             body = TraceIngest.model_validate_json(raw)
         except PydanticValidationError as exc:
@@ -191,11 +207,9 @@ def create_app(
                 415, "OTLP/protobuf is not supported — POST application/json"
             )
         _check_declared_size(request, cfg.max_payload_bytes)
-        body = await request.body()
-        if len(body) > cfg.max_payload_bytes:
-            raise _reject_ingest(413, "payload too large")
+        body = await _read_capped_body(request, cfg.max_payload_bytes)
         try:
-            payload = await request.json()
+            payload = json.loads(body)
         except Exception as exc:
             raise _reject_ingest(400, f"invalid JSON: {exc}") from exc
         if not isinstance(payload, dict):

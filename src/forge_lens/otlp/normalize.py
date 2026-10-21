@@ -29,6 +29,7 @@ from forge_lens.contracts.v1.trace import (
     Trace,
     TraceSource,
 )
+from forge_lens.core.bounded import BoundedList
 from forge_lens.core.errors import ValidationError
 from forge_lens.core.time import from_unix_nano
 from forge_lens.otlp.openinference import extract_token_usage, map_span_kind
@@ -259,6 +260,11 @@ def normalize_otlp_request(
     When ``errors`` is provided, malformed spans are quarantined — the
     reason is appended to ``errors`` and parsing continues. When
     ``errors`` is ``None`` the first malformed span raises (strict mode).
+
+    Quarantine notes are bounded (``BoundedList``): adversarial payloads
+    of thousands of malformed items yield the first
+    ``WARNINGS_CAP`` reasons plus one overflow count — never an
+    amplification of the input.
     """
     if not isinstance(payload, dict):
         raise ValidationError(
@@ -268,11 +274,15 @@ def normalize_otlp_request(
     if not isinstance(resource_spans, list):
         raise ValidationError("resourceSpans must be a list")
 
+    # internal sink is bounded even though `errors` is a plain list —
+    # the cap applies during collection, not after it
+    sink: BoundedList | None = BoundedList() if errors is not None else None
+
     def _evidence(msg: str) -> None:
         # malformed container: a note in quarantine mode, strict raise
-        if errors is None:
+        if sink is None:
             raise ValidationError(msg)
-        errors.append(msg)
+        sink.append(msg)
 
     grouped: dict[tuple[int, str], Trace] = {}
     for rs_idx, rs in enumerate(resource_spans):
@@ -307,11 +317,11 @@ def normalize_otlp_request(
                 if not isinstance(raw_span, dict):
                     continue
                 try:
-                    span = _parse_span(raw_span, provenance, errors=errors)
+                    span = _parse_span(raw_span, provenance, errors=sink)
                 except (ValidationError, PydanticValidationError) as exc:
-                    if errors is None:
+                    if sink is None:
                         raise
-                    errors.append(
+                    sink.append(
                         f"span {raw_span.get('spanId', '?')!r} quarantined: {exc}"
                     )
                     continue
@@ -348,6 +358,8 @@ def normalize_otlp_request(
 
     for trace in grouped.values():
         _finalize_trace(trace)
+    if sink is not None and errors is not None:
+        errors.extend(sink.summary())
     return list(grouped.values())
 
 

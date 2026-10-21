@@ -93,12 +93,16 @@ def classify_failure(trace: Trace) -> FailureReport:
     cyclic = sorted(
         cycle_member_ids({s.span_id: s.parent_span_id for s in trace.spans})
     )
-    # a trace "failed" when work errored, never completed, or its own
-    # declared topology is impossible — data-quality flags (clock_skew,
-    # duplicate, …) stay evidence, not failure verdicts
+    # an unclosed span in a trace that still declares itself open
+    # (ended_at=None) is in-flight, not a failure — truncation is only
+    # evidence when the envelope claims the run ended but spans didn't
+    truncated = bool(unclosed) and trace.ended_at is not None
+    # a trace "failed" when work errored, was truncated despite a closed
+    # envelope, or its own declared topology is impossible — data-quality
+    # flags (clock_skew, duplicate, …) stay evidence, not failure verdicts
     report = FailureReport(
         trace_id=trace.trace_id,
-        failed=bool(errs) or bool(unclosed) or bool(cyclic),
+        failed=bool(errs) or truncated or bool(cyclic),
     )
 
     # parent-pointer cycle — any member of a real cycle in the stored
@@ -150,9 +154,10 @@ def classify_failure(trace: Trace) -> FailureReport:
             report.detail = f"{cat.value}: {[s.name for s in hit]}"
             return report
 
-    # unclosed spans — execution truncated mid-flight (crash/timeout of
-    # the host process itself)
-    if unclosed and not errs:
+    # unclosed spans in a closed envelope — execution truncated
+    # mid-flight (crash/timeout of the host process itself). An open
+    # envelope with open spans is in-flight, not this category.
+    if truncated and not errs:
         report.category = FailureCategory.INCOMPLETE
         report.confidence = "inferred"
         report.evidence = {

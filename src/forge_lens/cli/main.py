@@ -485,7 +485,9 @@ def doctor(
     db_path = cfg.resolved_db_path
     if db_path.exists():
         try:
-            store = _store(cfg)
+            # read-only probe — a health check must not create tables,
+            # write schema_version, or set journal modes
+            store = SQLiteTraceStore(db_path, readonly=True)
             stats = store.stats()
             store.close()
             check("sqlite store readable", True, f"schema={stats['schema_version']}")

@@ -61,22 +61,39 @@ class PricingRegistry:
 
     @classmethod
     def from_file(cls, path: Path) -> PricingRegistry:
-        """JSON override: ``{"model": {"input_per_mtok": 1.0, ...}}``."""
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        """JSON override: ``{"model": {"input_per_mtok": 1.0, ...}}``.
+
+        Every failure names the file and the offending model — operator
+        config errors should diagnose themselves.
+        """
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            raise ValueError(f"pricing file {path} unreadable: {exc}") from exc
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"pricing file {path} is not valid JSON: {exc}") from exc
         if not isinstance(raw, dict):
             raise ValueError(f"pricing file {path} must be a JSON object")
         prices: dict[str, ModelPrice] = {}
         for model, entry in raw.items():
             if not isinstance(entry, dict):
-                raise ValueError(f"pricing entry for {model!r} must be an object")
-            prices[str(model)] = ModelPrice(
-                input_per_mtok=float(entry["input_per_mtok"]),
-                output_per_mtok=float(entry["output_per_mtok"]),
-                cached_input_per_mtok=(
-                    float(v) if (v := entry.get("cached_input_per_mtok")) is not None
-                    else None
-                ),
-            )
+                raise ValueError(
+                    f"pricing file {path}: entry for {model!r} must be an object"
+                )
+            try:
+                prices[str(model)] = ModelPrice(
+                    input_per_mtok=float(entry["input_per_mtok"]),
+                    output_per_mtok=float(entry["output_per_mtok"]),
+                    cached_input_per_mtok=(
+                        float(v)
+                        if (v := entry.get("cached_input_per_mtok")) is not None
+                        else None
+                    ),
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"pricing file {path}: invalid entry for {model!r}: {exc}"
+                ) from exc
         return cls(prices, source=f"file:{path.name}")
 
     def lookup(self, model: str | None) -> tuple[str, ModelPrice] | None:

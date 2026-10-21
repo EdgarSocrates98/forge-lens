@@ -596,3 +596,34 @@ def test_failure_replay_incident_endpoints(
     assert b["failure"]["failed"] is True
     assert b["graph"]["stats"]["span_count"] == 3
     assert b["bundle_version"] == "1.0.0"
+
+
+def test_chunked_oversize_body_rejected(client: TestClient) -> None:
+    """No Content-Length (chunked) must not bypass max_payload_bytes."""
+    cfg = LensConfig()
+    limit = cfg.max_payload_bytes
+
+    def gen():
+        yield b" " * 1024 * 1024
+        yield b" " * 1024 * 1024  # 2MiB total if limit is 1MiB…
+        yield b"x" * limit
+
+    r = client.post(
+        "/v1/traces",
+        content=gen(),
+        headers={"content-type": "application/json"},
+    )
+    assert r.status_code == 413
+
+
+def test_otlp_quarantine_warnings_bounded(client: TestClient) -> None:
+    """Adversarial malformed-spans payload → capped warnings, not 15x."""
+    spans = [{} for _ in range(250)]
+    r = client.post(
+        "/v1/otlp/traces",
+        json={"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]},
+    )
+    assert r.status_code == 200, r.text
+    warnings = r.json()["warnings"]
+    assert len(warnings) <= 201
+    assert any("more item(s)" in w for w in warnings[-3:])

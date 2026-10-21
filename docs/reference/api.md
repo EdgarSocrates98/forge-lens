@@ -9,6 +9,12 @@ chave a todos os GETs de dados (`/v1/traces*`, `/v1/graph/*`,
 
 ## Ingestão
 
+O corpo é lido em streaming com limite real (`max_payload_bytes`) — um
+POST chunked/sem `Content-Length` aborta no primeiro byte acima do
+teto; o check de `Content-Length` é apenas fast-path. `warnings[]` é
+limitado a 200 entradas + nota de overflow — payloads adversariais não
+amplificam a resposta.
+
 ### `POST /v1/traces`
 Envelope nativo `TraceIngest` (`schemas/v1/trace-ingest.json`).
 `project_id` do envelope é aplicado às traces.

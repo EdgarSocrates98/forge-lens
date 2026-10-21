@@ -492,3 +492,84 @@ def test_cycle_members_disconnected_cycles() -> None:
         "g": None,                    # clean root
     }
     assert cycle_member_ids(p) == {"a", "b", "c", "d", "e"}
+
+
+# -- round-12 regressions -----------------------------------------------------
+
+
+def test_max_depth_covers_all_roots() -> None:
+    """Multi-root trace: depth counts every forest, not just the
+    elected root's subtree."""
+    a = _span("aa", "shallow-root")
+    b = _span("bb", "deep-root", start_s=1)
+    c = _span("cc", "l2", parent="bb")
+    d = _span("dd", "l3", parent="cc")
+    e = _span("ee", "l4", parent="dd")
+    g = build_trace_graph(_trace([a, b, c, d, e]))
+    assert g.stats["max_depth"] == 4
+
+
+def test_max_depth_includes_cycle_attached_trees() -> None:
+    """A tree hanging off a cycle member still contributes depth."""
+    a = _span("a1", "a", parent="b1")
+    b = _span("b1", "b", parent="a1")
+    leaf1 = _span("c1", "child-of-cycle", parent="a1")
+    leaf2 = _span("d1", "grandchild", parent="c1")
+    g = build_trace_graph(_trace([a, b, leaf1, leaf2]))
+    assert g.stats["max_depth"] == 3  # member → child → grandchild
+    assert g.stats["cycle_members"] == 2
+
+
+def test_classify_in_flight_not_failed() -> None:
+    """ended_at=None + unclosed spans = running trace, not a failure."""
+    from forge_lens.investigate import classify_failure
+
+    s = _span("a1", "running")
+    s.end_time = None
+    s.integrity_flags.append(IntegrityFlag.MISSING_END)
+    t = _trace([s]).model_copy(update={"ended_at": None})
+    r = classify_failure(t)
+    assert r.failed is False
+    assert r.category == "unknown"
+
+
+def test_classify_truncated_when_envelope_closed() -> None:
+    """ended_at set but spans unclosed → host died mid-run."""
+    from forge_lens.investigate import classify_failure
+
+    s = _span("a1", "died")
+    s.end_time = None
+    s.integrity_flags.append(IntegrityFlag.MISSING_END)
+    r = classify_failure(_trace([s]))  # _trace sets ended_at
+    assert r.failed is True
+    assert r.category == "incomplete"
+    assert r.confidence == "inferred"
+
+
+def test_replay_kind_order_at_same_timestamp() -> None:
+    """Event stamped at span start: span_start precedes event."""
+    from forge_lens.contracts.v1.trace import SpanEvent
+    from forge_lens.investigate import replay_timeline
+
+    s = _span("a1", "work", dur_ms=100)
+    s.events.append(SpanEvent(name="at-start", time=s.start_time))
+    s.events.append(SpanEvent(name="at-end", time=s.end_time))
+    out = replay_timeline(_trace([s]))
+    kinds = [e["kind"] for e in out["entries"]]
+    assert kinds == ["span_start", "event", "event", "span_end"]
+    assert out["entries"][1]["event"] == "at-start"
+
+
+def test_node_has_token_usage_requires_parseable() -> None:
+    """Malformed usage dict → has_token_usage False (UNKNOWN_TOKENS bar)."""
+    bad = _span(
+        "a1", "gen", kind=SpanKind.LLM,
+        attrs={"forge_lens.token_usage": {"model": 42, "input_tokens": "x"}},
+    )
+    g = build_trace_graph(_trace([bad]))
+    assert g.nodes[0].has_token_usage is False
+
+    good = _span("b1", "gen2", kind=SpanKind.LLM,
+                 attrs=_usage("gpt-4o", 1, 1))
+    g2 = build_trace_graph(_trace([good]))
+    assert g2.nodes[0].has_token_usage is True

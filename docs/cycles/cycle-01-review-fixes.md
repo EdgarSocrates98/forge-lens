@@ -602,3 +602,40 @@ backend (`forge_lens/investigate/`): `classify_failure`,
 Testes: +12 (ciclos multi-nó/self/lead-in, cadeia 5k, skew≠falha,
 429 recuperado, context-length≠timeout, exception.type, replay vazio,
 ORPHAN resolvido/falso, usage malformado).
+
+## Rodada 12 — recursos verdadeiramente limitados + stats corretos
+
+- **Body sem bound (crítico)**: `request.body()`/`request.json()`
+  bufferizavam o payload inteiro antes do check — um POST chunked/sem
+  Content-Length de qualquer tamanho era materializado. Novo
+  `_read_capped_body` lê em streaming e aborta no primeiro byte acima
+  de `max_payload_bytes` (o `Content-Length` check vira só fast-path).
+- **Amplificação de warnings**: 1 nota por item malformado → ~15× o
+  payload (0.8MB → 11.6MB; 8MB → ~120MB). Novo `core/bounded.BoundedList`
+  (cap 200 + nota `"... and K more item(s)"`) aplicado durante a
+  coleta em `normalize_otlp_request` e em `IngestPipeline` — não é
+  trim pós-hoc, a memória de coleta também é limitada.
+- **`max_depth` errado em multi-root**: BFS saía só do `root_id`
+  eleito → sub-reportava. Agora cobre *todos* os roots de
+  `siblings[None]` + membros de ciclo como pseudo-roots (árvores
+  penduradas em ciclo contam). Traces `a`(1) + `b→c→d→e` reportam 4.
+- **`incomplete` ≠ in-flight**: `MISSING_END` com `ended_at=None` é
+  execução em curso → `failed=false`; a categoria `incomplete`
+  (`failed=true`) exige envelope fechado + spans abertos.
+- **Ordem de replay**: tie-break por `kind` era alfabético — evento no
+  mesmo timestamp do início do span aparecia antes de `span_start`.
+  Rank explícito `span_start < event < span_end`.
+- **`has_token_usage` consistente**: `extract_usage() is not None` —
+  dict de usage malformado não conta como usage (mesma régua do flag
+  `UNKNOWN_TOKENS`).
+- **Config/pricing error UX**: `load_config` embrulha erros de TOML
+  com o caminho do arquivo; `PricingRegistry.from_file` embrulha
+  JSON inválido, entry não-objeto e chaves faltantes com
+  arquivo+modelo.
+- **`doctor` não-mutante**: `SQLiteTraceStore(readonly=True)` — conexão
+  `mode=ro`, sem `mkdir`, sem `init_schema`, sem `PRAGMA journal_mode`
+  (que persiste WAL). Teste de hash do arquivo antes/depois.
+
+Testes: +8 (chunked oversize 413, quarantine cap, multi-root depth,
+cycle-attached depth, in-flight≠falha, truncamento de envelope fechado,
+ordem span_start/event, has_token_usage malformado, doctor imutável).

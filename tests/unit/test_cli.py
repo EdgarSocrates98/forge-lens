@@ -318,3 +318,26 @@ def test_ingest_fills_source_from_envelope(tmp_path: Path, synthetic_trace) -> N
         assert stored.source.system == "file-importer"
     finally:
         store.close()
+
+
+def test_doctor_does_not_create_or_mutate_db(tmp_path: Path) -> None:
+    """A health check must not create a store or write into one."""
+    db = tmp_path / ".forge-lens" / "lens.db"
+    # no db at all → doctor reports "not created", creates nothing
+    result = CliRunner().invoke(
+        app, ["doctor", str(tmp_path), "--db", str(db)]
+    )
+    assert result.exit_code in (0, 1)
+    assert not db.exists()
+    assert not (tmp_path / ".forge-lens").exists()
+
+    # existing db → content hash unchanged by the probe
+    from forge_lens.storage.sqlite import SQLiteTraceStore
+
+    SQLiteTraceStore(db).close()
+    before = db.read_bytes()
+    result = CliRunner().invoke(
+        app, ["doctor", str(tmp_path), "--db", str(db)]
+    )
+    assert result.exit_code == 0
+    assert db.read_bytes() == before

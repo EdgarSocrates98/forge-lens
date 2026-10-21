@@ -102,8 +102,13 @@ def load_config(project_dir: Path | None = None) -> LensConfig:
 
     cfg_file = base.data_dir / "config.toml"
     if cfg_file.exists():
-        with cfg_file.open("rb") as fh:
-            base = _toml_to_config(tomllib.load(fh), base)
+        try:
+            with cfg_file.open("rb") as fh:
+                base = _toml_to_config(tomllib.load(fh), base)
+        except Exception as exc:
+            # bare ValueError/KeyError from a config file is operator
+            # hostile — name the file in the error
+            raise ValueError(f"invalid config file {cfg_file}: {exc}") from exc
 
     env_map: dict[str, str] = {
         "FORGE_LENS_PROJECT": "project_id",

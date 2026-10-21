@@ -190,19 +190,29 @@ def _merge_links(stored: list[SpanLink], incoming: list[SpanLink]) -> list[SpanL
 class SQLiteTraceStore:
     """Thread-safe SQLite trace store (WAL)."""
 
-    def __init__(self, path: Path | str) -> None:
+    def __init__(self, path: Path | str, *, readonly: bool = False) -> None:
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        # Default (deferred) isolation level so `with self._conn:` is a real
-        # transaction — upsert_trace is atomic per docs/architecture/storage.md.
-        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        if readonly:
+            # probe mode (e.g. doctor): never create dirs, never run
+            # init_schema or PRAGMA journal_mode — a health check must
+            # not mutate the database it inspects
+            self._conn = sqlite3.connect(
+                f"file:{self.path}?mode=ro", uri=True, check_same_thread=False
+            )
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            # Default (deferred) isolation level so `with self._conn:` is a
+            # real transaction — upsert_trace is atomic per
+            # docs/architecture/storage.md.
+            self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.execute("PRAGMA foreign_keys=ON")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
-        self.init_schema()
+        if not readonly:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self.init_schema()
 
     # -- schema ---------------------------------------------------------
 

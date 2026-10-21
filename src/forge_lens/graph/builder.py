@@ -16,6 +16,8 @@ WHITE, GRAY, BLACK = 0, 1, 2
 
 
 def _node(span: Span) -> GraphNode:
+    from forge_lens.intel.cost import extract_usage
+
     return GraphNode(
         id=span.span_id,
         kind=span.kind.value,
@@ -25,7 +27,9 @@ def _node(span: Span) -> GraphNode:
         duration_ms=span.duration_ms,
         status=span.status.code.value,
         integrity_flags=[f.value for f in span.integrity_flags],
-        has_token_usage="forge_lens.token_usage" in span.attributes,
+        # a usage dict that doesn't parse is not usage — same bar the
+        # UNKNOWN_TOKENS flag applies
+        has_token_usage=extract_usage(span) is not None,
         error=span.status.code.value == "error",
     )
 
@@ -79,6 +83,7 @@ def build_trace_graph(trace: Trace) -> ExecutionGraph:
         trace.root_span_id if trace.root_span_id in ids
         else (roots[0].span_id if roots else None)
     )
+    members = cycle_member_ids({s.span_id: s.parent_span_id for s in spans})
     return ExecutionGraph(
         subject_id=trace.trace_id,
         project_id=trace.project_id,
@@ -88,12 +93,12 @@ def build_trace_graph(trace: Trace) -> ExecutionGraph:
         stats={
             "span_count": len(nodes),
             "edge_count": len(edges),
-            "max_depth": _max_depth(siblings, root_id),
+            "max_depth": _max_depth(siblings, members),
             "dangling_edges": sum(1 for e in edges if e.dangling),
             "missing_parents": sum(
                 1 for s in spans if s.parent_span_id and s.parent_span_id not in ids
             ),
-            "cycle_members": _cycle_members(spans),
+            "cycle_members": len(members),
         },
     )
 
@@ -127,17 +132,20 @@ def cycle_member_ids(parent_of: dict[str, str | None]) -> set[str]:
     return members
 
 
-def _cycle_members(spans: list[Span]) -> int:
-    parent_of = {s.span_id: s.parent_span_id for s in spans}
-    return len(cycle_member_ids(parent_of))
+def _max_depth(
+    siblings: dict[str | None, list[Span]], cyclic_members: set[str]
+) -> int:
+    """Longest parent→leaf chain across the WHOLE trace; 0 when empty.
 
-
-def _max_depth(siblings: dict[str | None, list[Span]], root_id: str | None) -> int:
-    """Longest parent→leaf chain length; 0 for an empty graph."""
-    if root_id is None:
+    BFS starts from every root-level span (a partial trace can carry
+    several), plus each cycle member as a pseudo-root — trees hanging
+    off a cycle still contribute depth. ``seen`` bounds revisits so a
+    member's cycle edges terminate rather than loop.
+    """
+    frontier = [s.span_id for s in siblings.get(None, [])] + sorted(cyclic_members)
+    if not frontier:
         return 0
     depth = 0
-    frontier = [root_id]
     seen: set[str] = set()
     while frontier:
         depth += 1

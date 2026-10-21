@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from forge_lens.contracts.v1.trace import IntegrityFlag, SpanKind, Trace
+from forge_lens.core.bounded import BoundedList
 from forge_lens.core.config import LensConfig
 from forge_lens.core.errors import PayloadTooLargeError, RateLimitedError, ValidationError
 from forge_lens.core.metrics import (
@@ -210,6 +211,9 @@ class IngestPipeline:
                 )
 
         result = IngestResult()
+        # warnings are bounded during accumulation — a hostile batch
+        # can't amplify into an unbounded response (inegociável #13)
+        warn_sink: BoundedList = BoundedList()
         with METRICS.timer(M_INGEST_LATENCY):
             for trace in traces:
                 _normalize_times(trace)
@@ -225,7 +229,7 @@ class IngestPipeline:
                     max_chars=self.config.max_attr_value_chars,
                 )
                 warnings = flag_integrity(trace)
-                result.warnings.extend(f"{trace.trace_id}: {w}" for w in warnings)
+                warn_sink.extend(f"{trace.trace_id}: {w}" for w in warnings)
 
                 # ORPHAN — parent absent from this trace but present in
                 # the store under another trace: it can never resolve
@@ -247,7 +251,7 @@ class IngestPipeline:
                         and owner != trace.trace_id
                     ):
                         span.integrity_flags.append(IntegrityFlag.ORPHAN)
-                        result.warnings.append(
+                        warn_sink.append(
                             f"{trace.trace_id}: span {span.span_id} parent "
                             f"belongs to trace {owner}"
                         )
@@ -273,4 +277,5 @@ class IngestPipeline:
             sum(len(s.events) for t in traces for s in t.spans),
         )
         METRICS.inc(M_INGEST_DUPLICATES, result.duplicate_spans)
+        result.warnings = warn_sink.summary()
         return result
