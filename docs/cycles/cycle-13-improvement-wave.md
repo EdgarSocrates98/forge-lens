@@ -63,7 +63,7 @@ binary=True)` — elegíveis ao z-test de `eval/compare`. Trace sem
 
 ## Residuals — DOCUMENTED_ONLY
 
-- `lens.sessions` MCP: `limit` >500 clamps (API também); paginação por
+- `lens.{sessions,tools}` MCP: `limit` >500 clamps (API também); paginação por
   `offset` existe na store/API mas o tool MCP só expõe `limit`.
 - Saved views legadas: toleradas, campos novos ausentes → defaults.
 - Studio eval runner: avaliadores que exigem params rodam com `{}` →

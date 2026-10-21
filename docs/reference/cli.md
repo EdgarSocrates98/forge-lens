@@ -66,6 +66,12 @@ veredito.
 Verifica Python ≥3.11, diretório de dados, store legível (schema_version,
 contagens), extras de servidor e import do SDK. Exit 0/1.
 
+## `forge-lens tools [--db] [--project] [--limit N] [--json]`
+
+Roll-up de ferramentas (espelha `GET /v1/tools`): uma linha por
+`tool.name` com calls, traces, errors e duração média — spans tool sem
+o atributo caem em `(unnamed)`.
+
 ## `forge-lens keys create --name <n> [--role reader|writer|admin] [--project P]... [--db]`
 ## `forge-lens keys list [--db]` · `forge-lens keys revoke <key_id> [--db]`
 

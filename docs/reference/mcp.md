@@ -57,6 +57,7 @@ espelham a inteligência de leitura da API HTTP:
 | `lens.failure` | `trace_id`, `project_id?` | `GET /v1/traces/{id}/failure` |
 | `lens.list_datasets` | `project_id?` | `GET /v1/datasets` |
 | `lens.sessions` | `project_id?`, `limit?` (≤500) | `GET /v1/sessions` |
+| `lens.tools` | `project_id?`, `limit?` (≤500) | `GET /v1/tools` |
 | `lens.capabilities` | — | `GET /v1/capabilities` |
 
 Notas:

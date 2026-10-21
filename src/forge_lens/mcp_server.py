@@ -71,6 +71,12 @@ def _tools() -> list[dict[str, Any]]:
          "description": "Store statistics snapshot.",
          "inputSchema": {"type": "object", "properties": {
              "project_id": {"type": "string"}}}},
+        {"name": "lens.tools",
+         "description": "Fleet-wide tool roll-up — calls/traces/errors/"
+                        "avg duration per tool.name (matches /v1/tools).",
+         "inputSchema": {"type": "object", "properties": {
+             "limit": {"type": "integer", "default": 100},
+             "project_id": {"type": "string"}}}},
         {"name": "lens.trace_efficiency",
          "description": "Per-trace efficiency roll-up "
                         "(tokens/tools/retries).",
@@ -192,6 +198,16 @@ def serve(db_path: str) -> int:
                 raise TypeError("limit must be a number")
             lim = 100 if raw_lim is None else int(raw_lim)
             return {"sessions": store.list_sessions(
+                _pid(args), limit=min(500, max(0, lim)))}
+        if name == "lens.tools":
+            raw_lim = args.get("limit")
+            if raw_lim is not None and (
+                isinstance(raw_lim, bool)
+                or not isinstance(raw_lim, (int, float, str))
+            ):
+                raise TypeError("limit must be a number")
+            lim = 100 if raw_lim is None else int(raw_lim)
+            return {"tools": store.list_tools(
                 _pid(args), limit=min(500, max(0, lim)))}
         if name == "lens.capabilities":
             from forge_lens.adapters.capabilities import capability_matrix

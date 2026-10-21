@@ -131,6 +131,7 @@ def test_tools_list_covers_read_intel(
         "lens.list_datasets",
         "lens.list_traces",
         "lens.sessions",
+        "lens.tools",
         "lens.stats",
         "lens.trace_efficiency",
     }
@@ -410,4 +411,29 @@ def test_sessions_tool_rolls_up(
         "session_id", "traces", "spans",
         "first_started_at", "last_activity_at",
     }
+    assert by_id[2]["error"]["code"] == -32603
+
+
+def test_tools_tool_rolls_up(
+    seeded_db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """lens.tools mirrors /v1/tools — per-name fleet roll-up."""
+    db_store = SQLiteTraceStore(seeded_db, readonly=False)
+    t = _loop_trace()
+    t.trace_id = "d" * 32
+    for s in t.spans:
+        s.trace_id = t.trace_id
+        s.attributes = {"tool.name": "web_search"}
+    db_store.upsert_trace(t)
+    db_store.close()
+
+    by_id = _serve(
+        seeded_db,
+        [_call_tool(1, "lens.tools", {}), _call_tool(2, "lens.tools", {"limit": "x"})],
+        capsys,
+    )
+    rows = _payload(by_id[1])["tools"]
+    ws = [r for r in rows if r["tool"] == "web_search"]
+    assert ws
+    assert ws[0]["calls"] >= 4  # seeded fixture may add more web_search calls
     assert by_id[2]["error"]["code"] == -32603

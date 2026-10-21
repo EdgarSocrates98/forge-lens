@@ -13,9 +13,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
   mesmos filtros em `forge-lens traces list`.
 - `GET /v1/sessions`: roll-up por `session_id` (traces, spans,
   first_started_at, last_activity_at) + `lens.sessions` no MCP.
+- `GET /v1/tools`: roll-up de frota por `tool.name` + `forge-lens tools`
+  + `lens.tools` no MCP (paridade CLI/API/MCP).
 - MCP stdio: `lens.detect_loops`, `lens.trace_efficiency`, `lens.cost`,
-  `lens.failure`, `lens.list_datasets`, `lens.sessions`,
-  `lens.capabilities` (9 tools read-only).
+  `lens.failure`, `lens.list_datasets`, `lens.sessions`, `lens.tools`,
+  `lens.capabilities` (11 tools read-only).
 - Avaliadores `contains`, `regex`, `tool_call_count`;
   `latency_budget` aceita `max_duration_ms` (`budget_ms` segue como alias).
 - Studio: barra de filtros completa no Trace Explorer (deep-linkável,

@@ -445,6 +445,36 @@ def graph(
 
 
 @app.command()
+def tools(
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    limit: Annotated[int, typer.Option("--limit", "-n")] = 50,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Fleet-wide tool roll-up: calls, traces, errors, avg duration per tool."""
+    cfg = _config(db)
+    store = _store(cfg)
+    try:
+        items = store.list_tools(
+            project or cfg.project_id, limit=min(500, max(0, limit))
+        )
+    finally:
+        store.close()
+    if json_out:
+        typer.echo(json.dumps(items, indent=2))
+        return
+    if not items:
+        typer.echo("no tool spans recorded")
+        return
+    for t in items:
+        avg = f"{t['avg_duration_ms']:.0f}ms" if t["avg_duration_ms"] else "?"
+        typer.echo(
+            f"{t['tool']:<24} calls={t['calls']:<6} "
+            f"traces={t['traces']:<5} errors={t['errors']:<4} avg={avg}"
+        )
+
+
+@app.command()
 def cost(
     trace_id: Annotated[str, typer.Argument()],
     db: Annotated[Path | None, typer.Option("--db")] = None,
