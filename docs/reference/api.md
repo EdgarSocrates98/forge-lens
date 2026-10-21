@@ -2,7 +2,10 @@
 
 Base: `http://127.0.0.1:7777/v1`. Todos os endpoints retornam JSON.
 Auth: quando `api_key` está configurada, os endpoints **de ingestão** exigem
-header `X-Forge-Lens-Key`; leitura é aberta (modelo local).
+header `X-Forge-Lens-Key`; leitura é aberta por padrão (modelo local) —
+`auth_reads = true` (TOML/`FORGE_LENS_AUTH_READS`) estende a exigência da
+chave a todos os GETs de dados (`/v1/traces*`, `/v1/graph/*`,
+`/v1/analytics/*`, `/v1/health`, `/v1/metrics`).
 
 ## Ingestão
 
@@ -20,7 +23,7 @@ Erros: `413` payload/limite excedido, `422` envelope inválido ou span com
 ### `POST /v1/otlp/traces`
 `ExportTraceServiceRequest` **JSON** (OTLP/HTTP). Protobuf não é aceito.
 Resposta: `{accepted_spans, updated_spans, duplicate_spans, traces[],
-warnings[]}` — spans malformados são *quarantined*: descartados com
+sanitize{}, warnings[]}` — spans malformados são *quarantined*: descartados com
 motivo listado em `warnings`, enquanto os válidos são ingeridos.
 Erros: `400` JSON inválido, `413` payload/limite excedido, `422` forma OTLP
 inválida, `429` rate limit.
@@ -36,6 +39,47 @@ Contrato `Trace` completo ou `404`. Sem `project_id`, usa o
 `cfg.project_id` configurado — a leitura cruzada entre projetos existe
 apenas no `Store` interno (modelo local single-user — `project_id`
 particiona dados, não é fronteira de segurança).
+
+## Inteligência (Cycles 03/04)
+
+### `GET /v1/graph/traces/{trace_id}?project_id`
+Grafo de execução `ExecutionGraph`: nós = spans; arestas `parent`
+(contenção observada), `sequence` (sucessão temporal entre irmãos por
+`start_time`), `link` (`SpanLink`s — `dangling: true` quando o alvo não
+está no grafo). `stats`: `span_count`, `edge_count`, `max_depth`,
+`dangling_edges`, `missing_parents`. `404` se a trace não existe.
+
+### `GET /v1/graph/traces/{trace_id}/critical-path`
+`{path: [span_id…], total_ms}` — cadeia raiz→folha que maximiza a soma
+de durações (o trabalho serializado que domina o wall-clock). Empates
+desempatam por id lexicográfico (determinístico).
+
+### `GET /v1/graph/traces/{trace_id}/bottlenecks?top=5`
+`{items: [{id, name, kind, self_ms, duration_ms}]}` — self-time =
+duração do span menos a soma dos filhos diretos (clamp ≥ 0; filhos
+podem se sobrepor). Ordenado por `self_ms` desc.
+
+### `GET /v1/graph/sessions/{session_id}?project_id&limit=200`
+Grafo de sessão: nós = traces ordenadas por `started_at`, arestas
+`sequence` entre execuções consecutivas. `stats.truncated` indica que a
+sessão excede `limit` (evidência, não erro).
+
+### `GET /v1/traces/{trace_id}/cost`
+Relatório derivado (`provenance: "derived"`): `{span_costs[],
+total_input_tokens, total_output_tokens, total_tokens,
+total_estimated_usd, by_model{}, unpriced_models[],
+usage_missing_on_llm_spans[], assumptions[], pricing_source, waste[]}`.
+Estimativas vêm do `PricingRegistry` (tabela bundled ou `pricing_file`
+JSON); `estimated_usd = null` quando o modelo não é precificado — nunca
+inventado. `waste[]` lista findings evidenciados: `retry_amplification`
+(≥3 invocações idênticas), `context_replay` (contexto reenviado ≥ maior
+janela), `duplicate_delivery` (tokens gastos em spans `duplicate`/
+`conflict`, com USD quando precificável), `unknown_tokens` (spans LLM
+sem `token_usage`), `unpriced_model`.
+
+### `GET /v1/analytics/pricing`
+`{source, models: {model: {input_per_mtok, output_per_mtok,
+cached_input_per_mtok}}}` — a tabela efetiva em uso.
 
 ## Ops
 

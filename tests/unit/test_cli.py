@@ -276,3 +276,19 @@ def test_serve_schemeless_endpoint_parses_host_port(
     assert calls == [("localhost", 8888)]
 
 
+
+
+def test_ingest_enforces_payload_bound(tmp_path: Path, monkeypatch) -> None:
+    """CLI ingest honors max_payload_bytes — the API path's byte bound
+    must not be silently skipped on the file path."""
+    cfg_dir = tmp_path / ".forge-lens"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text(
+        "[lens]\nproject_id = \"p1\"\nmax_payload_bytes = 64\n"
+    )
+    f = tmp_path / "big.json"
+    f.write_text(json.dumps({"traces": [], "pad": "x" * 512}))
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, ["ingest", str(f)])
+    assert result.exit_code == 1
+    assert "ingest failed" in result.output

@@ -40,6 +40,10 @@ class LensConfig:
     api_key: str | None = None
     """When set, ingestion endpoints require ``X-Forge-Lens-Key``."""
 
+    auth_reads: bool = False
+    """When true (and ``api_key`` is set), query/read endpoints require
+    the key too. Default off: local-first reads stay open by design."""
+
     endpoint: str = "http://127.0.0.1:7777"
     max_payload_bytes: int = 8 * 1024 * 1024
     max_traces_per_request: int = 10_000
@@ -48,6 +52,9 @@ class LensConfig:
     max_attr_value_chars: int = 4_096
     rate_limit_per_minute: int = 0
     """0 disables the in-process rate limiter (local-first default)."""
+
+    pricing_file: Path | None = None
+    """Optional JSON pricing table overriding the bundled registry."""
 
     @property
     def resolved_db_path(self) -> Path:
@@ -67,8 +74,12 @@ def _toml_to_config(data: dict[str, object], base: LensConfig) -> LensConfig:
         kwargs["capture"] = CaptureLevel(v)
     if isinstance(v := section.get("api_key"), str):
         kwargs["api_key"] = v
+    if isinstance(v := section.get("auth_reads"), bool):
+        kwargs["auth_reads"] = v
     if isinstance(v := section.get("endpoint"), str):
         kwargs["endpoint"] = v
+    if isinstance(v := section.get("pricing_file"), str):
+        kwargs["pricing_file"] = Path(v).expanduser()
     for key, field_name in (
         ("max_payload_bytes", "max_payload_bytes"),
         ("max_traces_per_request", "max_traces_per_request"),
@@ -99,7 +110,9 @@ def load_config(project_dir: Path | None = None) -> LensConfig:
         "FORGE_LENS_DB": "db_path",
         "FORGE_LENS_CAPTURE": "capture",
         "FORGE_LENS_API_KEY": "api_key",
+        "FORGE_LENS_AUTH_READS": "auth_reads",
         "FORGE_LENS_ENDPOINT": "endpoint",
+        "FORGE_LENS_PRICING_FILE": "pricing_file",
         "FORGE_LENS_MAX_PAYLOAD_BYTES": "max_payload_bytes",
         "FORGE_LENS_MAX_TRACES_PER_REQUEST": "max_traces_per_request",
         "FORGE_LENS_MAX_SPANS_PER_REQUEST": "max_spans_per_request",
@@ -113,10 +126,12 @@ def load_config(project_dir: Path | None = None) -> LensConfig:
         if raw is None:
             continue
         try:
-            if field_name == "db_path":
+            if field_name in {"db_path", "pricing_file"}:
                 overrides[field_name] = Path(raw).expanduser()
             elif field_name == "capture":
                 overrides[field_name] = CaptureLevel(raw)
+            elif field_name == "auth_reads":
+                overrides[field_name] = raw.lower() in {"1", "true", "yes", "on"}
             elif field_name in {"endpoint", "project_id", "api_key"}:
                 overrides[field_name] = raw
             else:  # every remaining mapped field is int-valued
@@ -144,6 +159,7 @@ def init_project(project_dir: Path, project_id: str) -> Path:
             'capture = "metadata"\n'
             'endpoint = "http://127.0.0.1:7777"\n'
             "# api_key = \"change-me\"  # set to require X-Forge-Lens-Key on ingest\n"
+            "# auth_reads = true  # also require the key on GET query endpoints\n"
             "# rate_limit_per_minute = 600\n",
             encoding="utf-8",
         )

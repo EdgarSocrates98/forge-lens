@@ -51,11 +51,11 @@ def _warn_if_exposed(host: str, cfg: LensConfig) -> None:
             "Set FORGE_LENS_API_KEY or api_key in config.toml.",
             err=True,
         )
-    else:
+    elif not cfg.auth_reads:
         typer.echo(
             f"warning: binding {host} — api_key protects ingest only; "
             "GET /v1/traces, /v1/health and /v1/metrics stay unauthenticated "
-            "by design (local-first reads).",
+            "by design (local-first reads). Set auth_reads=true to guard them.",
             err=True,
         )
 
@@ -171,7 +171,8 @@ def ingest(
     pipeline = IngestPipeline(store, cfg)
     quarantine: list[str] = []
     try:
-        payload = json.loads(file.read_text(encoding="utf-8"))
+        raw = file.read_bytes()
+        payload = json.loads(raw)
         if fmt == "otlp" or (fmt == "auto" and "resourceSpans" in payload):
             # file import — weaker provenance than a live OTLP push
             traces = normalize_otlp_request(
@@ -190,7 +191,8 @@ def ingest(
                     t.project_id = project
                 elif t.project_id == "default" and envelope.project_id != "default":
                     t.project_id = envelope.project_id
-        result = pipeline.ingest(traces)
+        # byte bound applies on the CLI path too — same limit the API enforces
+        result = pipeline.ingest(traces, payload_bytes=len(raw))
     except Exception as exc:
         typer.echo(f"ingest failed: {exc}", err=True)
         raise typer.Exit(1) from None
@@ -303,6 +305,102 @@ def traces_show(
         emit(node, depth)
         for child in reversed(by_parent.get(node.span_id, [])):
             stack.append((child, depth + 1))
+
+
+@app.command()
+def graph(
+    trace_id: Annotated[str, typer.Argument()],
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Execution graph for a trace: critical path + bottleneck ranking."""
+    from forge_lens.graph import build_trace_graph, critical_path, self_time_ranking
+
+    cfg = _config(db)
+    store = _store(cfg)
+    try:
+        trace = store.get_trace(trace_id, project_id=project or cfg.project_id)
+    finally:
+        store.close()
+    if trace is None:
+        typer.echo(f"trace {trace_id} not found", err=True)
+        raise typer.Exit(1)
+    g = build_trace_graph(trace)
+    if json_out:
+        typer.echo(g.model_dump_json(indent=2))
+        return
+    typer.echo(
+        f"graph {g.subject_id}: {g.stats['span_count']} nodes, "
+        f"{g.stats['edge_count']} edges, depth={g.stats['max_depth']}"
+    )
+    if g.stats["dangling_edges"]:
+        typer.echo(f"  ~ {g.stats['dangling_edges']} dangling link edge(s)")
+    cp = critical_path(g)
+    if cp["path"]:
+        names = {n.id: n.name for n in g.nodes}
+        typer.echo(f"critical path ({cp['total_ms']}ms):")
+        for node_id in cp["path"]:  # type: ignore[attr-defined]
+            typer.echo(f"  → {names.get(node_id, node_id)}")
+    typer.echo("top self-time:")
+    for row in self_time_ranking(g):
+        typer.echo(f"  {row['self_ms']:>10}ms  {row['name']} [{row['kind']}]")
+
+
+@app.command()
+def cost(
+    trace_id: Annotated[str, typer.Argument()],
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Token + cost report for a trace (derived estimate + waste findings)."""
+    from forge_lens.intel import PricingRegistry, detect_waste, trace_cost
+
+    cfg = _config(db)
+    store = _store(cfg)
+    try:
+        trace = store.get_trace(trace_id, project_id=project or cfg.project_id)
+    finally:
+        store.close()
+    if trace is None:
+        typer.echo(f"trace {trace_id} not found", err=True)
+        raise typer.Exit(1)
+    registry = (
+        PricingRegistry.from_file(cfg.pricing_file)
+        if cfg.pricing_file
+        else PricingRegistry()
+    )
+    report = trace_cost(trace, registry)
+    waste = detect_waste(trace, registry)
+    if json_out:
+        typer.echo(
+            report.model_dump_json(indent=2)
+            if not waste
+            else json.dumps(
+                {
+                    **report.model_dump(mode="json"),
+                    "waste": [w.model_dump(mode="json") for w in waste],
+                },
+                indent=2,
+            )
+        )
+        return
+    typer.echo(f"trace {report.trace_id}  pricing={registry.source}")
+    typer.echo(
+        f"  tokens: in={report.total_input_tokens} "
+        f"out={report.total_output_tokens} total={report.total_tokens}"
+    )
+    typer.echo(f"  estimated: ${report.total_estimated_usd:.6f}")
+    for model, b in report.by_model.items():
+        typer.echo(
+            f"    {model}: in={b['input_tokens']} out={b['output_tokens']} "
+            f"${b['estimated_usd']:.6f}"
+        )
+    for m in report.unpriced_models:
+        typer.echo(f"  ~ unpriced model: {m}")
+    for w in waste:
+        typer.echo(f"  ~ {w.kind}: {w.detail}")
 
 
 @app.command()

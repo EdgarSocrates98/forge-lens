@@ -480,3 +480,49 @@ Sem bugs bloqueantes; as seis sugestões do reviewer foram aplicadas:
 
 171 testes py + 20 ts; `ruff` limpo; `mypy --strict` 0 erros; golden
 fixture exercitando `process.runtime.*`; schemas sem drift.
+
+## Rodada 9 — revisão externa (fixes + avanço de roadmap)
+
+Além das correções, esta rodada entregou implementação real de dois
+ciclos do roadmap (ver `cycle-03-final-report.md` e
+`cycle-04-final-report.md`):
+
+- **`ingest` CLI honrava `max_payload_bytes`? Não** — `read_text`
+  carregava o arquivo inteiro e `pipeline.ingest` ia sem
+  `payload_bytes`. Agora `read_bytes` + `payload_bytes=len(raw)` —
+  o mesmo bound da API vale no caminho de arquivo —
+  `test_ingest_enforces_payload_bound`.
+- **Assimetria de resposta**: `POST /v1/otlp/traces` omitia `sanitize`
+  apesar de computá-lo — agora devolve o mesmo envelope do nativo —
+  `test_otlp_response_includes_sanitize`.
+- **`auth_reads` (fundamento Cycle 08)**: novo campo de config
+  (`auth_reads = true` / `FORGE_LENS_AUTH_READS`) estende a exigência de
+  `api_key` aos GETs de dados; `_warn_if_exposed` aponta a flag quando
+  bind não-loopback + chave sem `auth_reads` —
+  `test_auth_reads_gates_get_endpoints`,
+  `test_auth_reads_off_keeps_reads_open`.
+
+### Cycle 03 (grafo temporal) — backend
+
+`forge_lens/graph/`: `ExecutionGraph` com arestas `parent`/`sequence`/
+`link` (determinístico, `dangling` evidenciado, `missing_parents` como
+estatística honesta), `critical_path`, `self_time_ranking`,
+`build_session_graph`. Endpoints `/v1/graph/traces/{id}[,
+/critical-path, /bottlenecks]` e `/v1/graph/sessions/{id}` (com
+`stats.truncated`). CLI `forge-lens graph`.
+
+### Cycle 04 (tokens/custo/contexto) — backend
+
+`forge_lens/intel/`: `PricingRegistry` (tabela bundled versionada +
+override `pricing_file` JSON, lookup exato→prefixo), `CostReport` por
+span/modelo com `provenance: derived` + `assumptions`, `detect_waste`
+com 5 findings evidenciados (`retry_amplification`, `context_replay`,
+`duplicate_delivery` precificado, `unknown_tokens`, `unpriced_model`).
+Endpoints `/v1/traces/{id}/cost` + `/v1/analytics/pricing`. CLI
+`forge-lens cost`.
+
+## Estado pós-fix (rodada 9)
+
+192 testes py + 20 ts; `ruff` limpo; `mypy --strict` 0 erros em 45
+arquivos; schemas sem drift (grafos/relatórios são modelos de saída,
+não contratos de ingestão).

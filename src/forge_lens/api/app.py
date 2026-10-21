@@ -78,6 +78,7 @@ def create_app(
     _init_lock = threading.RLock()
     _store_holder: dict[str, TraceStore] = {}
     _pipeline_holder: dict[str, IngestPipeline] = {}
+    _pricing_holder: dict[str, Any] = {}
 
     def get_store() -> TraceStore:
         if "db" not in _store_holder:
@@ -209,12 +210,17 @@ def create_app(
             "updated_spans": result.updated_spans,
             "duplicate_spans": result.duplicate_spans,
             "traces": result.traces,
+            "sanitize": result.sanitize,
             "warnings": result.warnings,
         }
 
     # -- query ----------------------------------------------------------
 
-    @app.get(f"/{API_VERSION}/traces")
+    # auth_reads=true (with api_key configured) extends the same key check
+    # to reads; default keeps local-first reads open
+    read_deps = [Depends(check_auth)] if cfg.auth_reads else []
+
+    @app.get(f"/{API_VERSION}/traces", dependencies=read_deps)
     async def list_traces(
         project_id: str | None = None,
         session_id: str | None = None,
@@ -234,7 +240,7 @@ def create_app(
             )
         return {"items": items, "limit": limit, "offset": offset}
 
-    @app.get(f"/{API_VERSION}/traces/{{trace_id}}")
+    @app.get(f"/{API_VERSION}/traces/{{trace_id}}", dependencies=read_deps)
     async def get_trace(trace_id: str, project_id: str | None = None) -> dict[str, Any]:
         with METRICS.timer(M_QUERY_LATENCY):
             trace = get_store().get_trace(trace_id, project_id=project_id or cfg.project_id)
@@ -242,9 +248,108 @@ def create_app(
             raise HTTPException(status_code=404, detail="trace not found")
         return trace.model_dump(mode="json")
 
+    # -- intelligence (Cycles 03/04): graph + cost -----------------------
+
+    def _get_trace_or_404(trace_id: str, project_id: str | None) -> Any:
+        trace = get_store().get_trace(
+            trace_id, project_id=project_id or cfg.project_id
+        )
+        if trace is None:
+            raise HTTPException(status_code=404, detail="trace not found")
+        return trace
+
+    def _registry() -> Any:
+        from forge_lens.intel.pricing import PricingRegistry
+
+        if "registry" not in _pricing_holder:
+            _pricing_holder["registry"] = (
+                PricingRegistry.from_file(cfg.pricing_file)
+                if cfg.pricing_file
+                else PricingRegistry()
+            )
+        return _pricing_holder["registry"]
+
+    @app.get(f"/{API_VERSION}/graph/traces/{{trace_id}}", dependencies=read_deps)
+    async def trace_graph(
+        trace_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        from forge_lens.graph import build_trace_graph
+
+        trace = _get_trace_or_404(trace_id, project_id)
+        return build_trace_graph(trace).model_dump(mode="json")
+
+    @app.get(
+        f"/{API_VERSION}/graph/traces/{{trace_id}}/critical-path",
+        dependencies=read_deps,
+    )
+    async def trace_critical_path(
+        trace_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        from forge_lens.graph import build_trace_graph, critical_path
+
+        trace = _get_trace_or_404(trace_id, project_id)
+        return critical_path(build_trace_graph(trace))
+
+    @app.get(
+        f"/{API_VERSION}/graph/traces/{{trace_id}}/bottlenecks",
+        dependencies=read_deps,
+    )
+    async def trace_bottlenecks(
+        trace_id: str, project_id: str | None = None, top: int = 5
+    ) -> dict[str, Any]:
+        from forge_lens.graph import build_trace_graph, self_time_ranking
+
+        trace = _get_trace_or_404(trace_id, project_id)
+        return {"items": self_time_ranking(build_trace_graph(trace), top=top)}
+
+    @app.get(f"/{API_VERSION}/graph/sessions/{{session_id}}", dependencies=read_deps)
+    async def session_graph(
+        session_id: str, project_id: str | None = None, limit: int = 200
+    ) -> dict[str, Any]:
+        from forge_lens.graph import build_session_graph
+
+        pid = project_id or cfg.project_id
+        lim = max(1, min(limit, 500))
+        # fetch one extra row — its existence is the truncation evidence
+        rows = get_store().list_traces(
+            project_id=pid, session_id=session_id, limit=lim + 1
+        )
+        truncated = len(rows) > lim
+        traces = [
+            t
+            for r in rows[:lim]
+            if (t := get_store().get_trace(r["trace_id"], project_id=pid))
+            is not None
+        ]
+        graph = build_session_graph(session_id, pid, traces)
+        out = graph.model_dump(mode="json")
+        out["stats"]["truncated"] = truncated
+        return out
+
+    @app.get(f"/{API_VERSION}/traces/{{trace_id}}/cost", dependencies=read_deps)
+    async def trace_cost_report(
+        trace_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        from forge_lens.intel import detect_waste, trace_cost
+
+        trace = _get_trace_or_404(trace_id, project_id)
+        registry = _registry()
+        report = trace_cost(trace, registry)
+        out = report.model_dump(mode="json")
+        out["pricing_source"] = registry.source
+        out["waste"] = [
+            w.model_dump(mode="json") for w in detect_waste(trace, registry)
+        ]
+        return out
+
+    @app.get(f"/{API_VERSION}/analytics/pricing", dependencies=read_deps)
+    async def pricing_table() -> dict[str, Any]:
+        registry = _registry()
+        return {"source": registry.source, "models": registry.models()}
+
     # -- ops ------------------------------------------------------------
 
-    @app.get(f"/{API_VERSION}/health")
+    @app.get(f"/{API_VERSION}/health", dependencies=read_deps)
     async def health() -> dict[str, Any]:
         return {
             "status": "ok",
@@ -253,7 +358,7 @@ def create_app(
             "stats": get_store().stats(),
         }
 
-    @app.get(f"/{API_VERSION}/metrics")
+    @app.get(f"/{API_VERSION}/metrics", dependencies=read_deps)
     async def metrics() -> dict[str, Any]:
         return METRICS.snapshot()
 

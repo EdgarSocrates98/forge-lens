@@ -444,3 +444,112 @@ def test_negative_offset_clamped_to_zero(
     body = r.json()
     assert body["offset"] == 0
     assert len(body["items"]) == 1
+
+
+# -- Cycle 03/04 endpoints ---------------------------------------------------
+
+
+def test_trace_graph_endpoint(client: TestClient, synthetic_trace: Trace) -> None:
+    client.post("/v1/traces", json=TraceIngest(traces=[synthetic_trace]).model_dump(mode="json"))
+    r = client.get(f"/v1/graph/traces/{synthetic_trace.trace_id}")
+    assert r.status_code == 200, r.text
+    g = r.json()
+    assert g["stats"]["span_count"] == 3
+    assert g["root_id"] == "1" * 16
+    assert any(e["kind"] == "parent" for e in g["edges"])
+    assert any(e["kind"] == "sequence" for e in g["edges"])
+
+
+def test_critical_path_and_bottlenecks(client: TestClient, synthetic_trace: Trace) -> None:
+    client.post("/v1/traces", json=TraceIngest(traces=[synthetic_trace]).model_dump(mode="json"))
+    r = client.get(f"/v1/graph/traces/{synthetic_trace.trace_id}/critical-path")
+    assert r.status_code == 200
+    assert r.json()["path"][0] == "1" * 16
+    r = client.get(f"/v1/graph/traces/{synthetic_trace.trace_id}/bottlenecks")
+    assert r.status_code == 200
+    assert r.json()["items"]
+
+
+def test_cost_endpoint_priced_and_waste(tmp_path, synthetic_trace: Trace) -> None:
+    """pricing_file override flows through the app; waste[] ships in the report."""
+    import json as _json
+
+    pricing = tmp_path / "prices.json"
+    pricing.write_text(_json.dumps({
+        "gpt-test": {"input_per_mtok": 2.5, "output_per_mtok": 10.0}
+    }))
+    store = SQLiteTraceStore(tmp_path / "api.db")
+    cfg = LensConfig(
+        data_dir=tmp_path, db_path=tmp_path / "api.db", pricing_file=pricing
+    )
+    app = create_app(store=store, config=cfg)
+    with TestClient(app) as c:
+        c.post("/v1/traces", json=TraceIngest(traces=[synthetic_trace]).model_dump(mode="json"))
+        r = c.get(f"/v1/traces/{synthetic_trace.trace_id}/cost")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["pricing_source"].startswith("file:")
+        # 100x2.5 + 42x10.0 per MTok
+        assert body["total_estimated_usd"] == round((100 * 2.5 + 42 * 10.0) / 1e6, 8)
+        assert "waste" in body
+        r = c.get("/v1/analytics/pricing")
+        assert r.status_code == 200
+        assert "gpt-test" in r.json()["models"]
+    store.close()
+
+
+def test_session_graph_endpoint(client: TestClient, synthetic_trace: Trace) -> None:
+    t2 = synthetic_trace.model_copy(deep=True)
+    t2.trace_id = "c" * 32
+    t2.session_id = "sess-1"
+    for s in t2.spans:
+        s.trace_id = "c" * 32
+    t1 = synthetic_trace.model_copy(update={"session_id": "sess-1"})
+    client.post("/v1/traces", json=TraceIngest(traces=[t1, t2]).model_dump(mode="json"))
+    r = client.get("/v1/graph/sessions/sess-1")
+    assert r.status_code == 200, r.text
+    g = r.json()
+    assert g["stats"]["trace_count"] == 2
+    assert g["edges"][0]["kind"] == "sequence"
+    assert g["stats"]["truncated"] is False
+
+
+# -- round-9 regressions ------------------------------------------------------
+
+
+def test_otlp_response_includes_sanitize(client: TestClient, otlp_payload: dict) -> None:
+    """OTLP ingest returns the same sanitize summary as the native route."""
+    r = client.post("/v1/otlp/traces", json=otlp_payload)
+    assert r.status_code == 200
+    assert "sanitize" in r.json()
+
+
+def test_auth_reads_gates_get_endpoints(tmp_path) -> None:
+    """auth_reads=true + api_key: reads require the key; default stays open."""
+    store = SQLiteTraceStore(tmp_path / "api.db")
+    cfg = LensConfig(
+        data_dir=tmp_path,
+        db_path=tmp_path / "api.db",
+        api_key="secret",
+        auth_reads=True,
+    )
+    app = create_app(store=store, config=cfg)
+    with TestClient(app) as c:
+        assert c.get("/v1/traces").status_code == 401
+        assert c.get("/v1/health").status_code == 401
+        assert c.get("/v1/metrics").status_code == 401
+        assert c.get("/v1/traces", headers={"X-Forge-Lens-Key": "secret"}).status_code == 200
+        # ingest still guarded as before
+        assert c.post("/v1/traces", json={}).status_code == 401
+    store.close()
+
+
+def test_auth_reads_off_keeps_reads_open(tmp_path) -> None:
+    """auth_reads=false (default): GETs stay open even with api_key set."""
+    store = SQLiteTraceStore(tmp_path / "api.db")
+    cfg = LensConfig(data_dir=tmp_path, db_path=tmp_path / "api.db", api_key="secret")
+    app = create_app(store=store, config=cfg)
+    with TestClient(app) as c:
+        assert c.get("/v1/traces").status_code == 200
+        assert c.get("/v1/health").status_code == 200
+    store.close()

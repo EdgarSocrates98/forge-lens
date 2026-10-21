@@ -33,6 +33,19 @@ Lista traces mais recentes com status, span_count e error_count.
 Árvore de spans indentada: duração, `!` em erro, `~ flag:` de integridade,
 `~ tokens:` de uso. `--json` emite o contrato completo.
 
+## `forge-lens graph <trace_id> [--db] [--project] [--json]`
+
+Grafo de execução (Cycle 03): stats de nós/arestas/profundidade,
+critical path (cadeia que domina o wall-clock) e top self-time.
+`--json` emite o `ExecutionGraph` completo.
+
+## `forge-lens cost <trace_id> [--db] [--project] [--json]`
+
+Relatório de custo derivado (Cycle 04): tokens totais, breakdown por
+modelo, `estimated` em USD, modelos sem preço e findings de desperdício
+(`retry_amplification`, `context_replay`, `duplicate_delivery`,
+`unknown_tokens`, `unpriced_model`). `--json` inclui `waste[]`.
+
 ## `forge-lens doctor [path] [--db]`
 
 Verifica Python ≥3.11, diretório de dados, store legível (schema_version,
@@ -42,12 +55,14 @@ contagens), extras de servidor e import do SDK. Exit 0/1.
 
 Ordem: argumento > env (`FORGE_LENS_*`) > `.forge-lens/config.toml` > default.
 Chaves: `project_id`, `db_path`, `capture` (`metadata|full`), `api_key`,
-`endpoint`, `max_payload_bytes`, `max_traces_per_request`,
-`max_spans_per_request`, `max_events_per_span`, `max_attr_value_chars`,
-`rate_limit_per_minute`. Env: `FORGE_LENS_PROJECT`, `_DB`, `_CAPTURE`,
-`_API_KEY`, `_ENDPOINT`, `_MAX_PAYLOAD_BYTES`, `_MAX_TRACES_PER_REQUEST`,
-`_MAX_SPANS_PER_REQUEST`, `_MAX_EVENTS_PER_SPAN`, `_MAX_ATTR_VALUE_CHARS`,
-`_RATE_LIMIT_PER_MINUTE` — valor malformado → `invalid env FORGE_LENS_*=…`.
+`auth_reads` (bool — exige a chave também nos GETs), `endpoint`,
+`pricing_file` (JSON de preços para `cost`/API), `max_payload_bytes`,
+`max_traces_per_request`, `max_spans_per_request`, `max_events_per_span`,
+`max_attr_value_chars`, `rate_limit_per_minute`. Env: `FORGE_LENS_PROJECT`,
+`_DB`, `_CAPTURE`, `_API_KEY`, `_AUTH_READS`, `_ENDPOINT`, `_PRICING_FILE`,
+`_MAX_PAYLOAD_BYTES`, `_MAX_TRACES_PER_REQUEST`, `_MAX_SPANS_PER_REQUEST`,
+`_MAX_EVENTS_PER_SPAN`, `_MAX_ATTR_VALUE_CHARS`, `_RATE_LIMIT_PER_MINUTE` —
+valor malformado → `invalid env FORGE_LENS_*=…`.
 
 `serve` deriva o bind de `endpoint` (host+port) quando `--host`/`--port`
 não são passados — `endpoint` é a config que diz onde esta instância
