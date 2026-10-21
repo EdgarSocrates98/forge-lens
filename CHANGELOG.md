@@ -25,6 +25,16 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
   `latency_budget` aceita `max_duration_ms` (`budget_ms` segue como alias).
 - Studio: barra de filtros completa no Trace Explorer (deep-linkável,
   saved views) e nova view `/sessions`.
+- SDK Python read-side: `forge_lens.sdk.query.LensClient` (+ `QueryError`)
+  — cliente fino cobrindo toda a superfície de leitura `/v1`
+  (`traces`/`sessions`/`tools`, `graph/*`, `cost`, `failure`, `replay`,
+  `incident`, `security`, `eval`, `efficiency`, `recommendations`,
+  `loops`, datasets + versions, e os POSTs de consulta `eval/run`,
+  `eval/compare`, `intel/efficiency`, `intel/regress`, `analyze/*`,
+  `alerts/evaluate`, além de `health`/`metrics`/`capabilities`/
+  `pricing`/`ops_summary`/`specialists`). stdlib `urllib` como o
+  `HTTPExporter`; `QueryError` único com `status_code`; `from_config()`
+  resolve `FORGE_LENS_*` + `.forge-lens/config.toml` como a CLI.
 - Docs: `guides/operations-runbook.md`, `guides/troubleshooting.md`;
   referências `cli.md`/`mcp.md` e `security/retention.md` sincronizadas
   com o código.

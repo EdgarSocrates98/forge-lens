@@ -23,8 +23,8 @@ forge-lens doctor               # install health check
   to `observed` silently. `Confidence UNKNOWN` requires explicit unknowns.
 - **Deterministic core**: no wall-clock reads, no LLM calls and no network
   imports inside `core/`, `contracts/`, `otlp/`, `sanitize/`, `storage/`,
-  `ingest/` — network I/O lives only in `api/` (boundary) and `sdk/exporter`.
-  Sort all emitted collections.
+  `ingest/` — network I/O lives only in `api/` (boundary) and the `sdk/`
+  HTTP modules (`exporter`, `query`). Sort all emitted collections.
   - *Documented exception*: `time.perf_counter`/`time.monotonic` appear in
     `core/metrics.py` (self-observability durations — never part of stored
     evidence) and as the *injectable default* clock for `RateLimiter`/

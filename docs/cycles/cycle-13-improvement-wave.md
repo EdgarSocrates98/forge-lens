@@ -75,6 +75,18 @@ binary=True)` — elegíveis ao z-test de `eval/compare`. Trace sem
 - Studio `/datasets`: list/search, create dataset, create version com
   cases (input/expected JSON), e painel "compare cohorts" que posta o
   body real de `/v1/eval/compare` e renderiza deltas + gate verdict.
+- SDK Python read-side (`src/forge_lens/sdk/query.py`): `LensClient` +
+  `QueryError` cobrem todas as rotas GET de leitura (`traces` com todos
+  os filtros, `sessions`, `tools`, `graph/*`, `cost`/`failure`/`replay`/
+  `incident`/`security`/`eval`/`efficiency`/`recommendations`/`loops`,
+  datasets + versions, meta) **e** os POSTs de consulta sob `read_deps`
+  (`eval/run`, `eval/compare`, `intel/efficiency`, `intel/regress`,
+  `analyze/*`, `alerts/evaluate`). urllib-only como `HTTPExporter`;
+  `from_config()` usa a mesma cadeia env/TOML; `X-Forge-Lens-Key` quando
+  `api_key` definida (role `reader` basta). `GET /v1/traces/{id}/stream`
+  (SSE) fica fora de propósito — não é recurso JSON. Testes em
+  `tests/unit/test_query_client.py` (22): uvicorn real em loopback
+  (mesmo padrão do e2e) + `urlopen` fakeado para shapes/erros.
 
 ## Residuals — DOCUMENTED_ONLY
 
