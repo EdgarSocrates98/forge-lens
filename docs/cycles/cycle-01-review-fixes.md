@@ -924,7 +924,7 @@ lookalikes camelCase/cardano/awaken/monkeys; `_children` instant-order;
 - **`/v1/eval/run|compare` 500 → 400**: `json.loads(bytes)` levanta
   `UnicodeDecodeError` em UTF-8 inválido — classe distinta de
   `JSONDecodeError`. `_eval_body` agora captura ambos (a ingestão OTLP
-  já usava `except Exception` → 400). 4 payloads × 2 endpoints pinados
+  já usava `except Exception` → 400). 2 payloads × 2 endpoints pinados
   com `== 400` explícito.
 - **`_attrs` não descarta mais silenciosamente**: itens top-level que
   não são `{"key": str, ...}` contam em `_otlp.dropped_attributes` —
@@ -970,3 +970,43 @@ lookalikes camelCase/cardano/awaken/monkeys; `_children` instant-order;
 Testes: deep-nesting → `== 400` nos dois endpoints; dataset inválido →
 422 antes do lookup; denylist com os novos padrões + lookalikes; TS com
 NaN/Infinity/"garbage" → throw e coerção `"5"`/`1.9`.
+
+## Round 24 — denylist completeness + ordenação total (revisão e37668f)
+
+- **cvv/cvc + social com separador opcional** (simetria com os irmãos):
+  `cvvNumber`, `cvvCode`, `cvcNo`, `cvvValue`, `cvcHash`,
+  `socialSecurityNumber`, `socialSecurityNo` redigem; `cvv_count` segue
+  limpo. Sufixos cvv ganharam `value|hash` também.
+- **otp ganha prefixos + nomes canônicos**: `(card|user|login|bank|
+  account|device|my|t|h)?[-_.]?otp` — `totp`/`hotp` (RFC 6238/4226,
+  campo real de MFA), `loginOtp`, `myOtp`, `deviceOtp` redigem; `stop`,
+  `worktop`, `terrapin`, `stotp` limpos pela âncora.
+- **plural tokens espelha os namespaces `*key`**: `client|master|
+  signing|ssh|hmac|encryption|private|secret` entram na enumeração —
+  `privateTokens`/`clientTokens`/`secretTokens` redigem; `xprivateTokens`,
+  `invalidClientTokens` limpos.
+- **família `*_code` enumerada**: `auth|mfa|pass|verification|recovery|
+  backup|activation|access|login|confirm(ation)?|reset|one[-_.]?time` +
+  `[-_.]?codes?$` — `auth_code`/`authCode`/`mfa_code`/`passcode`/
+  `verification_code`/`recovery_code`/`backup_code`/`activation_code`/
+  `access_code`/`login_code`/`reset_code`/`one_time_code` redigem;
+  `error_code`, `status_code`, `exit_code`, `discount_code`,
+  `promoCode`, `barcode`, `unicode`, `zip_code`, `postal_code`,
+  `country_code`, `currency_code`, `morse_code`, `qr_code`,
+  `bypass_code`, `compass.code` limpos — a enumeração é o que os poupa.
+- **`*_phrase` + `mnemonic` + `wallet_key`**: `seed_phrase`,
+  `recovery_phrase`, `seedphrase`, `mnemonic(_phrase)?`, `wallet_key`
+  redigem; `catchphrase`, `paraphrase`, `mnemonicDevices`, `xwallet.key`
+  limpos.
+- **`list_traces` ordem total**: `ORDER BY started_ns DESC, project_id,
+  trace_id` — PK é `(project_id, trace_id)`; queries sem filtro
+  (quickstart) não empatam mais entre projetos.
+- **compare nomeia o lado nos erros**: `_eval_trace_ids`/`_eval_project_id`/
+  `_eval_dataset` recebem `field=` prefixado — `b.dataset`,
+  `a.trace_ids` nos detalhes 422. `_eval_body`→`dict[str, Any]`,
+  `_side_params`→tuple anotado.
+- **TS `maxTraces`**: `null`/`""`/espaço → `TypeError` (paridade com
+  `int(None)`/`int("")`); `Number(null)===0` não zera mais em silêncio.
+- **`_children`**: `ensure_aware` removido — `to_unix_nano` já coage
+  naive-as-UTC.
+- **nit round-22**: "4 payloads" → 2 payloads × 2 endpoints.

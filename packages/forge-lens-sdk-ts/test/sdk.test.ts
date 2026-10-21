@@ -414,6 +414,16 @@ describe("InMemoryExporter bound validation", () => {
       () => new InMemoryExporter("garbage" as unknown as number),
       TypeError,
     );
+    // Number(null)===0 / Number("")==0 — like int(None)/int(""), these
+    // must throw, not silently build a zero-capacity exporter
+    assert.throws(
+      () => new InMemoryExporter(null as unknown as number),
+      TypeError,
+    );
+    assert.throws(
+      () => new InMemoryExporter("" as unknown as number),
+      TypeError,
+    );
   });
 
   it("coerces numeric input like Python int()", () => {

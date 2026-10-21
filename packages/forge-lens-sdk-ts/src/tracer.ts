@@ -28,12 +28,17 @@ export class InMemoryExporter implements Exporter {
   tracesDropped = 0;
   constructor(readonly maxTraces = 1000) {
     // coerce like Python int() ("5" → 5), then fail fast on garbage:
-    // a non-finite bound must not silently zero the capacity
-    const n = Number(maxTraces);
-    if (!Number.isFinite(n)) {
+    // null/""/non-finite must not silently zero the capacity
+    // (Number(null)===0 — checked before coercion, like int(None))
+    if (
+      maxTraces == null ||
+      (typeof (maxTraces as unknown) === "string" &&
+        (maxTraces as unknown as string).trim() === "") ||
+      !Number.isFinite(Number(maxTraces))
+    ) {
       throw new TypeError(`maxTraces must be finite, got ${maxTraces}`);
     }
-    this.maxTraces = Math.max(0, Math.trunc(n));
+    this.maxTraces = Math.max(0, Math.trunc(Number(maxTraces)));
   }
   export(
     traces: Trace[],

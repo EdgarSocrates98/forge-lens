@@ -458,19 +458,19 @@ def create_app(
             )
         return specs
 
-    def _eval_project_id(body: dict[str, Any]) -> str | None:
+    def _eval_project_id(body: dict[str, Any], field: str = "project_id") -> str | None:
         pid = body.get("project_id")
         if pid is None:
             return None
-        return _eval_str(pid, "project_id")
+        return _eval_str(pid, field)
 
-    def _eval_dataset(body: dict[str, Any]) -> str | None:
+    def _eval_dataset(body: dict[str, Any], field: str = "dataset") -> str | None:
         ds = body.get("dataset")
         if ds is None:
             return None
-        return _eval_str(ds, "dataset")
+        return _eval_str(ds, field)
 
-    def _eval_trace_ids(body: dict[str, Any]) -> list[str]:
+    def _eval_trace_ids(body: dict[str, Any], field: str = "trace_ids") -> list[str]:
         """Shape validation only — no store access."""
         trace_ids = body.get("trace_ids")
         if (
@@ -479,16 +479,16 @@ def create_app(
             or len(trace_ids) > _MAX_EVAL_TRACES
         ):
             raise _reject_request(
-                422, f"trace_ids: 1..{_MAX_EVAL_TRACES} strings required"
+                422, f"{field}: 1..{_MAX_EVAL_TRACES} strings required"
             )
-        return [_eval_str(t, "trace_ids[]") for t in trace_ids]
+        return [_eval_str(t, f"{field}[]") for t in trace_ids]
 
     def _eval_traces(body: dict[str, Any]) -> list[Any]:
         ids = _eval_trace_ids(body)
         pid = _eval_project_id(body)
         return [_get_trace_or_404(tid, pid) for tid in ids]
 
-    async def _eval_body(request: Request) -> Any:
+    async def _eval_body(request: Request) -> dict[str, Any]:
         _check_declared_size(request, cfg.max_payload_bytes, _reject_request)
         try:
             body = json.loads(
@@ -531,19 +531,19 @@ def create_app(
         body = await _eval_body(request)
         specs = _eval_specs(body)
 
-        def _side_params(key: str) -> Any:
+        def _side_params(key: str) -> tuple[list[str], str | None, str | None]:
             """Shape validation only — runs for BOTH sides before any
             store fan-out, so a malformed `b` is a 422 about `b`, never
-            masked by a's lookups."""
+            masked by a's lookups. Errors name their side."""
             side = body.get(key)
             if not isinstance(side, dict):
                 raise _reject_request(422, f"{key}: object required")
             side_ids = dict(side)
             side_ids.setdefault("project_id", _eval_project_id(body))
             return (
-                _eval_trace_ids(side_ids),
-                _eval_project_id(side_ids),
-                _eval_dataset(side),
+                _eval_trace_ids(side_ids, f"{key}.trace_ids"),
+                _eval_project_id(side_ids, f"{key}.project_id"),
+                _eval_dataset(side, f"{key}.dataset"),
             )
 
         a_ids, a_pid, a_dataset = _side_params("a")

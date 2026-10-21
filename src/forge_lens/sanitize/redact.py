@@ -41,30 +41,42 @@ SENSITIVE_KEY_RE = re.compile(
     # partition_key, primary_key, sort_key, hash_key, cache_key,
     # idempotency_key…). Only key names that are credential-shaped.
     r"(^|[-_.])(signing|ssh|session|hmac|encryption|decryption|master|"
-    r"license|auth|client|pgp|gpg|tls|ssl|aws|kms|"
+    r"license|auth|client|pgp|gpg|tls|ssl|aws|kms|wallet|"
     r"service[-_.]?account)[-_.]?keys?$|"
-    # pin/otp: bare or with an explicit credential suffix, separator
-    # optional — `pinCode`/`otpCode`/`cardPin` are camelCase credentials.
-    # `pin_count`/`otp_attempts`/`login.pin_retries` are counters (their
-    # suffix isn't in the credential list). Accepted collision:
+    # pin: bare or credential-prefixed, separators optional —
+    # `pinCode`/`cardPin` are camelCase credentials.
+    # `pin_count`/`login.pin_retries` are counters. Accepted collision:
     # `pincode` (postal code) redacts — the credential-safe direction.
     r"(^|[-_.])(card|user|login|bank|account)?[-_.]?pin"
     r"([-_.]?(code|number|value|hash|secret))?$|"
-    r"(^|[-_.])otp([-_.]?(code|number|value|hash|secret))?$|"
-    # cvv/cvc: bare, digit-suffixed, or named — `cvv_count` is a counter
-    r"(^|[-_.])(cvv|cvc)([0-9]*|[-_.](code|number|num|no)s?)$|"
+    # otp with the same prefix set plus the canonical RFC 6238/4226
+    # names (t|h): `totp`, `hotp`, `loginOtp`, `device.otp` redact;
+    # `stop`/`worktop`/`otp_count` stay clear via the anchor
+    r"(^|[-_.])(card|user|login|bank|account|device|my|t|h)?[-_.]?otp"
+    r"([-_.]?(code|number|value|hash|secret))?$|"
+    # cvv/cvc: bare, digits, or named — optional separator like every
+    # sibling branch (`cvvNumber`); `cvv_count` is a counter
+    r"(^|[-_.])(cvv|cvc)([0-9]*|[-_.]?(code|number|num|no|value|hash)s?)$|"
     # both sides anchored — `discard_number`, `wildcard.number`,
     # `card_number_count`, `security_code_review` stay clear
     r"(^|[-_.])card[-_.]?(number|num|no)s?$|"
     r"(^|[-_.])security[-_.]?code$|"
-    r"(^|[-_.])social[-_.]?security([-_.](number|num|no)s?)?$|"
-    # plural token sets — every alternative left-anchored so
-    # `valid_tokens`, `invalid_tokens`, `paid_tokens`, `xaccess_tokens`,
-    # `rapidTokens`, `capitalTokens`, `xauthTokens` (metric counters /
-    # substring lookalikes) stay clear; `[-_.]?` covers camelCase
-    # accessTokens/sessionTokens too; bare `tokens$` must NOT match
-    # (see comment above)
-    r"(^|[-_.])(access|refresh|id|session|auth|api|bearer|csrf|jwt|oauth)"
+    r"(^|[-_.])social[-_.]?security([-_.]?(number|num|no)s?)?$|"
+    # auth/verification-code family — enumerated so `discount_code`,
+    # `error_code`, `status_code`, `zip_code`, `barcode`, `unicode`,
+    # `promoCode`, `morse_code`, `qr_code` stay clear
+    r"(^|[-_.])(auth|mfa|pass|verification|recovery|backup|activation|"
+    r"access|login|confirm(ation)?|reset|one[-_.]?time)[-_.]?codes?$|"
+    # crypto seed/recovery/mnemonic phrases + bare `mnemonic`
+    r"(^|[-_.])(seed|recovery|backup|mnemonic|pass|secret)[-_.]?phrases?$|"
+    r"(^|[-_.])mnemonics?$|"
+    # plural token sets — mirrors the credential namespaces of the `*key`
+    # family plus the flow names; every alternative left-anchored so
+    # `valid_tokens`, `paid_tokens`, `rapidTokens`, `capitalTokens`,
+    # `xauthTokens`, `invalidSessionTokens` (metric counters / lookalikes)
+    # stay clear; bare `tokens$` must NOT match (see comment above)
+    r"(^|[-_.])(access|refresh|id|session|auth|api|bearer|csrf|jwt|oauth|"
+    r"client|master|signing|ssh|hmac|encryption|private|secret)"
     r"[-_.]?tokens$)"
 )
 

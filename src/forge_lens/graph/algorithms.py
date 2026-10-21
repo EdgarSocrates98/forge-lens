@@ -5,7 +5,7 @@ All functions are pure — they take the built graph, return evidence.
 
 from __future__ import annotations
 
-from forge_lens.core.time import ensure_aware, to_unix_nano
+from forge_lens.core.time import to_unix_nano
 from forge_lens.graph.models import EdgeKind, ExecutionGraph
 
 WHITE, GRAY, BLACK = 0, 1, 2
@@ -26,7 +26,7 @@ def _children(graph: ExecutionGraph) -> dict[str, list[str]]:
             key=lambda i: (
                 i not in node_order,
                 (
-                    to_unix_nano(ensure_aware(t))
+                    to_unix_nano(t)  # coerces naive-as-UTC itself
                     if (t := node_order.get(i)) is not None
                     else 0
                 ),

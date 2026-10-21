@@ -283,18 +283,35 @@ def test_sensitive_key_denylist_covers_credential_families() -> None:
         "pinCode", "pinNumber", "pinHash", "cardPin", "user.pinCode",
         "otp", "login_otp", "otp.code", "otp_code", "otp.secret",
         "otp_number", "otp.number", "otpCode", "otpValue",
+        # canonical RFC 6238/4226 field names + prefixed forms
+        "totp", "hotp", "totp_code", "loginOtp", "myOtp", "deviceOtp",
         "cvv", "cvv2", "card_cvc", "payment.cvc", "cvc3",
         "cvv22", "cvc123", "cvv_code", "cvc_number",
+        "cvvNumber", "cvvCode", "cvcNo", "cvvValue", "cvcHash",
         "card_number", "cardNumber", "card.num", "card_numbers",
         "card_no",
         "security_code", "security.code",
         "social_security_number", "social_security",
+        "socialSecurityNumber", "socialSecurityNo",
         "aws_key", "aws_keys", "kms_key", "signing_keys",
+        "wallet_key", "wallet.keys",
+        # auth/verification code family
+        "auth_code", "authCode", "mfa_code", "passcode", "pass_code",
+        "verification_code", "recovery_code", "backup_code",
+        "activation_code", "access_code", "login_code",
+        "confirm_code", "confirmation_code", "reset_code",
+        "one_time_code",
+        # seed/recovery phrases + bare mnemonic
+        "seed_phrase", "seedphrase", "recovery_phrase",
+        "mnemonic_phrase", "mnemonic", "mnemonics",
         "access_tokens", "refresh.tokens", "id_tokens",
         "accessTokens", "refreshTokens", "idTokens",
         "session_tokens", "sessionTokens", "auth_tokens", "authTokens",
         "api_tokens", "apiTokens", "bearer_tokens", "bearerTokens",
         "csrf_tokens", "jwt.tokens", "oauth_tokens", "oauthTokens",
+        # plural token sets mirror the *key credential namespaces
+        "privateTokens", "clientTokens", "masterTokens", "signingTokens",
+        "ssh_tokens", "hmacTokens", "encryption_tokens", "secretTokens",
     ]
     for key in sensitive:
         assert _is_sensitive_key(key), f"{key!r} must redact"
@@ -316,6 +333,19 @@ def test_sensitive_key_denylist_false_positives_stay_clear() -> None:
         "rapidTokens", "capitalTokens", "xauthTokens",
         "invalidSessionTokens", "validSessionTokens",
         "authenticTokens", "xjwt_tokens", "oauth_tokens_count",
+        "xprivateTokens", "invalidClientTokens",
+        # non-credential `*_code` telemetry/domains — the enumeration
+        # exists precisely to spare these
+        "error_code", "status_code", "http.status_code", "exit_code",
+        "response_code", "discount_code", "discountCode", "promoCode",
+        "promo_code", "barcode", "unicode", "zip_code", "postal_code",
+        "country_code", "currency_code", "area_code", "morse_code",
+        "qr_code", "product_code", "region_code", "bypass_code",
+        "compass.code",
+        # phrase-family lookalikes
+        "catchphrase", "paraphrase", "mnemonicDevices",
+        # otp stop-words + embedded-substring lookalikes
+        "terrapin", "coupon", "myotic", "stotp", "xwallet.key",
         # legitimate telemetry `*key` names — OTel semconv included
         "messaging.kafka.message.key",
         "messaging.rabbitmq.message.routing_key",

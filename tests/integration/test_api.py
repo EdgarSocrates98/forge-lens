@@ -852,3 +852,15 @@ def test_eval_run_validates_dataset_before_trace_lookup(
     )
     assert r.status_code == 422
     assert "dataset" in r.json()["detail"]
+
+    # compare errors name their side — "b.dataset", not a bare field
+    r = client.post(
+        "/v1/eval/compare",
+        json={
+            "a": {"trace_ids": ["f" * 32]},
+            "b": {"trace_ids": ["f" * 32], "dataset": 5},
+            "evaluators": [{"name": "error_free"}],
+        },
+    )
+    assert r.status_code == 422
+    assert "b.dataset" in r.json()["detail"]

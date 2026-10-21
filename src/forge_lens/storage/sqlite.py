@@ -750,7 +750,8 @@ class SQLiteTraceStore:
                 f"""SELECT trace_id, project_id, session_id, root_span_id,
                            started_ns, ended_ns, status_code, span_count, error_count
                     FROM traces {where}
-                    ORDER BY started_ns DESC, trace_id LIMIT ? OFFSET ?""",
+                    ORDER BY started_ns DESC, project_id, trace_id
+                    LIMIT ? OFFSET ?""",
                 (*params, max(0, limit), max(0, offset)),
             ).fetchall()
         return [
