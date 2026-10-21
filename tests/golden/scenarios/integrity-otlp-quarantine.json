@@ -1,0 +1,48 @@
+{
+  "scenario_id": "integrity-otlp-quarantine",
+  "title": "A malformed OTLP span is quarantined — the good span still lands",
+  "category": "integrity",
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/otlp/traces",
+        "json": {
+          "resourceSpans": [
+            {
+              "scopeSpans": [
+                {
+                  "spans": [
+                    {
+                      "traceId": "babababababababababababababababa",
+                      "spanId": "aaaaaaaaaaaaaaaa",
+                      "name": "good",
+                      "startTimeUnixNano": "1767264000000000000",
+                      "endTimeUnixNano": "1767264000100000000",
+                      "status": {"code": 1}
+                    },
+                    {
+                      "traceId": "babababababababababababababababa",
+                      "spanId": "ffffffffffffffff",
+                      "name": "broken",
+                      "startTimeUnixNano": "notnano"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {"accepted_spans": 1, "traces": ["babababababababababababababababa"]},
+    "json_contains": {"warnings": ["quarantined", "notnano"]},
+    "store": {"trace_count": 1, "span_count": 1}
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "Quarantine is the OTLP endpoint contract: a span that cannot parse lands in warnings (bounded) while its siblings persist — the batch is never rejected for one bad member."
+}

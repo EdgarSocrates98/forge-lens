@@ -1,0 +1,70 @@
+{
+  "scenario_id": "integrity-orphan",
+  "title": "A parent stored under another trace earns orphan on top of missing_parent",
+  "category": "integrity",
+  "setup": {
+    "ingest_traces": [
+      {
+        "trace_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "root_span_id": "abababababababab",
+        "started_at": "2026-01-01T12:00:00Z",
+        "ended_at": "2026-01-01T12:00:00.100000Z",
+        "spans": [
+          {
+            "trace_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "span_id": "abababababababab",
+            "name": "foreign-parent",
+            "start_time": "2026-01-01T12:00:00Z",
+            "end_time": "2026-01-01T12:00:00.100000Z",
+            "status": {"code": "ok"}
+          }
+        ]
+      }
+    ]
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "traces": [
+            {
+              "trace_id": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+              "root_span_id": "cdcdcdcdcdcdcdcd",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.100000Z",
+              "spans": [
+                {
+                  "trace_id": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+                  "span_id": "cdcdcdcdcdcdcdcd",
+                  "parent_span_id": "abababababababab",
+                  "name": "adopted",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {"accepted_spans": 1},
+    "json_contains": {"warnings": ["parent belongs to trace a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"]},
+    "store": {
+      "span_flags": {
+        "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/cdcdcdcdcdcdcdcd": [
+          "missing_parent",
+          "orphan"
+        ]
+      }
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "ORPHAN is additive to MISSING_PARENT: the parent exists in the store but under a different trace_id, so it can never resolve inside this one (pipeline queries span_trace_id)."
+}

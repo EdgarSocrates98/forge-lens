@@ -1,0 +1,23 @@
+{
+  "scenario_id": "datasets-version-missing-dataset",
+  "title": "Writing a version under a nonexistent dataset is 404, not an implicit create",
+  "category": "datasets",
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "PUT",
+        "path": "/v1/datasets/ghost-ds/versions/v1",
+        "json": {
+          "cases": [{"case_id": "c1", "input": {}, "expected": {}}]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 404,
+    "body_contains": ["not found", "create it first"]
+  },
+  "forbidden": {"status_not": [200, 500]},
+  "notes": "A version can't exist under a dataset nobody declared — the error tells the caller to create the dataset first instead of silently materializing a shell."
+}

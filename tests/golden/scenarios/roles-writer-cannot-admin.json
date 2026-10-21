@@ -1,0 +1,33 @@
+{
+  "scenario_id": "roles-writer-cannot-admin",
+  "title": "A writer key cannot reach the admin surface — 403 'role admin required'",
+  "category": "roles",
+  "setup": {
+    "config": {"auth_mode": "keys"},
+    "api_keys": [
+      {
+        "key_id": "flk_writer1",
+        "name": "writer-bot",
+        "secret": "flk_test_writer_1",
+        "role": "writer",
+        "projects": []
+      }
+    ]
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/v1/admin/audit",
+        "headers": {"X-Forge-Lens-Key": "flk_test_writer_1"}
+      }
+    ]
+  },
+  "expected": {
+    "status": 403,
+    "body_contains": ["role 'admin' required"]
+  },
+  "forbidden": {"status_not": [200, 500]},
+  "notes": "Admin endpoints (keys/audit/prune/rules) require role_at_least('admin'). The denial itself is audited — the attempt is evidence, not silence."
+}

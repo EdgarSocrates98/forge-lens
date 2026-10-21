@@ -1,0 +1,47 @@
+{
+  "scenario_id": "integrity-envelope-sent-at",
+  "title": "An envelope sent_at predating the trace start warns about producer clock skew",
+  "category": "integrity",
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "sent_at": "2026-01-01T11:00:00Z",
+          "traces": [
+            {
+              "trace_id": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+              "root_span_id": "9090909090909090",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.100000Z",
+              "spans": [
+                {
+                  "trace_id": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+                  "span_id": "9090909090909090",
+                  "name": "op",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {"accepted_spans": 1},
+    "json_contains": {"warnings": ["sent_at predates trace start", "clock skew"]},
+    "store": {
+      "span_flag_absent": {
+        "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1/9090909090909090": ["clock_skew"]
+      }
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "Envelope-level skew is a warning, not a span flag — clock_skew is reserved for end<start inside a span (see integrity-clock-skew). The warning is emitted by the API layer after ingest."
+}

@@ -1,0 +1,85 @@
+{
+  "scenario_id": "eval-compare-gate-pass",
+  "title": "Gate passes when candidate meets min_pass_rate_b and no drop",
+  "category": "eval",
+  "setup": {
+    "store_traces": [
+      {
+        "trace_id": "ecececececececececececececececec",
+        "root_span_id": "1111111111111111",
+        "started_at": "2026-01-01T12:00:00Z",
+        "ended_at": "2026-01-01T12:00:00.500000Z",
+        "spans": [
+          {
+            "trace_id": "ecececececececececececececececec",
+            "span_id": "1111111111111111",
+            "name": "op-a",
+            "start_time": "2026-01-01T12:00:00Z",
+            "end_time": "2026-01-01T12:00:00.500000Z",
+            "status": {"code": "ok"}
+          }
+        ]
+      },
+      {
+        "trace_id": "edededededededededededededededed",
+        "root_span_id": "2222222222222222",
+        "started_at": "2026-01-01T12:00:00Z",
+        "ended_at": "2026-01-01T12:00:00.500000Z",
+        "spans": [
+          {
+            "trace_id": "edededededededededededededededed",
+            "span_id": "2222222222222222",
+            "name": "op-b",
+            "start_time": "2026-01-01T12:00:00Z",
+            "end_time": "2026-01-01T12:00:00.500000Z",
+            "status": {"code": "ok"}
+          }
+        ]
+      }
+    ]
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/eval/compare",
+        "json": {
+          "a": {"trace_ids": ["ecececececececececececececececec"]},
+          "b": {"trace_ids": ["edededededededededededededededed"]},
+          "evaluators": [{"name": "error_free"}],
+          "gate": {
+            "metrics": {
+              "error_free/no_error_spans": {
+                "min_pass_rate_b": 1.0,
+                "max_drop": 0.0
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {
+      "a": {"n": 1},
+      "b": {"n": 1},
+      "deltas": [
+        {
+          "evaluator": "error_free",
+          "metric": "no_error_spans",
+          "pass_rate_a": 1.0,
+          "pass_rate_b": 1.0,
+          "delta": 0.0,
+          "test": "two_proportion_z",
+          "significance": "insufficient_data",
+          "p_value": null
+        }
+      ],
+      "gate": {"gate_passed": true, "failures": []}
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "Both sides pass error_free — the gate has nothing to fail on. Honest statistics: with n=1 per side the z-test refuses to pretend ('insufficient_data', p_value null) even though the gate itself passes on observed rates."
+}

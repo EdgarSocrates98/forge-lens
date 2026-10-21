@@ -1,0 +1,50 @@
+{
+  "scenario_id": "ingest-envelope-project-fill",
+  "title": "A non-default envelope project_id fills traces that stayed 'default'",
+  "category": "ingest",
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "project_id": "tenant-g",
+          "traces": [
+            {
+              "trace_id": "cccccccccccccccccccccccccccccccc",
+              "root_span_id": "1212121212121212",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.100000Z",
+              "spans": [
+                {
+                  "trace_id": "cccccccccccccccccccccccccccccccc",
+                  "span_id": "1212121212121212",
+                  "name": "op",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {"accepted_spans": 1},
+    "store": {
+      "trace_count": 1,
+      "traces": {
+        "cccccccccccccccccccccccccccccccc": {
+          "project_id": "tenant-g",
+          "status": {"code": "ok"}
+        }
+      }
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "api/app.py: a trace whose own project_id stayed 'default' inherits the envelope project; an explicit per-trace project_id stays authoritative (see the mirrored scenario in test_api.py)."
+}

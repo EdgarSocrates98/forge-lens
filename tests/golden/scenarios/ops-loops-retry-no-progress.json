@@ -1,0 +1,94 @@
+{
+  "scenario_id": "ops-loops-retry-no-progress",
+  "title": "A same-name tool failing 3x yields retry_loop plus no_progress_signal",
+  "category": "ops",
+  "evidence_required": true,
+  "setup": {
+    "store_traces": [
+      {
+        "trace_id": "e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7",
+        "root_span_id": "1111111111111111",
+        "started_at": "2026-01-01T12:00:00Z",
+        "ended_at": "2026-01-01T12:00:03Z",
+        "spans": [
+          {
+            "trace_id": "e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7",
+            "span_id": "1111111111111111",
+            "name": "agent",
+            "kind": "agent",
+            "start_time": "2026-01-01T12:00:00Z",
+            "end_time": "2026-01-01T12:00:03Z",
+            "status": {"code": "error"}
+          },
+          {
+            "trace_id": "e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7",
+            "span_id": "2222222222222222",
+            "parent_span_id": "1111111111111111",
+            "name": "db_query",
+            "kind": "tool",
+            "start_time": "2026-01-01T12:00:00.100000Z",
+            "end_time": "2026-01-01T12:00:00.500000Z",
+            "attributes": {"tool.args": {"attempt": 1}},
+            "status": {"code": "error", "message": "deadline"}
+          },
+          {
+            "trace_id": "e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7",
+            "span_id": "3333333333333333",
+            "parent_span_id": "1111111111111111",
+            "name": "db_query",
+            "kind": "tool",
+            "start_time": "2026-01-01T12:00:01Z",
+            "end_time": "2026-01-01T12:00:01.500000Z",
+            "attributes": {"tool.args": {"attempt": 2}},
+            "status": {"code": "error", "message": "deadline"}
+          },
+          {
+            "trace_id": "e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7",
+            "span_id": "4444444444444444",
+            "parent_span_id": "1111111111111111",
+            "name": "db_query",
+            "kind": "tool",
+            "start_time": "2026-01-01T12:00:02Z",
+            "end_time": "2026-01-01T12:00:02.500000Z",
+            "attributes": {"tool.args": {"attempt": 3}},
+            "status": {"code": "error", "message": "deadline"}
+          }
+        ]
+      }
+    ]
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/v1/traces/e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7/loops"
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {
+      "classification": "heuristic",
+      "findings": [
+        {
+          "kind": "no_progress_signal",
+          "classification": "heuristic",
+          "count": 3
+        },
+        {
+          "kind": "retry_loop",
+          "classification": "heuristic",
+          "count": 3,
+          "span_ids": [
+            "2222222222222222",
+            "3333333333333333",
+            "4444444444444444"
+          ]
+        }
+      ]
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "Different args (the signature varies) but same name, all error → retry_loop. no_progress_signal co-fires because a finding exists AND errored tool spans exist — 'progress is unproven, not disproven'. Findings sort by kind."
+}

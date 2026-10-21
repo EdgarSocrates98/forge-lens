@@ -1,0 +1,65 @@
+{
+  "scenario_id": "ops-classify-cycle",
+  "title": "A parent-pointer cycle in stored topology classifies as cycle",
+  "category": "ops",
+  "evidence_required": true,
+  "setup": {
+    "store_traces": [
+      {
+        "trace_id": "e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9",
+        "root_span_id": "1111111111111111",
+        "started_at": "2026-01-01T12:00:00Z",
+        "ended_at": "2026-01-01T12:00:01Z",
+        "spans": [
+          {
+            "trace_id": "e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9",
+            "span_id": "1111111111111111",
+            "name": "root",
+            "start_time": "2026-01-01T12:00:00Z",
+            "end_time": "2026-01-01T12:00:01Z",
+            "status": {"code": "ok"}
+          },
+          {
+            "trace_id": "e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9",
+            "span_id": "aaaaaaaaaaaaaaaa",
+            "parent_span_id": "bbbbbbbbbbbbbbbb",
+            "name": "A",
+            "start_time": "2026-01-01T12:00:00.100000Z",
+            "end_time": "2026-01-01T12:00:00.500000Z",
+            "status": {"code": "ok"}
+          },
+          {
+            "trace_id": "e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9",
+            "span_id": "bbbbbbbbbbbbbbbb",
+            "parent_span_id": "aaaaaaaaaaaaaaaa",
+            "name": "B",
+            "start_time": "2026-01-01T12:00:00.200000Z",
+            "end_time": "2026-01-01T12:00:00.600000Z",
+            "status": {"code": "ok"}
+          }
+        ]
+      }
+    ]
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/v1/traces/e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9/failure"
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {
+      "failed": true,
+      "category": "cycle",
+      "evidence": {
+        "span_ids": ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"]
+      }
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "A↔B parentage is impossible topology — the declaration itself is the failure, no error span needed (failed=true on corrupted topology). Cycle members are sorted for determinism; both members are named as evidence."
+}

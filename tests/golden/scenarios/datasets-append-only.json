@@ -1,0 +1,56 @@
+{
+  "scenario_id": "datasets-append-only",
+  "title": "Dataset versions are append-only — a second write to the same version is 409",
+  "category": "datasets",
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "PUT",
+        "path": "/v1/datasets/ds-golden",
+        "json": {"name": "Golden DS", "task": "qa"}
+      },
+      {
+        "method": "PUT",
+        "path": "/v1/datasets/ds-golden/versions/v1",
+        "json": {
+          "cases": [
+            {
+              "case_id": "case-1",
+              "input": {"q": "2+2"},
+              "expected": {"a": "4"}
+            }
+          ]
+        }
+      },
+      {
+        "method": "PUT",
+        "path": "/v1/datasets/ds-golden/versions/v1",
+        "json": {
+          "cases": [
+            {
+              "case_id": "case-1",
+              "input": {"q": "mutated"},
+              "expected": {"a": "?"}
+            }
+          ]
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/v1/datasets/ds-golden/versions/v1"
+      }
+    ]
+  },
+  "expected": {
+    "statuses": [200, 200, 409, 200],
+    "responses": [
+      {"json": {"dataset_id": "ds-golden", "project_id": "default", "stored": true}},
+      {"json": {"dataset_id": "ds-golden", "version": "v1", "cases": 1}},
+      {"body_contains": ["append-only", "never mutated"]},
+      {"body_contains": ["case-1", "2+2"]}
+    ]
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "The 409 names the invariant ('versions are append-only, never mutated in place'); the follow-up GET proves the first version is untouched — it still returns the original case content ('2+2'), not the losing write's."
+}

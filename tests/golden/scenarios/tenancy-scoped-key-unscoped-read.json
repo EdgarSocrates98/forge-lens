@@ -1,0 +1,30 @@
+{
+  "scenario_id": "tenancy-scoped-key-unscoped-read",
+  "title": "A scoped key cannot issue a project-less (unscoped) list — 403",
+  "category": "tenancy",
+  "setup": {
+    "config": {"auth_mode": "keys"},
+    "api_keys": [
+      {
+        "key_id": "flk_scopeda",
+        "name": "scoped-reader",
+        "secret": "flk_test_scoped_a",
+        "role": "reader",
+        "projects": ["tenant-a"]
+      }
+    ]
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/v1/traces",
+        "headers": {"X-Forge-Lens-Key": "flk_test_scoped_a"}
+      }
+    ]
+  },
+  "expected": {"status": 403},
+  "forbidden": {"status_not": [200, 500]},
+  "notes": "An omitted project_id resolves to the configured default project — which is still outside the key's scope. A scoped key may never drift into an all-projects read via the omitted-param path (project_allowed requires an explicit, listed project)."
+}

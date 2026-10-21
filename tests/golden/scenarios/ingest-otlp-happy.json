@@ -1,0 +1,91 @@
+{
+  "scenario_id": "ingest-otlp-happy",
+  "title": "OTLP/HTTP JSON ingest normalizes, groups per trace and stores",
+  "category": "ingest",
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/otlp/traces",
+        "json": {
+          "resourceSpans": [
+            {
+              "resource": {
+                "attributes": [
+                  {"key": "service.name", "value": {"stringValue": "otlp-golden-svc"}},
+                  {"key": "telemetry.sdk.language", "value": {"stringValue": "python"}}
+                ]
+              },
+              "scopeSpans": [
+                {
+                  "scope": {"name": "golden-lib", "version": "0.0.1"},
+                  "spans": [
+                    {
+                      "traceId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                      "spanId": "dddddddddddddddd",
+                      "name": "root-op",
+                      "kind": 2,
+                      "startTimeUnixNano": "1767264000000000000",
+                      "endTimeUnixNano": "1767264000500000000",
+                      "attributes": [
+                        {"key": "openinference.span.kind", "value": {"stringValue": "AGENT"}}
+                      ],
+                      "status": {"code": 1}
+                    },
+                    {
+                      "traceId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                      "spanId": "eeeeeeeeeeeeeeee",
+                      "parentSpanId": "dddddddddddddddd",
+                      "name": "llm-call",
+                      "kind": 1,
+                      "startTimeUnixNano": "1767264000010000000",
+                      "endTimeUnixNano": "1767264000200000000",
+                      "attributes": [
+                        {"key": "openinference.span.kind", "value": {"stringValue": "LLM"}},
+                        {"key": "llm.token_count.prompt", "value": {"intValue": "512"}},
+                        {"key": "llm.token_count.completion", "value": {"intValue": 64}},
+                        {"key": "llm.model_name", "value": {"stringValue": "claude-test"}}
+                      ],
+                      "status": {"code": 1}
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {
+      "accepted_spans": 2,
+      "duplicate_spans": 0,
+      "traces": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
+    },
+    "store": {
+      "trace_count": 1,
+      "span_count": 2,
+      "traces": {
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+          "project_id": "default",
+          "root_span_id": "dddddddddddddddd",
+          "status": {"code": "ok"},
+          "provenance": "observed",
+          "session_id": null
+        }
+      },
+      "spans": {
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/dddddddddddddddd": {"kind": "agent"},
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/eeeeeeeeeeeeeeee": {
+          "kind": "llm",
+          "parent_span_id": "dddddddddddddddd"
+        }
+      }
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "Mirrors tests/fixtures/otlp-request.json at the API boundary: normalization derives root_span_id, envelope times and token usage; the stored kind comes from openinference.span.kind."
+}

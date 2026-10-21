@@ -1,0 +1,47 @@
+{
+  "scenario_id": "integrity-partial-trace",
+  "title": "An envelope with no ended_at marks the root span partial_trace",
+  "category": "integrity",
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "traces": [
+            {
+              "trace_id": "bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf",
+              "root_span_id": "7070707070707070",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": null,
+              "spans": [
+                {
+                  "trace_id": "bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf",
+                  "span_id": "7070707070707070",
+                  "name": "root",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {"accepted_spans": 1},
+    "json_contains": {"warnings": ["trace is partial"]},
+    "store": {
+      "traces": {"bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf": {"ended_at": null}},
+      "span_flags": {
+        "bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf/7070707070707070": ["partial_trace"]
+      }
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "The flag marks the *envelope* delivered incomplete, not a broken span — it lands on the root (root_span_id match or first parentless span)."
+}

@@ -1,0 +1,94 @@
+{
+  "scenario_id": "ingest-native-happy",
+  "title": "Native ingest stores a 3-span trace; status is derived from spans",
+  "category": "ingest",
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "project_id": "default",
+          "traces": [
+            {
+              "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "root_span_id": "1111111111111111",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.900000Z",
+              "status": {"code": "error"},
+              "source": {"system": "golden-corpus", "sdk_name": "forge-lens-sdk-python"},
+              "spans": [
+                {
+                  "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "span_id": "1111111111111111",
+                  "name": "agent.run",
+                  "kind": "agent",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.900000Z",
+                  "status": {"code": "ok"}
+                },
+                {
+                  "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "span_id": "2222222222222222",
+                  "parent_span_id": "1111111111111111",
+                  "name": "llm gpt-test",
+                  "kind": "llm",
+                  "start_time": "2026-01-01T12:00:00.050000Z",
+                  "end_time": "2026-01-01T12:00:00.400000Z",
+                  "attributes": {
+                    "llm.model_name": "gpt-test",
+                    "forge_lens.token_usage": {
+                      "provider": "openai",
+                      "model": "gpt-test",
+                      "input_tokens": 100,
+                      "output_tokens": 42,
+                      "total_tokens": 142,
+                      "measurement_source": "provider"
+                    }
+                  },
+                  "status": {"code": "ok"}
+                },
+                {
+                  "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "span_id": "3333333333333333",
+                  "parent_span_id": "1111111111111111",
+                  "name": "tool web_search",
+                  "kind": "tool",
+                  "start_time": "2026-01-01T12:00:00.420000Z",
+                  "end_time": "2026-01-01T12:00:00.800000Z",
+                  "attributes": {"tool.name": "web_search"},
+                  "status": {"code": "error", "message": "timeout"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {
+      "accepted_spans": 3,
+      "updated_spans": 0,
+      "duplicate_spans": 0,
+      "traces": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+    },
+    "store": {
+      "trace_count": 1,
+      "span_count": 3,
+      "traces": {
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+          "project_id": "default",
+          "session_id": null,
+          "root_span_id": "1111111111111111",
+          "status": {"code": "error"},
+          "provenance": "observed"
+        }
+      }
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "One errored tool span rolls the stored trace status up to 'error' (derived on write). Native spans land with provenance=observed."
+}

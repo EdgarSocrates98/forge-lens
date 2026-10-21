@@ -1,0 +1,81 @@
+{
+  "scenario_id": "eval-null-scores-honest",
+  "title": "Unobserved fields and unknown evaluators score null — counted, never zeroed",
+  "category": "eval",
+  "provenance": "derived",
+  "setup": {
+    "store_traces": [
+      {
+        "trace_id": "ebebebebebebebebebebebebebebebeb",
+        "root_span_id": "1111111111111111",
+        "started_at": "2026-01-01T12:00:00Z",
+        "ended_at": "2026-01-01T12:00:00.500000Z",
+        "spans": [
+          {
+            "trace_id": "ebebebebebebebebebebebebebebebeb",
+            "span_id": "1111111111111111",
+            "name": "op",
+            "start_time": "2026-01-01T12:00:00Z",
+            "end_time": "2026-01-01T12:00:00.500000Z",
+            "status": {"code": "ok"}
+          }
+        ]
+      }
+    ]
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/eval/run",
+        "json": {
+          "trace_ids": ["ebebebebebebebebebebebebebebebeb"],
+          "evaluators": [
+            {
+              "name": "exact_match",
+              "params": {"field": "no.such.field", "expected": "x"}
+            },
+            {"name": "not_a_real_evaluator"}
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {
+      "results": {
+        "ebebebebebebebebebebebebebebebeb": [
+          {
+            "evaluator": "exact_match",
+            "metric": "field_exact_match",
+            "score": null,
+            "details": {"reason": "field not observed in trace"}
+          },
+          {
+            "evaluator": "not_a_real_evaluator",
+            "metric": "unknown_evaluator",
+            "score": null
+          }
+        ]
+      },
+      "summary": {
+        "exact_match/field_exact_match": {
+          "n": 0,
+          "nulls": 1,
+          "mean_score": null,
+          "pass_rate": null
+        },
+        "not_a_real_evaluator/unknown_evaluator": {
+          "n": 0,
+          "nulls": 1,
+          "mean_score": null,
+          "pass_rate": null
+        }
+      }
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "No invented observations: an unobserved field can't match, so the score is null with the reason named; a typo'd evaluator reports 'unknown_evaluator' instead of crashing or silently passing. Nulls aggregate into 'nulls', never into means."
+}

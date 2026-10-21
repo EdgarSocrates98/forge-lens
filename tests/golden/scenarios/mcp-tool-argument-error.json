@@ -1,0 +1,37 @@
+{
+  "scenario_id": "mcp-tool-argument-error",
+  "title": "A tools/call with bad arguments reports the argument error verbatim",
+  "category": "mcp",
+  "input": {
+    "op": "mcp",
+    "frames": [
+      {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+      {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {"name": "lens.get_trace", "arguments": {}}
+      },
+      {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {"name": "lens.get_trace", "arguments": {"trace_id": 42}}
+      }
+    ]
+  },
+  "expected": {
+    "output": {
+      "1": {"result": {"serverInfo": {"name": "forge-lens"}}},
+      "2": {"error": {"code": -32603}},
+      "3": {"error": {"code": -32603}},
+      "_rc": 0
+    },
+    "output_contains": {
+      "2.error.message": ["tool error:", "trace_id must be a non-empty string"],
+      "3.error.message": ["trace_id must be a non-empty string"]
+    }
+  },
+  "forbidden": {},
+  "notes": "A malformed call never kills the stdio loop and never degrades to a generic fault: the TypeError text ('trace_id must be a non-empty string') rides through as the -32603 message, and the server keeps serving (rc=0)."
+}

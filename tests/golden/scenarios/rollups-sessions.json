@@ -1,0 +1,87 @@
+{
+  "scenario_id": "rollups-sessions",
+  "title": "/v1/sessions rolls traces up per session_id, newest activity first",
+  "category": "rollups",
+  "setup": {
+    "ingest_traces": [
+      {
+        "trace_id": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+        "session_id": "sess-alpha",
+        "started_at": "2026-01-01T12:00:00Z",
+        "ended_at": "2026-01-01T12:00:00.100000Z",
+        "spans": [
+          {
+            "trace_id": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+            "span_id": "1111111111111111",
+            "name": "a1",
+            "start_time": "2026-01-01T12:00:00Z",
+            "end_time": "2026-01-01T12:00:00.100000Z",
+            "status": {"code": "ok"}
+          }
+        ]
+      },
+      {
+        "trace_id": "e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2",
+        "session_id": "sess-alpha",
+        "started_at": "2026-01-01T12:00:05Z",
+        "ended_at": "2026-01-01T12:00:05.100000Z",
+        "spans": [
+          {
+            "trace_id": "e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2",
+            "span_id": "2222222222222222",
+            "name": "a2",
+            "start_time": "2026-01-01T12:00:05Z",
+            "end_time": "2026-01-01T12:00:05.100000Z",
+            "status": {"code": "ok"}
+          }
+        ]
+      },
+      {
+        "trace_id": "e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3",
+        "session_id": "sess-beta",
+        "started_at": "2026-01-01T12:00:10Z",
+        "ended_at": "2026-01-01T12:00:10.100000Z",
+        "spans": [
+          {
+            "trace_id": "e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3",
+            "span_id": "3333333333333333",
+            "name": "b1",
+            "start_time": "2026-01-01T12:00:10Z",
+            "end_time": "2026-01-01T12:00:10.100000Z",
+            "status": {"code": "ok"}
+          }
+        ]
+      },
+      {
+        "trace_id": "e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4",
+        "started_at": "2026-01-01T12:00:20Z",
+        "ended_at": "2026-01-01T12:00:20.100000Z",
+        "spans": [
+          {
+            "trace_id": "e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4",
+            "span_id": "4444444444444444",
+            "name": "no-session",
+            "start_time": "2026-01-01T12:00:20Z",
+            "end_time": "2026-01-01T12:00:20.100000Z",
+            "status": {"code": "ok"}
+          }
+        ]
+      }
+    ]
+  },
+  "input": {
+    "op": "http",
+    "requests": [{"method": "GET", "path": "/v1/sessions"}]
+  },
+  "expected": {
+    "status": 200,
+    "json": {
+      "items": [
+        {"session_id": "sess-beta", "traces": 1, "spans": 1},
+        {"session_id": "sess-alpha", "traces": 2, "spans": 2}
+      ]
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "One row per observed session_id, ordered by last activity DESC (ties on session_id ASC); the sessionless trace is excluded by the IS NOT NULL clause — it doesn't roll into a phantom '(none)' row."
+}

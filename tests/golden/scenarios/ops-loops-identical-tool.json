@@ -1,0 +1,90 @@
+{
+  "scenario_id": "ops-loops-identical-tool",
+  "title": "Three identical tool calls in one trace flag repeated_identical_tool",
+  "category": "ops",
+  "evidence_required": true,
+  "setup": {
+    "store_traces": [
+      {
+        "trace_id": "e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6",
+        "root_span_id": "1111111111111111",
+        "started_at": "2026-01-01T12:00:00Z",
+        "ended_at": "2026-01-01T12:00:03Z",
+        "spans": [
+          {
+            "trace_id": "e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6",
+            "span_id": "1111111111111111",
+            "name": "agent",
+            "kind": "agent",
+            "start_time": "2026-01-01T12:00:00Z",
+            "end_time": "2026-01-01T12:00:03Z",
+            "status": {"code": "ok"}
+          },
+          {
+            "trace_id": "e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6",
+            "span_id": "2222222222222222",
+            "parent_span_id": "1111111111111111",
+            "name": "search",
+            "kind": "tool",
+            "start_time": "2026-01-01T12:00:00.100000Z",
+            "end_time": "2026-01-01T12:00:00.500000Z",
+            "attributes": {"tool.name": "search", "tool.args": {"q": "x"}},
+            "status": {"code": "ok"}
+          },
+          {
+            "trace_id": "e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6",
+            "span_id": "3333333333333333",
+            "parent_span_id": "1111111111111111",
+            "name": "search",
+            "kind": "tool",
+            "start_time": "2026-01-01T12:00:01Z",
+            "end_time": "2026-01-01T12:00:01.400000Z",
+            "attributes": {"tool.name": "search", "tool.args": {"q": "x"}},
+            "status": {"code": "ok"}
+          },
+          {
+            "trace_id": "e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6",
+            "span_id": "4444444444444444",
+            "parent_span_id": "1111111111111111",
+            "name": "search",
+            "kind": "tool",
+            "start_time": "2026-01-01T12:00:02Z",
+            "end_time": "2026-01-01T12:00:02.400000Z",
+            "attributes": {"tool.name": "search", "tool.args": {"q": "x"}},
+            "status": {"code": "ok"}
+          }
+        ]
+      }
+    ]
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/v1/traces/e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6/loops"
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {
+      "trace_id": "e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6",
+      "classification": "heuristic",
+      "findings": [
+        {
+          "kind": "repeated_identical_tool",
+          "classification": "heuristic",
+          "count": 3,
+          "span_ids": [
+            "2222222222222222",
+            "3333333333333333",
+            "4444444444444444"
+          ]
+        }
+      ]
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "Same tool name + same content-hashed args, 3 in a row (the default repeat_threshold) — flagged with the member span_ids as evidence. Every finding is 'heuristic': repetition can be legitimate polling; this is evidence, never a verdict."
+}

@@ -1,0 +1,43 @@
+{
+  "scenario_id": "limits-payload-too-large",
+  "title": "A body over max_payload_bytes is refused 413 before parsing",
+  "category": "limits",
+  "setup": {
+    "config": {"max_payload_bytes": 256}
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "traces": [
+            {
+              "trace_id": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.100000Z",
+              "spans": [
+                {
+                  "trace_id": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0",
+                  "span_id": "1212121212121212",
+                  "name": "op",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 413,
+    "body_contains": ["payload too large"],
+    "store": {"trace_count": 0, "span_count": 0}
+  },
+  "forbidden": {"status_not": [200, 500]},
+  "notes": "The declared Content-Length fast-path fires before a byte is parsed; the streaming cap is the real bound for chunked bodies. Nothing is persisted on a 413 — no partial writes."
+}

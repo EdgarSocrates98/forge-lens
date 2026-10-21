@@ -1,0 +1,53 @@
+{
+  "scenario_id": "roles-reader-cannot-write",
+  "title": "A reader key is refused on the write path — 403 'writer role required'",
+  "category": "roles",
+  "setup": {
+    "config": {"auth_mode": "keys"},
+    "api_keys": [
+      {
+        "key_id": "flk_reader1",
+        "name": "reader-bot",
+        "secret": "flk_test_reader_1",
+        "role": "reader",
+        "projects": []
+      }
+    ]
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "headers": {"X-Forge-Lens-Key": "flk_test_reader_1"},
+        "json": {
+          "traces": [
+            {
+              "trace_id": "d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.100000Z",
+              "spans": [
+                {
+                  "trace_id": "d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6",
+                  "span_id": "1212121212121212",
+                  "name": "op",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 403,
+    "body_contains": ["writer role required"],
+    "store": {"trace_count": 0}
+  },
+  "forbidden": {"status_not": [200, 500]},
+  "notes": "Roles are ordered reader ⊂ writer ⊂ admin; ingest is a writer action. The denial is audited (see audit-auth-denied) and nothing is persisted."
+}

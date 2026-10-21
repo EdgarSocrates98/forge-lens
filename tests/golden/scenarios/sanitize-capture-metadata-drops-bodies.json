@@ -1,0 +1,57 @@
+{
+  "scenario_id": "sanitize-capture-metadata-drops-bodies",
+  "title": "capture=metadata (default) drops content-bearing attributes with a counted marker",
+  "category": "sanitize",
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "traces": [
+            {
+              "trace_id": "adadadadadadadadadadadadadadadad",
+              "root_span_id": "1010101010101010",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.100000Z",
+              "spans": [
+                {
+                  "trace_id": "adadadadadadadadadadadadadadadad",
+                  "span_id": "1010101010101010",
+                  "name": "llm call",
+                  "kind": "llm",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "attributes": {
+                    "input.value": "the secret prompt body",
+                    "llm.model_name": "gpt-test",
+                    "forge_lens.token_usage": {"model": "gpt-test", "total_tokens": 9}
+                  },
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {"accepted_spans": 1, "sanitize": {"dropped_content": 1}},
+    "store": {
+      "span_attrs": {
+        "adadadadadadadadadadadadadadadad/1010101010101010": {
+          "input.value": {"_forge_lens.dropped": true, "_approx_bytes": 22},
+          "llm.model_name": "gpt-test"
+        }
+      }
+    }
+  },
+  "forbidden": {
+    "body_not_contains": ["the secret prompt body"],
+    "store_json_not_contains": ["the secret prompt body"]
+  },
+  "notes": "Safe-by-default: CONTENT_ATTRIBUTES (input.value, output.value, llm.*_messages, tool.parameters, retrieval.documents) become a size marker at capture=metadata — the drop is recorded, never silent."
+}

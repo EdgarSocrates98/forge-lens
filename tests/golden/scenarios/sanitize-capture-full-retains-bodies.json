@@ -1,0 +1,59 @@
+{
+  "scenario_id": "sanitize-capture-full-retains-bodies",
+  "title": "capture=full (opt-in) retains content-bearing attributes verbatim",
+  "category": "sanitize",
+  "setup": {
+    "config": {"capture": "full"}
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "traces": [
+            {
+              "trace_id": "aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae",
+              "root_span_id": "1010101010101010",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.100000Z",
+              "spans": [
+                {
+                  "trace_id": "aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae",
+                  "span_id": "1010101010101010",
+                  "name": "llm call",
+                  "kind": "llm",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "attributes": {
+                    "input.value": "the prompt body stays",
+                    "output.value": "the model answer stays",
+                    "forge_lens.token_usage": {"model": "gpt-test", "total_tokens": 9}
+                  },
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {"accepted_spans": 1, "sanitize": {"dropped_content": 0}},
+    "store": {
+      "span_attrs": {
+        "aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae/1010101010101010": {
+          "input.value": "the prompt body stays",
+          "output.value": "the model answer stays"
+        }
+      }
+    }
+  },
+  "forbidden": {
+    "store_json_not_contains": ["_forge_lens.dropped"]
+  },
+  "notes": "capture=full is the explicit opt-in: CONTENT_ATTRIBUTES land verbatim and no drop marker is written. Key/value credential patterns still apply at full — only the content-drop and email-mask layers are gated by the level."
+}

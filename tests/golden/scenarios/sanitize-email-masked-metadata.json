@@ -1,0 +1,51 @@
+{
+  "scenario_id": "sanitize-email-masked-metadata",
+  "title": "capture=metadata masks e-mail addresses inside attribute values",
+  "category": "sanitize",
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "traces": [
+            {
+              "trace_id": "afafafafafafafafafafafafafafafaf",
+              "root_span_id": "1010101010101010",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.100000Z",
+              "spans": [
+                {
+                  "trace_id": "afafafafafafafafafafafafafafafaf",
+                  "span_id": "1010101010101010",
+                  "name": "notify",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "attributes": {"user.contact": "reach agent@example.com today"},
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {"accepted_spans": 1, "sanitize": {"emails_masked": 1}},
+    "store": {
+      "span_attrs": {
+        "afafafafafafafafafafafafafafafaf/1010101010101010": {
+          "user.contact": "reach [MASKED:email] today"
+        }
+      }
+    }
+  },
+  "forbidden": {
+    "body_not_contains": ["agent@example.com"],
+    "store_json_not_contains": ["agent@example.com"]
+  },
+  "notes": "EMAIL_RE runs at capture=metadata only (mask_emails gate in redact.py); lookup keys like session_id/project_id are exempt from masking by design."
+}

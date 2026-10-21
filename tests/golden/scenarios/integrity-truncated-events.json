@@ -1,0 +1,57 @@
+{
+  "scenario_id": "integrity-truncated-events",
+  "title": "A span over max_events_per_span is bounded and flagged truncated",
+  "category": "integrity",
+  "setup": {
+    "config": {"max_events_per_span": 1}
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "traces": [
+            {
+              "trace_id": "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4",
+              "root_span_id": "1111111111111111",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.100000Z",
+              "spans": [
+                {
+                  "trace_id": "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4",
+                  "span_id": "1111111111111111",
+                  "name": "chatty",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "events": [
+                    {"name": "e1", "time": "2026-01-01T12:00:00.010000Z"},
+                    {"name": "e2", "time": "2026-01-01T12:00:00.020000Z"}
+                  ],
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {"accepted_spans": 1},
+    "store": {
+      "spans": {
+        "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4/1111111111111111": {
+          "events": [{"name": "e1"}]
+        }
+      },
+      "span_flags": {
+        "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4/1111111111111111": ["truncated"]
+      }
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "Bounds are enforced with evidence: the span keeps the first max_events_per_span events and earns 'truncated' — the cap is observable on the stored span, never a silent loss."
+}

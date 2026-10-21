@@ -1,0 +1,69 @@
+{
+  "scenario_id": "limits-rate-limited",
+  "title": "rate_limit_per_minute bounds ingest — the second call in-window is 429",
+  "category": "limits",
+  "setup": {
+    "config": {"rate_limit_per_minute": 1}
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "traces": [
+            {
+              "trace_id": "d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.100000Z",
+              "spans": [
+                {
+                  "trace_id": "d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2",
+                  "span_id": "1212121212121212",
+                  "name": "op",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "traces": [
+            {
+              "trace_id": "d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.100000Z",
+              "spans": [
+                {
+                  "trace_id": "d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3",
+                  "span_id": "3434343434343434",
+                  "name": "op2",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "statuses": [200, 429],
+    "responses": [
+      {"json": {"accepted_spans": 1}},
+      {"body_contains": ["ingestion rate limit exceeded"]}
+    ],
+    "store": {"trace_count": 1}
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "The fixed-window limiter lives in the pipeline (shared across requests in one process); the HTTP boundary maps RateLimitedError to 429. The rejected batch persists nothing."
+}

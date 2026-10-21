@@ -1,0 +1,105 @@
+{
+  "scenario_id": "eval-battery-all-keys",
+  "title": "Every registered evaluator key scores and lands under its evaluator/metric summary key",
+  "category": "eval",
+  "provenance": "derived",
+  "setup": {
+    "store_traces": [
+      {
+        "trace_id": "eaeaeaeaeaeaeaeaeaeaeaeaeaeaeaea",
+        "root_span_id": "1111111111111111",
+        "started_at": "2026-01-01T12:00:00Z",
+        "ended_at": "2026-01-01T12:00:00.800000Z",
+        "spans": [
+          {
+            "trace_id": "eaeaeaeaeaeaeaeaeaeaeaeaeaeaeaea",
+            "span_id": "1111111111111111",
+            "name": "agent.run",
+            "kind": "agent",
+            "start_time": "2026-01-01T12:00:00Z",
+            "end_time": "2026-01-01T12:00:00.800000Z",
+            "attributes": {"output.value": "the answer is 42"},
+            "status": {"code": "ok"}
+          },
+          {
+            "trace_id": "eaeaeaeaeaeaeaeaeaeaeaeaeaeaeaea",
+            "span_id": "2222222222222222",
+            "parent_span_id": "1111111111111111",
+            "name": "llm gpt-test",
+            "kind": "llm",
+            "start_time": "2026-01-01T12:00:00.050000Z",
+            "end_time": "2026-01-01T12:00:00.400000Z",
+            "attributes": {
+              "forge_lens.token_usage": {
+                "model": "gpt-test",
+                "input_tokens": 100,
+                "output_tokens": 42,
+                "total_tokens": 142
+              }
+            },
+            "status": {"code": "ok"}
+          },
+          {
+            "trace_id": "eaeaeaeaeaeaeaeaeaeaeaeaeaeaeaea",
+            "span_id": "3333333333333333",
+            "parent_span_id": "1111111111111111",
+            "name": "tool web_search",
+            "kind": "tool",
+            "start_time": "2026-01-01T12:00:00.450000Z",
+            "end_time": "2026-01-01T12:00:00.700000Z",
+            "attributes": {"tool.name": "web_search"},
+            "status": {"code": "ok"}
+          }
+        ]
+      }
+    ]
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/eval/run",
+        "json": {
+          "trace_ids": ["eaeaeaeaeaeaeaeaeaeaeaeaeaeaeaea"],
+          "evaluators": [
+            {"name": "error_free"},
+            {"name": "latency_budget", "params": {"max_duration_ms": 1000}},
+            {"name": "token_budget", "params": {"max_total_tokens": 1000}},
+            {"name": "tool_success"},
+            {"name": "has_span", "params": {"name": "agent.run"}},
+            {"name": "exact_match", "params": {"field": "output.value", "expected": "the answer is 42"}},
+            {"name": "token_f1", "params": {"field": "output.value", "expected": "the answer is 42"}},
+            {"name": "allowed_tools", "params": {"allowed": ["web_search"]}},
+            {"name": "task_completion"},
+            {"name": "contains", "params": {"text": "answer"}},
+            {"name": "regex", "params": {"pattern": "is 42"}},
+            {"name": "tool_call_count", "params": {"min": 1, "max": 5}}
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {
+      "trace_ids": ["eaeaeaeaeaeaeaeaeaeaeaeaeaeaeaea"],
+      "summary": {
+        "error_free/no_error_spans": {"n": 1, "nulls": 0, "mean_score": 1.0, "pass_rate": 1.0},
+        "latency_budget/within_budget_ms": {"n": 1, "nulls": 0, "mean_score": 1.0, "pass_rate": 1.0},
+        "token_budget/within_token_budget": {"n": 1, "nulls": 0, "mean_score": 1.0, "pass_rate": 1.0},
+        "tool_success/tool_success_rate": {"n": 1, "nulls": 0, "mean_score": 1.0, "pass_rate": 1.0},
+        "has_span/expected_span_present": {"n": 1, "nulls": 0, "mean_score": 1.0, "pass_rate": 1.0},
+        "exact_match/field_exact_match": {"n": 1, "nulls": 0, "mean_score": 1.0, "pass_rate": 1.0},
+        "token_f1/field_token_f1": {"n": 1, "nulls": 0, "mean_score": 1.0, "pass_rate": 1.0},
+        "allowed_tools/tools_within_allowlist": {"n": 1, "nulls": 0, "mean_score": 1.0, "pass_rate": 1.0},
+        "task_completion/task_completed": {"n": 1, "nulls": 0, "mean_score": 1.0, "pass_rate": 1.0},
+        "contains/output_contains": {"n": 1, "nulls": 0, "mean_score": 1.0, "pass_rate": 1.0},
+        "regex/output_regex_match": {"n": 1, "nulls": 0, "mean_score": 1.0, "pass_rate": 1.0},
+        "tool_call_count/tool_calls_within_bounds": {"n": 1, "nulls": 0, "mean_score": 1.0, "pass_rate": 1.0}
+      }
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "The registry's full key list exercised against one trace that satisfies every spec — this is the per-key golden: summary keys are '<evaluator>/<metric>', every result carries provenance=derived (the scenario-level provenance assertion enforces it)."
+}

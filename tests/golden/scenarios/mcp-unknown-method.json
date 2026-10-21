@@ -1,0 +1,23 @@
+{
+  "scenario_id": "mcp-unknown-method",
+  "title": "An unsupported JSON-RPC method answers -32601 with the method named",
+  "category": "mcp",
+  "input": {
+    "op": "mcp",
+    "frames": [
+      {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+      {"jsonrpc": "2.0", "id": 9, "method": "resources/list", "params": {}}
+    ]
+  },
+  "expected": {
+    "output": {
+      "9": {"error": {"code": -32601}},
+      "_rc": 0
+    },
+    "output_contains": {
+      "9.error.message": ["unknown 'resources/list'"]
+    }
+  },
+  "forbidden": {},
+  "notes": "The MCP surface is deliberately small (initialize/ping/tools/list/tools/call) — anything else is a protocol-level unknown, named in the error rather than silently ignored or coerced."
+}

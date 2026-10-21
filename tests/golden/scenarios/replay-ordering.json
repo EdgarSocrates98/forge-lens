@@ -1,0 +1,72 @@
+{
+  "scenario_id": "replay-ordering",
+  "title": "Replay interleaves starts/events/ends on one deterministic timeline",
+  "category": "replay",
+  "setup": {
+    "store_traces": [
+      {
+        "trace_id": "f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2",
+        "root_span_id": "1111111111111111",
+        "started_at": "2026-01-01T12:00:00Z",
+        "ended_at": "2026-01-01T12:00:01Z",
+        "spans": [
+          {
+            "trace_id": "f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2",
+            "span_id": "1111111111111111",
+            "name": "root",
+            "start_time": "2026-01-01T12:00:00Z",
+            "end_time": "2026-01-01T12:00:01Z",
+            "status": {"code": "ok"}
+          },
+          {
+            "trace_id": "f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2",
+            "span_id": "2222222222222222",
+            "parent_span_id": "1111111111111111",
+            "name": "child",
+            "start_time": "2026-01-01T12:00:00.200000Z",
+            "end_time": "2026-01-01T12:00:00.500000Z",
+            "events": [
+              {
+                "name": "llm.chunk",
+                "time": "2026-01-01T12:00:00.300000Z"
+              }
+            ],
+            "status": {"code": "ok"}
+          },
+          {
+            "trace_id": "f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2",
+            "span_id": "3333333333333333",
+            "parent_span_id": "1111111111111111",
+            "name": "still-running",
+            "start_time": "2026-01-01T12:00:00.600000Z",
+            "end_time": null,
+            "status": {"code": "unset"}
+          }
+        ]
+      }
+    ]
+  },
+  "input": {
+    "op": "engine",
+    "function": "replay_timeline",
+    "trace_id": "f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2"
+  },
+  "expected": {
+    "output": {
+      "trace_id": "f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2",
+      "span_count": 3,
+      "unclosed_spans": 1,
+      "total_ms": 1000.0,
+      "entries": [
+        {"kind": "span_start", "span_id": "1111111111111111", "offset_ms": 0.0},
+        {"kind": "span_start", "span_id": "2222222222222222", "offset_ms": 200.0},
+        {"kind": "event", "span_id": "2222222222222222", "event": "llm.chunk", "offset_ms": 300.0},
+        {"kind": "span_end", "span_id": "2222222222222222", "status": "ok", "offset_ms": 500.0},
+        {"kind": "span_start", "span_id": "3333333333333333", "offset_ms": 600.0},
+        {"kind": "span_end", "span_id": "1111111111111111", "status": "ok", "offset_ms": 1000.0}
+      ]
+    }
+  },
+  "forbidden": {},
+  "notes": "Entries sort by (timestamp, span_id, kind-rank start<event<end); offsets are relative to the earliest observed timestamp so replays compare across machines. The unclosed span contributes a start and is counted — never hidden."
+}

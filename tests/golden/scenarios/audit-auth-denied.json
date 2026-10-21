@@ -1,0 +1,38 @@
+{
+  "scenario_id": "audit-auth-denied",
+  "title": "A rejected key is itself audited — denied auth attempts leave evidence",
+  "category": "audit",
+  "setup": {
+    "config": {"auth_mode": "keys"},
+    "api_keys": [
+      {
+        "key_id": "flk_admin00",
+        "name": "admin",
+        "secret": "flk_test_admin_ok",
+        "role": "admin",
+        "projects": []
+      }
+    ]
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/v1/admin/audit",
+        "headers": {"X-Forge-Lens-Key": "flk_forged_secret"}
+      }
+    ]
+  },
+  "expected": {
+    "status": 401,
+    "body_contains": ["invalid or missing API key"],
+    "store": {
+      "audit": [
+        {"action": "auth", "actor": "unknown", "outcome": "denied"}
+      ]
+    }
+  },
+  "forbidden": {"status_not": [200, 500]},
+  "notes": "Failed auth is evidence too: the 401 is accompanied by an audit row (action=auth, outcome=denied, actor=unknown) so denied attempts are observable, not silent."
+}

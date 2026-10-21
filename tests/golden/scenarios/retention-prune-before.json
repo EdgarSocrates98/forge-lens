@@ -1,0 +1,62 @@
+{
+  "scenario_id": "retention-prune-before",
+  "title": "Prune deletes traces older than the cutoff — whole traces, audited",
+  "category": "retention",
+  "setup": {
+    "ingest_traces": [
+      {
+        "trace_id": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+        "started_at": "2025-01-01T00:00:00Z",
+        "ended_at": "2025-01-01T00:00:00.100000Z",
+        "spans": [
+          {
+            "trace_id": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+            "span_id": "1111111111111111",
+            "name": "old",
+            "start_time": "2025-01-01T00:00:00Z",
+            "end_time": "2025-01-01T00:00:00.100000Z",
+            "status": {"code": "ok"}
+          }
+        ]
+      },
+      {
+        "trace_id": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1",
+        "started_at": "2026-06-01T00:00:00Z",
+        "ended_at": "2026-06-01T00:00:00.100000Z",
+        "spans": [
+          {
+            "trace_id": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1",
+            "span_id": "2222222222222222",
+            "name": "recent",
+            "start_time": "2026-06-01T00:00:00Z",
+            "end_time": "2026-06-01T00:00:00.100000Z",
+            "status": {"code": "ok"}
+          }
+        ]
+      }
+    ]
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/admin/prune",
+        "json": {"before": "2026-01-01T00:00:00Z"}
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {"deleted": {"traces": 1}, "before_ns": 1767225600000000000},
+    "store": {
+      "trace_count": 1,
+      "audit": [{"action": "traces.prune", "outcome": "ok"}]
+    }
+  },
+  "forbidden": {
+    "status_not": [500],
+    "trace_ids_absent": ["f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"]
+  },
+  "notes": "Cutoff on started_ns, deletion at trace granularity (spans go with their trace — partial deletion would fabricate an incomplete execution). The prune itself lands in the audit trail."
+}

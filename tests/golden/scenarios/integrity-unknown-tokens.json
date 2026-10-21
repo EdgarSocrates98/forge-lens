@@ -1,0 +1,47 @@
+{
+  "scenario_id": "integrity-unknown-tokens",
+  "title": "An llm-kind span with no parseable usage gets unknown_tokens",
+  "category": "integrity",
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "traces": [
+            {
+              "trace_id": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+              "root_span_id": "8080808080808080",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.100000Z",
+              "spans": [
+                {
+                  "trace_id": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+                  "span_id": "8080808080808080",
+                  "name": "llm unknown-usage",
+                  "kind": "llm",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "attributes": {"llm.model_name": "mystery-model"},
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {"accepted_spans": 1},
+    "store": {
+      "span_flags": {
+        "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0/8080808080808080": ["unknown_tokens"]
+      }
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "Absent OR malformed usage both flag — 'we don't know' is recorded, never zero-filled (no invented observations)."
+}

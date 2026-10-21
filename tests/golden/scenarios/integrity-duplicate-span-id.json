@@ -1,0 +1,65 @@
+{
+  "scenario_id": "integrity-duplicate-span-id",
+  "title": "Two spans sharing span_id inside one trace merge at write time",
+  "category": "integrity",
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "traces": [
+            {
+              "trace_id": "bdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd",
+              "root_span_id": "5555555555555555",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.100000Z",
+              "spans": [
+                {
+                  "trace_id": "bdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd",
+                  "span_id": "5555555555555555",
+                  "name": "first-delivery",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "attributes": {"a": 1},
+                  "status": {"code": "ok"}
+                },
+                {
+                  "trace_id": "bdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd",
+                  "span_id": "5555555555555555",
+                  "name": "second-delivery",
+                  "start_time": "2026-01-01T12:00:00Z",
+                  "end_time": "2026-01-01T12:00:00.100000Z",
+                  "attributes": {"b": 2},
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {"accepted_spans": 1, "updated_spans": 1, "duplicate_spans": 0},
+    "store": {
+      "trace_count": 1,
+      "span_count": 1,
+      "spans": {
+        "bdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd/5555555555555555": {
+          "name": "first-delivery"
+        }
+      },
+      "span_attrs": {
+        "bdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd/5555555555555555": {"a": 1, "b": 2}
+      },
+      "span_flags": {
+        "bdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd/5555555555555555": ["conflict"]
+      }
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "Real behavior (verified): an in-batch span_id collision goes through the same upsert path as a re-delivery — the second occurrence inserts nothing, merges attributes (updated_spans=1), and first-observed name wins. Because the two deliveries disagree on the merge-untouched field 'name', the stored row also earns 'conflict'. One stored row; no fabricated spans."
+}

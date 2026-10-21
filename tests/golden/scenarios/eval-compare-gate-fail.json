@@ -1,0 +1,92 @@
+{
+  "scenario_id": "eval-compare-gate-fail",
+  "title": "Gate fails on a dropped pass rate and names every failure with evidence",
+  "category": "eval",
+  "setup": {
+    "store_traces": [
+      {
+        "trace_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeee01",
+        "root_span_id": "1111111111111111",
+        "started_at": "2026-01-01T12:00:00Z",
+        "ended_at": "2026-01-01T12:00:00.500000Z",
+        "spans": [
+          {
+            "trace_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeee01",
+            "span_id": "1111111111111111",
+            "name": "op-a",
+            "start_time": "2026-01-01T12:00:00Z",
+            "end_time": "2026-01-01T12:00:00.500000Z",
+            "status": {"code": "ok"}
+          }
+        ]
+      },
+      {
+        "trace_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeee02",
+        "root_span_id": "2222222222222222",
+        "started_at": "2026-01-01T12:00:00Z",
+        "ended_at": "2026-01-01T12:00:00.500000Z",
+        "spans": [
+          {
+            "trace_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeee02",
+            "span_id": "2222222222222222",
+            "name": "op-b",
+            "start_time": "2026-01-01T12:00:00Z",
+            "end_time": "2026-01-01T12:00:00.500000Z",
+            "status": {"code": "error", "message": "boom"}
+          }
+        ]
+      }
+    ]
+  },
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/eval/compare",
+        "json": {
+          "a": {"trace_ids": ["eeeeeeeeeeeeeeeeeeeeeeeeeeeeee01"]},
+          "b": {"trace_ids": ["eeeeeeeeeeeeeeeeeeeeeeeeeeeeee02"]},
+          "evaluators": [{"name": "error_free"}],
+          "gate": {
+            "metrics": {
+              "error_free/no_error_spans": {"min_pass_rate_b": 1.0},
+              "unmeasured/metric": {}
+            }
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {
+      "deltas": [
+        {
+          "evaluator": "error_free",
+          "pass_rate_a": 1.0,
+          "pass_rate_b": 0.0,
+          "delta": -1.0,
+          "significance": "insufficient_data"
+        }
+      ],
+      "gate": {
+        "gate_passed": false,
+        "failures": [
+          {
+            "metric": "error_free/no_error_spans",
+            "reason": "pass_rate_b below minimum",
+            "observed": 0.0,
+            "required": 1.0
+          },
+          {
+            "metric": "unmeasured/metric",
+            "reason": "metric not evaluated — cannot gate on unmeasured evidence"
+          }
+        ]
+      }
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "Two failure modes, both honest: the candidate's observed pass rate broke the minimum, and gating on a metric that was never evaluated is itself a failure ('cannot gate on unmeasured evidence'). Failures are sorted by metric for determinism."
+}

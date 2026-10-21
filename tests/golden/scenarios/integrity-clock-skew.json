@@ -1,0 +1,45 @@
+{
+  "scenario_id": "integrity-clock-skew",
+  "title": "A span whose end precedes its start earns clock_skew — flag only, no warning",
+  "category": "integrity",
+  "input": {
+    "op": "http",
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/v1/traces",
+        "json": {
+          "traces": [
+            {
+              "trace_id": "bebebebebebebebebebebebebebebebe",
+              "root_span_id": "6666666666666666",
+              "started_at": "2026-01-01T12:00:00Z",
+              "ended_at": "2026-01-01T12:00:00.050000Z",
+              "spans": [
+                {
+                  "trace_id": "bebebebebebebebebebebebebebebebe",
+                  "span_id": "6666666666666666",
+                  "name": "backwards",
+                  "start_time": "2026-01-01T12:00:00.100000Z",
+                  "end_time": "2026-01-01T12:00:00.050000Z",
+                  "status": {"code": "ok"}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "status": 200,
+    "json": {"accepted_spans": 1, "warnings": []},
+    "store": {
+      "span_flags": {
+        "bebebebebebebebebebebebebebebebe/6666666666666666": ["clock_skew"]
+      }
+    }
+  },
+  "forbidden": {"status_not": [500]},
+  "notes": "Documented asymmetry: flag_integrity attaches clock_skew but emits no warning text — the evidence lives on the span, and ingest still accepts it (a skew is data-quality, not a rejection)."
+}
