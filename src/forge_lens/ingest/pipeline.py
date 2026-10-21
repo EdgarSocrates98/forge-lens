@@ -99,6 +99,21 @@ def flag_integrity(trace: Trace) -> list[str]:
         warnings.append(f"{missing_parents} span(s) reference parents not present in this trace")
     if trace.ended_at is None and trace.spans:
         warnings.append("trace is partial (no ended_at)")
+    if trace.spans:
+        # envelope-declared bounds are trusted as-is — flag when they
+        # contradict the spans they claim to cover
+        earliest = min(s.start_time for s in trace.spans)
+        if ensure_aware(trace.started_at) > earliest:
+            warnings.append(
+                "declared started_at is after the earliest span start"
+            )
+        ends = [s.end_time for s in trace.spans if s.end_time is not None]
+        if (
+            trace.ended_at is not None
+            and ends
+            and ensure_aware(trace.ended_at) < max(ends)
+        ):
+            warnings.append("declared ended_at is before the latest span end")
     return warnings
 
 

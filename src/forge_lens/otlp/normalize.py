@@ -5,8 +5,11 @@ or ints, attribute values in several shapes, and missing sections. What
 cannot be interpreted is never dropped silently — unrecoverable spans go
 to quarantine (``errors`` list or strict ``ValidationError``), and data
 that can't be stored leaves evidence: events without ``timeUnixNano``
-count in ``attributes["_otlp.events_dropped"]``, and kvlist entries
-with a non-string key count in ``"_otlp.dropped_kv_pairs"``.
+count in ``attributes["_otlp.events_dropped"]``, kvlist entries with a
+non-string key count in ``"_otlp.dropped_kv_pairs"``, non-dict links
+count in ``"_otlp.links_dropped"``, and list fields holding a scalar
+are named in ``"_otlp.malformed_fields"``. Explicit ``null`` reads as
+absent — same convention as ``resourceSpans or []``.
 """
 
 from __future__ import annotations
@@ -52,18 +55,26 @@ def _attr_value(raw: Any, depth: int = 0) -> Any:
             return v
     if "arrayValue" in raw:
         arr = raw["arrayValue"]
-        return (
-            [_attr_value(v, depth + 1) for v in arr.get("values", [])]
-            if isinstance(arr, dict)
-            else raw
-        )
+        if not isinstance(arr, dict):
+            return raw
+        values = arr.get("values")
+        if values is None:
+            return []  # explicit null ≈ absent (lax producers send it)
+        if not isinstance(values, list):
+            return raw  # malformed node persists un-flattened — evidence
+        return [_attr_value(v, depth + 1) for v in values]
     if "kvlistValue" in raw:
         kvl = raw["kvlistValue"]
         if not isinstance(kvl, dict):
             return raw
+        values = kvl.get("values")
+        if values is None:
+            return {}  # explicit null ≈ empty kvlist
+        if not isinstance(values, list):
+            return raw  # malformed node persists un-flattened — evidence
         out: dict[Any, Any] = {}
         dropped = 0
-        for kv in kvl.get("values", []):
+        for kv in values:
             # key must be a string — an array/object key is unhashable
             # and would crash dict insertion (→ HTTP 500)
             if isinstance(kv, dict) and isinstance(kv.get("key"), str):
@@ -137,12 +148,35 @@ def _parse_span(
             mode="json", exclude_none=True
         )
 
+    # A list field holding null or a scalar can't be iterated — mark it
+    # in attributes (never silent) instead of crashing on ``for``.
+    malformed_fields: list[str] = []
+    raw_events = raw.get("events")
+    if raw_events is not None and not isinstance(raw_events, list):
+        malformed_fields.append("events")
+        raw_events = None
+    raw_links = raw.get("links")
+    if raw_links is not None and not isinstance(raw_links, list):
+        malformed_fields.append("links")
+        raw_links = None
+    if malformed_fields:
+        attributes["_otlp.malformed_fields"] = malformed_fields
+        if errors is None:
+            raise ValidationError(
+                f"span {span_id!r}: non-list field(s): "
+                + ", ".join(malformed_fields)
+            )
+        errors.append(
+            f"span {span_id!r}: non-list field(s): "
+            + ", ".join(malformed_fields)
+        )
+
     # An event without timeUnixNano cannot be stored (SpanEvent.time is
     # required). The drop is never silent: the count travels with the
     # span as evidence, and quarantine mode also records a warning.
     events: list[SpanEvent] = []
     dropped_events = 0
-    for ev in raw.get("events", []):
+    for ev in raw_events or []:
         if isinstance(ev, dict) and ev.get("timeUnixNano") is not None:
             events.append(
                 SpanEvent(
@@ -160,15 +194,21 @@ def _parse_span(
                 f"span {span_id!r}: dropped {dropped_events} event(s) "
                 "without timeUnixNano"
             )
-    links = [
-        SpanLink(
-            trace_id=lk.get("traceId", ""),
-            span_id=lk.get("spanId", ""),
-            attributes=_attrs(lk.get("attributes")),
-        )
-        for lk in raw.get("links", [])
-        if isinstance(lk, dict)
-    ]
+    links: list[SpanLink] = []
+    dropped_links = 0
+    for lk in raw_links or []:
+        if isinstance(lk, dict):
+            links.append(
+                SpanLink(
+                    trace_id=lk.get("traceId", ""),
+                    span_id=lk.get("spanId", ""),
+                    attributes=_attrs(lk.get("attributes")),
+                )
+            )
+        else:
+            dropped_links += 1
+    if dropped_links:
+        attributes["_otlp.links_dropped"] = dropped_links
 
     raw_parent = raw.get("parentSpanId") or None
     if isinstance(raw_parent, str) and raw_parent.strip("0") == "":
@@ -179,7 +219,8 @@ def _parse_span(
         trace_id=str(trace_id),
         span_id=str(span_id),
         parent_span_id=str(raw_parent) if raw_parent is not None else None,
-        name=str(raw.get("name", "unnamed")),
+        # `or` — an explicit null name must not stringify to "None"
+        name=str(raw.get("name") or "unnamed"),
         kind=map_span_kind(attributes, raw.get("kind")),
         start_time=_parse_time(raw.get("startTimeUnixNano")),
         end_time=_parse_time(raw.get("endTimeUnixNano")),
@@ -215,19 +256,42 @@ def normalize_otlp_request(
     if not isinstance(resource_spans, list):
         raise ValidationError("resourceSpans must be a list")
 
+    def _evidence(msg: str) -> None:
+        # malformed container: a note in quarantine mode, strict raise
+        if errors is None:
+            raise ValidationError(msg)
+        errors.append(msg)
+
     grouped: dict[tuple[int, str], Trace] = {}
     for rs_idx, rs in enumerate(resource_spans):
         if not isinstance(rs, dict):
             continue
-        resource_attrs = _attrs((rs.get("resource") or {}).get("attributes"))
+        resource = rs.get("resource")
+        if resource is not None and not isinstance(resource, dict):
+            _evidence(f"resourceSpans[{rs_idx}].resource is not an object")
+            resource = None
+        resource_attrs = _attrs(
+            resource.get("attributes") if isinstance(resource, dict) else None
+        )
         scope_spans = rs.get("scopeSpans") or rs.get("instrumentationLibrarySpans") or []
-        for ss in scope_spans:
+        if not isinstance(scope_spans, list):
+            _evidence(f"resourceSpans[{rs_idx}].scopeSpans is not a list")
+            continue
+        for ss_idx, ss in enumerate(scope_spans):
             if not isinstance(ss, dict):
                 continue
-            scope = ss.get("scope") or ss.get("instrumentationLibrary") or {}
+            scope = ss.get("scope") or ss.get("instrumentationLibrary")
+            if scope is not None and not isinstance(scope, dict):
+                _evidence(f"scopeSpans[{ss_idx}].scope is not an object")
+                scope = None
+            scope = scope or {}
             sdk_name = scope.get("name")
             sdk_version = scope.get("version")
-            for raw_span in ss.get("spans", []):
+            spans = ss.get("spans")
+            if spans is not None and not isinstance(spans, list):
+                _evidence(f"scopeSpans[{ss_idx}].spans is not a list")
+                spans = None
+            for raw_span in spans or []:
                 if not isinstance(raw_span, dict):
                     continue
                 try:

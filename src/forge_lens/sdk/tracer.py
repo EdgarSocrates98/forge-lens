@@ -442,13 +442,16 @@ def _finalize(trace: Trace) -> None:
 
 
 _default: LensTracer | None = None
+_default_lock = threading.Lock()
 
 
 def get_tracer(service_name: str = "forge-lens-app", **kwargs: Any) -> LensTracer:
-    """Process-wide default tracer (lazy singleton)."""
+    """Process-wide default tracer (lazy singleton, thread-safe)."""
     global _default
     if _default is None:
-        _default = LensTracer(service_name=service_name, **kwargs)
+        with _default_lock:
+            if _default is None:
+                _default = LensTracer(service_name=service_name, **kwargs)
     return _default
 
 

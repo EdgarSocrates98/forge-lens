@@ -399,3 +399,52 @@ conflito porque a dedupe acontece no store, abaixo do pipeline.
 
 159 testes py + 20 ts + smoke de pacote; `ruff` limpo; `mypy --strict`
 0 erros; schemas sem drift; `uv build` ok; `pip-audit` 0 vulns.
+
+## Rodada 7 — remaining unguarded OTLP paths → 500
+
+### Blocking
+
+- **Containers OTLP malformados ainda produziam HTTP 500**: rodadas 3–5
+  fecharam `intValue`, `timeUnixNano`, body não-dict, kvlist keys e depth
+  cap — mas deixaram caminhos não-guardados que `TypeError`/
+  `AttributeError` escapavam do catch `(ValidationError,
+  PydanticValidationError)`. Corrigidos com o mesmo idioma defensivo já
+  usado no arquivo:
+  - `resourceSpans[].resource` não-dict → coerced a `{}` + nota em `errors`
+  - `scopeSpans[].scope`/`instrumentationLibrary` não-dict → `{}` + nota
+  - `scopeSpans`/`spans` não-list → skip + nota em `errors` (strict raise)
+  - `span.events`/`span.links` não-list → campo marcado em
+    `attributes["_otlp.malformed_fields"]` + nota (strict raise);
+    links não-dict em lista contam em `_otlp.links_dropped`
+  - `arrayValue.values`/`kvlistValue.values` não-list → nó retorna raw
+    (evidência verbatim); `null` explícito lê como ausente
+  - Regressões: `test_otlp_non_dict_resource_and_scope_not_500`,
+    `test_otlp_non_list_containers_not_500`,
+    `test_otlp_anyvalue_non_list_values_not_500`,
+    `test_otlp_non_list_field_strict_mode_raises` +
+    `test_otlp_malformed_containers_not_500` (12 shapes e2e, todos 200/422).
+
+### Sugestões
+
+- **`name: null` → literal "None"**: agora `raw.get("name") or "unnamed"`
+  — `test_otlp_null_name_becomes_unnamed`.
+- **`SanitizeReport.details` morto**: campo declarado, nunca populado —
+  removido (agregação em `result.sanitize` só itera contadores).
+- **TOML `rate_limit_per_minute = true`**: `bool` é subclasse de `int` —
+  agora `not isinstance(v, bool)` protege os bounds int —
+  `test_toml_bool_is_not_an_int_bound`.
+- **`extra="allow"` não persistia**: nota honesta em `contracts.md` —
+  extras validam no contrato mas não sobrevivem ao round-trip do store.
+- **`GET /v1/traces` `offset` negativo**: clamped a 0 (simétrico com
+  `limit` — clamp, não 422) no endpoint e no store —
+  `test_negative_offset_clamped_to_zero`.
+- **Bounds declarados vs. spans sem evidência**: `flag_integrity` agora
+  emite warning quando `started_at`/`ended_at` do envelope contradiz o
+  min/max real dos spans — `test_declared_bounds_contradicting_spans_warns`.
+- **`get_tracer()` race na primeira construção**: double-checked locking
+  — `test_get_tracer_singleton_is_thread_safe`.
+
+## Estado pós-fix (rodada 7)
+
+169 testes py + 20 ts + smoke de pacote; `ruff` limpo; `mypy --strict`
+0 erros; schemas sem drift; `uv build` ok; `pip-audit` 0 vulns.

@@ -280,3 +280,106 @@ def test_otlp_bytesvalue_reports_decoded_length() -> None:
     )
     trace = normalize_otlp_request(payload)[0]
     assert trace.spans[0].attributes["blob"] == {"_bytes": 15}
+
+
+_SPAN_BASE = {
+    "traceId": "b" * 32,
+    "spanId": "d" * 16,
+    "name": "s",
+    "startTimeUnixNano": "1767264000000000000",
+}
+
+
+def _wrap_spans(spans: list) -> dict:
+    return {"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}
+
+
+def test_otlp_non_dict_resource_and_scope_not_500() -> None:
+    """resource/scope as scalar used to AttributeError → HTTP 500.
+    A malformed container must degrade, never crash."""
+    for resource in ("x", 42, [1], True):
+        errors: list[str] = []
+        payload = {
+            "resourceSpans": [
+                {
+                    "resource": resource,
+                    "scopeSpans": [{"spans": [dict(_SPAN_BASE)]}],
+                }
+            ]
+        }
+        traces = normalize_otlp_request(payload, errors=errors)
+        assert traces[0].spans[0].span_id == "d" * 16
+        assert any("resource" in e for e in errors)
+    for scope in ("x", 42, [1], True):
+        errors = []
+        payload = {
+            "resourceSpans": [
+                {
+                    "scopeSpans": [
+                        {"scope": scope, "spans": [dict(_SPAN_BASE)]}
+                    ]
+                }
+            ]
+        }
+        traces = normalize_otlp_request(payload, errors=errors)
+        assert traces[0].spans[0].span_id == "d" * 16
+        assert any("scope" in e for e in errors)
+
+
+def test_otlp_non_list_containers_not_500() -> None:
+    """scopeSpans/spans/events/links as null-or-scalar used to TypeError
+    → HTTP 500. Each must leave evidence, never crash."""
+    for spans_field in (None, 5, "x"):
+        errors: list[str] = []
+        payload = {
+            "resourceSpans": [{"scopeSpans": [{"spans": spans_field}]}]
+        }
+        traces = normalize_otlp_request(payload, errors=errors)
+        if spans_field is not None:
+            assert any("spans" in e for e in errors)
+        assert traces == []
+
+    for field in ("events", "links"):
+        for bad_value in (None, 5, "x"):
+            errors = []
+            span = dict(_SPAN_BASE)
+            span[field] = bad_value
+            traces = normalize_otlp_request(_wrap_spans([span]), errors=errors)
+            assert traces[0].spans[0].span_id == "d" * 16
+            attrs = traces[0].spans[0].attributes
+            if bad_value is None:
+                # explicit null ≈ absent — same convention as
+                # `resourceSpans or []` everywhere else in this parser
+                assert "_otlp.malformed_fields" not in attrs
+            else:
+                assert field in attrs["_otlp.malformed_fields"]
+                assert any(field in e for e in errors)
+
+
+def test_otlp_non_list_field_strict_mode_raises() -> None:
+    """Strict mode (errors=None) rejects a malformed list field."""
+    span = dict(_SPAN_BASE)
+    span["events"] = 5
+    with pytest.raises(ValidationError):
+        normalize_otlp_request(_wrap_spans([span]))
+
+
+def test_otlp_anyvalue_non_list_values_not_500() -> None:
+    """arrayValue/kvlistValue with non-list `values` used to TypeError —
+    the malformed node must persist un-flattened as evidence."""
+    cases = [
+        ({"arrayValue": {"values": None}}, []),
+        ({"arrayValue": {"values": 5}}, {"arrayValue": {"values": 5}}),
+        ({"kvlistValue": {"values": None}}, {}),
+        ({"kvlistValue": {"values": 5}}, {"kvlistValue": {"values": 5}}),
+    ]
+    for value, expected in cases:
+        payload = _span_payload(attributes=[{"key": "a", "value": value}])
+        trace = normalize_otlp_request(payload)[0]
+        assert trace.spans[0].attributes["a"] == expected
+
+
+def test_otlp_null_name_becomes_unnamed() -> None:
+    """`name: null` must not stringify into the literal "None"."""
+    trace = normalize_otlp_request(_span_payload(name=None))[0]
+    assert trace.spans[0].name == "unnamed"

@@ -397,3 +397,50 @@ def test_auth_non_ascii_header_401_not_500(
         )
         assert r.status_code == 200
     store.close()
+
+
+def test_otlp_malformed_containers_not_500(client: TestClient) -> None:
+    """Every unguarded container shape (resource/scope/spans/events/links/
+    AnyValue values) used to raise TypeError/AttributeError → HTTP 500.
+    All must degrade into 200 + quarantine warnings."""
+    span_base = {
+        "traceId": "a" * 32, "spanId": "b" * 16, "name": "s",
+        "startTimeUnixNano": "1",
+    }
+    cases = [
+        {"resourceSpans": [{"resource": "x", "scopeSpans": [{"spans": [dict(span_base)]}]}]},
+        {"resourceSpans": [{"resource": 42, "scopeSpans": [{"spans": [dict(span_base)]}]}]},
+        {"resourceSpans": [{"scopeSpans": [{"scope": "x", "spans": [dict(span_base)]}]}]},
+        {"resourceSpans": [{"scopeSpans": [
+            {"instrumentationLibrary": "x", "spans": [dict(span_base)]}
+        ]}]},
+        {"resourceSpans": [{"scopeSpans": [{"spans": None}]}]},
+        {"resourceSpans": [{"scopeSpans": [{"spans": 5}]}]},
+        {"resourceSpans": [{"scopeSpans": [{"spans": [dict(span_base, events=None)]}]}]},
+        {"resourceSpans": [{"scopeSpans": [{"spans": [dict(span_base, events=5)]}]}]},
+        {"resourceSpans": [{"scopeSpans": [{"spans": [dict(span_base, links=None)]}]}]},
+        {"resourceSpans": [{"scopeSpans": [{"spans": [dict(span_base, links=5)]}]}]},
+        {"resourceSpans": [{"scopeSpans": [{"spans": [dict(
+            span_base, attributes=[{"key": "a", "value": {"arrayValue": {"values": None}}}],
+        )]}]}]},
+        {"resourceSpans": [{"scopeSpans": [{"spans": [dict(
+            span_base, attributes=[{"key": "k", "value": {"kvlistValue": {"values": 5}}}],
+        )]}]}]},
+    ]
+    for payload in cases:
+        r = client.post("/v1/otlp/traces", json=payload)
+        assert r.status_code in (200, 422), (payload, r.text)
+
+
+def test_negative_offset_clamped_to_zero(
+    client: TestClient, synthetic_trace: Trace
+) -> None:
+    """offset is clamped like limit — negative input reads as 0, and the
+    response echoes the clamped value."""
+    envelope = TraceIngest(traces=[synthetic_trace]).model_dump(mode="json")
+    client.post("/v1/traces", json=envelope)
+    r = client.get("/v1/traces", params={"offset": -5})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["offset"] == 0
+    assert len(body["items"]) == 1

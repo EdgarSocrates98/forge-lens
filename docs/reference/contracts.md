@@ -8,7 +8,10 @@ gerados: `schemas/v1/*.json` — regenere com
 
 - `schema_version: "1.0.0"` em todo modelo — bump obrigatório em quebra.
 - `extra="allow"`: campos desconhecidos são preservados — consumidores antigos
-  leem payloads novos sem perda.
+  leem payloads novos sem perda. **Nota de persistência**: campos extra são
+  válidos no contrato mas o `SQLiteTraceStore` grava apenas as colunas do
+  schema — dados extra não sobrevivem a um round-trip pelo store (aplicam
+  em memória/na resposta da API; migração de colunas vem com schema v2).
 - Campos ausentes ficam `None` — nunca valores fabricados.
 
 ## Modelos

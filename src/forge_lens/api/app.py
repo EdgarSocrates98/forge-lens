@@ -223,6 +223,7 @@ def create_app(
         offset: int = 0,
     ) -> dict[str, Any]:
         limit = max(1, min(limit, 500))
+        offset = max(0, offset)  # symmetric with limit — clamp, don't reject
         with METRICS.timer(M_QUERY_LATENCY):
             items = get_store().list_traces(
                 project_id=project_id or cfg.project_id,

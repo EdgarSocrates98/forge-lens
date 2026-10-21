@@ -81,3 +81,18 @@ def test_env_bad_int_reports_variable_name(monkeypatch) -> None:
     monkeypatch.setenv("FORGE_LENS_MAX_PAYLOAD_BYTES", "huge")
     with pytest.raises(ValueError, match="FORGE_LENS_MAX_PAYLOAD_BYTES"):
         load_config()
+
+
+def test_toml_bool_is_not_an_int_bound(tmp_path: Path) -> None:
+    """`rate_limit_per_minute = true` is a bool — bool subclasses int but
+    must not silently configure a 1 req/min bound."""
+    from forge_lens.core.config import load_config
+
+    (tmp_path / ".forge-lens").mkdir()
+    (tmp_path / ".forge-lens" / "config.toml").write_text(
+        "[lens]\nrate_limit_per_minute = true\nmax_spans_per_request = 50\n"
+    )
+    cfg = load_config(tmp_path)
+    # bool ignored — default preserved; the real int still applies
+    assert cfg.rate_limit_per_minute != 1
+    assert cfg.max_spans_per_request == 50

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 
 from forge_lens.contracts.v1.trace import IntegrityFlag, Trace
@@ -189,3 +191,18 @@ def test_naive_times_normalized_to_utc(
     assert loaded is not None
     # naive-as-UTC: stored timestamps equal the aware originals
     assert loaded.spans[0].start_time == synthetic_trace.spans[0].start_time
+
+
+def test_declared_bounds_contradicting_spans_warns(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """Envelope-declared started_at/ended_at are trusted as-is — but a
+    contradiction with the actual span bounds must surface as evidence."""
+    bad = synthetic_trace.model_copy(deep=True)
+    # spans start at t0; declare a started_at 10s later
+    bad.started_at = bad.spans[0].start_time + timedelta(seconds=10)
+    # and an ended_at before the latest span end
+    bad.ended_at = bad.spans[0].start_time
+    result = _pipeline(tmp_store).ingest([bad])
+    assert any("started_at" in w for w in result.warnings)
+    assert any("ended_at" in w for w in result.warnings)

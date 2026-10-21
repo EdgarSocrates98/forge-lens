@@ -77,7 +77,9 @@ def _toml_to_config(data: dict[str, object], base: LensConfig) -> LensConfig:
         ("max_attr_value_chars", "max_attr_value_chars"),
         ("rate_limit_per_minute", "rate_limit_per_minute"),
     ):
-        if isinstance(v := section.get(key), int):
+        # bool is an int subclass — `rate_limit_per_minute = true` would
+        # silently mean 1 req/min; only a real int configures a bound
+        if isinstance(v := section.get(key), int) and not isinstance(v, bool):
             kwargs[field_name] = v
     return LensConfig(**{**base.__dict__, **kwargs})
 

@@ -17,7 +17,7 @@ All replacements are countable: ``SanitizeReport`` feeds self-metrics.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from forge_lens.contracts.v1.trace import Trace
@@ -74,7 +74,6 @@ class SanitizeReport:
     dropped_content: int = 0
     truncated_values: int = 0
     emails_masked: int = 0
-    details: list[str] = field(default_factory=list)
 
 
 def _is_sensitive_key(key: str) -> bool:

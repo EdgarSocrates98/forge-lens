@@ -471,3 +471,27 @@ def test_redact_hook_error_never_breaks_app() -> None:
         pass
     assert tracer.export_errors == 1
     assert len(exporter.traces) == 1
+
+
+def test_get_tracer_singleton_is_thread_safe() -> None:
+    """Concurrent first access must not construct two tracers."""
+    import threading
+
+    import forge_lens.sdk.tracer as tracer_mod
+
+    old = tracer_mod._default
+    tracer_mod._default = None
+    try:
+        results: list[LensTracer] = []
+        threads = [
+            threading.Thread(target=lambda: results.append(tracer_mod.get_tracer()))
+            for _ in range(8)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(results) == 8
+        assert len({id(t) for t in results}) == 1  # one instance, not 8
+    finally:
+        tracer_mod._default = old
