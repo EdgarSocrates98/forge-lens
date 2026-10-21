@@ -646,6 +646,15 @@ class SQLiteTraceStore:
         )
 
     def get_trace(self, trace_id: str, project_id: str | None = None) -> Trace | None:
+        # a str carrying lone surrogates (argv surrogateescape, WTF-8
+        # request bodies) raises UnicodeEncodeError in the driver — an
+        # unencodable id can never match a stored one, so it is "absent"
+        try:
+            trace_id.encode("utf-8")
+            if project_id is not None:
+                project_id.encode("utf-8")
+        except UnicodeEncodeError:
+            return None
         with self._lock:
             if project_id:
                 trow = self._conn.execute(

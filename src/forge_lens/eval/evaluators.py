@@ -8,6 +8,7 @@ marks pass/fail metrics eligible for the proportion test in
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -58,6 +59,8 @@ def _latency_budget(
     trace: Trace, params: dict[str, Any], now: datetime | None
 ) -> EvaluationResult:
     budget = float(params["budget_ms"])
+    if not math.isfinite(budget):
+        raise ValueError("budget_ms must be finite")
     if trace.ended_at is None or not trace.spans:
         return _result(
             "latency_budget",
@@ -95,7 +98,10 @@ def _latency_budget(
 def _token_budget(
     trace: Trace, params: dict[str, Any], now: datetime | None
 ) -> EvaluationResult:
-    budget = int(params["max_total_tokens"])
+    raw_budget = params["max_total_tokens"]
+    if isinstance(raw_budget, float) and not math.isfinite(raw_budget):
+        raise ValueError("max_total_tokens must be finite")
+    budget = int(raw_budget)
     total = 0
     known = 0
     for s in trace.spans:
@@ -166,8 +172,8 @@ def _has_span(
     )
 
 
-# name → (fn, binary?) — binary metrics get the proportion z-test in
-# compare; continuous ones report deltas only
+# name → (fn, binary?) — binary marks metrics whose trace-level pass
+# fraction (score==1.0 counts) supports the proportion z-test in compare
 EVALUATORS: dict[str, tuple[Evaluator, bool]] = {
     "error_free": (_error_free, True),
     "latency_budget": (_latency_budget, True),
@@ -175,7 +181,8 @@ EVALUATORS: dict[str, tuple[Evaluator, bool]] = {
     "tool_success": (_tool_success, True),
     "has_span": (_has_span, True),
 }
-"""Binary flag: ``True`` = score∈{0,1} → proportion test applies."""
+"""Binary flag: ``True`` = the score is a per-trace pass (1.0)/fail —
+the pass fraction across traces is a proportion the z-test can test."""
 
 
 def run_evaluators(
@@ -235,7 +242,7 @@ def run_evaluators(
         fn, _binary = entry
         try:
             out.append(fn(trace, params, now))
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
             out.append(
                 _result(
                     name,

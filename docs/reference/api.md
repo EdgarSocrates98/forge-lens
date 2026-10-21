@@ -141,7 +141,9 @@ Bateria default (`error_free`, `tool_success`) → `{results[]}`.
 `evaluator/metric` com `significance`: `significant` (z-teste de duas
 proporções, só para métricas binárias 0/1 com n≥10 por lado),
 `insufficient_data`, `not_tested` (métrica contínua — p-valor nunca é
-fabricado), `not_computable` (variância pooled zero).
+fabricado), `not_computable` (variância pooled zero). Um side pode
+carregar seu próprio `project_id`, sobrescrevendo o do topo apenas
+naquele lado — comparação cross-project A/B.
 
 Avaliadores: `error_free` (binário), `tool_success` (binário por trace —
 pass = todas as tools ok; `null` sem tool spans), `latency_budget`

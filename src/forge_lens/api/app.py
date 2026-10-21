@@ -432,6 +432,20 @@ def create_app(
     _MAX_EVAL_TRACES = 500
     _MAX_EVAL_SPECS = 100
 
+    def _eval_str(value: Any, field: str) -> str:
+        """str that is safe to bind into sqlite — lone surrogates from
+        WTF-8 bodies pass isinstance() but raise UnicodeEncodeError in
+        the DB driver."""
+        if not isinstance(value, str):
+            raise _reject_request(422, f"{field} must be a string")
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise _reject_request(
+                422, f"{field}: unencodable string (lone surrogate)"
+            ) from None
+        return value
+
     def _eval_specs(body: dict[str, Any]) -> list[Any]:
         specs = body.get("evaluators")
         if (
@@ -446,15 +460,15 @@ def create_app(
 
     def _eval_project_id(body: dict[str, Any]) -> str | None:
         pid = body.get("project_id")
-        if pid is not None and not isinstance(pid, str):
-            raise _reject_request(422, "project_id must be a string")
-        return pid
+        if pid is None:
+            return None
+        return _eval_str(pid, "project_id")
 
     def _eval_dataset(body: dict[str, Any]) -> str | None:
         ds = body.get("dataset")
-        if ds is not None and not isinstance(ds, str):
-            raise _reject_request(422, "dataset must be a string")
-        return ds
+        if ds is None:
+            return None
+        return _eval_str(ds, "dataset")
 
     def _eval_traces(body: dict[str, Any]) -> list[Any]:
         trace_ids = body.get("trace_ids")
@@ -462,13 +476,13 @@ def create_app(
             not isinstance(trace_ids, list)
             or not trace_ids
             or len(trace_ids) > _MAX_EVAL_TRACES
-            or not all(isinstance(t, str) for t in trace_ids)
         ):
             raise _reject_request(
                 422, f"trace_ids: 1..{_MAX_EVAL_TRACES} strings required"
             )
+        ids = [_eval_str(t, "trace_ids[]") for t in trace_ids]
         pid = _eval_project_id(body)
-        return [_get_trace_or_404(tid, pid) for tid in trace_ids]
+        return [_get_trace_or_404(tid, pid) for tid in ids]
 
     async def _eval_body(request: Request) -> Any:
         _check_declared_size(request, cfg.max_payload_bytes, _reject_request)
@@ -490,16 +504,20 @@ def create_app(
         from forge_lens.eval import evaluate_traces
 
         body = await _eval_body(request)
+        # cheap validation first — a bad spec list must not cost a
+        # fan-out of store lookups before the 422 fires
+        specs = _eval_specs(body)
         report = evaluate_traces(
-            _eval_traces(body),
-            _eval_specs(body),
-            dataset=_eval_dataset(body),
+            _eval_traces(body), specs, dataset=_eval_dataset(body)
         )
         return report.model_dump(mode="json")
 
     @app.post(f"/{API_VERSION}/eval/compare", dependencies=read_deps)
     async def eval_compare(request: Request) -> dict[str, Any]:
-        """A/B compare: ``{a: {trace_ids,dataset}, b: {...}, evaluators}``."""
+        """A/B compare: ``{a: {trace_ids,dataset}, b: {...}, evaluators}``.
+
+        A side may carry its own ``project_id`` — it overrides the
+        top-level one for that side only, enabling cross-project A/B."""
         from forge_lens.eval import compare_runs, evaluate_traces
 
         body = await _eval_body(request)

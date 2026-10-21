@@ -22,8 +22,8 @@ class EvalReport(LensModel):
     results: dict[str, list[EvaluationResult]]
     """trace_id → its EvaluationResult list, in spec order."""
     summary: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    """``evaluator/metric`` → ``{n, mean_score, pass_rate, nulls}`` —
-    ``pass_rate`` counts score==1.0 for binary evaluators."""
+    """``evaluator/metric`` → ``{n, nulls, sum, mean_score, pass_rate}``
+    — ``pass_rate`` counts score==1.0 for binary evaluators."""
 
 
 def evaluate_traces(

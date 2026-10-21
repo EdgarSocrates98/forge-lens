@@ -684,8 +684,7 @@ def test_eval_malformed_bodies_are_4xx_not_500(
         ({"trace_ids": [tid], "evaluators": []}, "json"),        # empty specs
         ({"trace_ids": [tid] * 501,
           "evaluators": [{"name": "error_free"}]}, "json"),      # over cap
-        ({"trace_ids": ["x" * i for i in range(1)],
-          "evaluators": [{"name": "error_free"}] * 0}, "json"),  # empty again
+        ({"trace_ids": [""], "evaluators": []}, "json"),         # empty specs 2
         ({"trace_ids": [1, 2], "evaluators": [{"name": "x"}]}, "json"),  # non-str ids
         ({"trace_ids": [tid], "evaluators": [{"name": "error_free"}] * 101}, "json"),
         ({"trace_ids": [tid], "evaluators": [{"name": "error_free"}],
@@ -740,3 +739,56 @@ def test_eval_specs_never_500_even_when_junk(
                for res in results)
     assert any("params must be an object" in res["details"]["reason"]
                for res in results)
+
+
+def test_eval_surrogate_strings_are_422_not_500(
+    client: TestClient, synthetic_trace: Trace
+) -> None:
+    """WTF-8 bodies: json.loads accepts lone surrogates; binding them
+    into sqlite raises UnicodeEncodeError — now a clean 422."""
+    client.post("/v1/traces", json=TraceIngest(traces=[synthetic_trace]).model_dump(mode="json"))
+    tid = synthetic_trace.trace_id
+    # a \\ud800 escape is VALID JSON — json.loads materializes a lone
+    # surrogate that isinstance(str) accepts but sqlite can't bind
+    for raw in (
+        '{"trace_ids": ["\\ud800"], "evaluators": [{"name": "error_free"}]}',
+        f'{{"trace_ids": ["{tid}"], "project_id": "\\ud800", '
+        '"evaluators": [{"name": "error_free"}]}',
+        f'{{"a": {{"trace_ids": ["{tid}"]}}, "b": {{"trace_ids": ["{tid}"], '
+        '"project_id": "\\ud800"}, '
+        '"evaluators": [{"name": "error_free"}]}',
+    ):
+        url = "/v1/eval/compare" if raw.startswith('{"a"') else "/v1/eval/run"
+        r = client.post(url, content=raw,
+                        headers={"Content-Type": "application/json"})
+        assert r.status_code == 422, (raw[:60], r.status_code, r.text)
+
+
+def test_eval_non_finite_params_score_none_not_verdict(
+    client: TestClient, synthetic_trace: Trace
+) -> None:
+    """Infinity/NaN budgets must not fabricate a confident pass/fail —
+    they degrade to score=None like every other bad spec."""
+    client.post("/v1/traces", json=TraceIngest(traces=[synthetic_trace]).model_dump(mode="json"))
+    tid = synthetic_trace.trace_id
+    # Python's json.loads accepts Infinity/NaN literals — real clients
+    # send them as raw text; strict serializers can't even emit them
+    for budget in ("Infinity", "-Infinity", "NaN", "1e999"):
+        raw = (
+            f'{{"trace_ids": ["{tid}"], "evaluators": [{{"name": '
+            f'"latency_budget", "params": {{"budget_ms": {budget}}}}}]}}'
+        )
+        r = client.post("/v1/eval/run", content=raw,
+                        headers={"Content-Type": "application/json"})
+        assert r.status_code == 200, (budget, r.text)
+        res = r.json()["results"][tid][0]
+        assert res["score"] is None, budget
+    for budget in ("Infinity", "NaN"):
+        raw = (
+            f'{{"trace_ids": ["{tid}"], "evaluators": [{{"name": '
+            f'"token_budget", "params": {{"max_total_tokens": {budget}}}}}]}}'
+        )
+        r = client.post("/v1/eval/run", content=raw,
+                        headers={"Content-Type": "application/json"})
+        assert r.status_code == 200, (budget, r.text)
+        assert r.json()["results"][tid][0]["score"] is None

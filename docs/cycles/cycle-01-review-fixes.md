@@ -690,3 +690,29 @@ battery ×6, endpoints eval ×2).
 
 Testes: +5 (bateria de 11 bodies malformados → 4xx, specs junk →
 score=None, `not_computable`, negative-duration, dedupe+sum).
+
+## Round 15 — eval boundary: os 500s confirmados fechados
+
+- **`OverflowError` capturado**: `run_evaluators` agora cobre
+  `ArithmeticError` — `int(1e999)`, `float(10**400)` viram
+  `evaluator_error` com `score=None`, não 500.
+- **Params não-finitos não fabricam veredito**: `budget_ms`/`max_total_tokens`
+  com `Infinity`/`NaN` (que `json.loads` aceita literalmente) →
+  `ValueError` → `score=None` + reason. Antes `Infinity` dava pass grátis
+  e `NaN` fail universal — sinais confiantes de specs malformados.
+- **Lone surrogates → 422**: `json.loads` materializa surrogates de
+  escapes `\ud800` válidos; `isinstance(str)` aceitava e sqlite
+  explodia em `UnicodeEncodeError`. `_eval_str` valida encodabilidade
+  UTF-8 em `trace_ids[]`/`project_id`/`dataset`. `get_trace` também
+  mapeia `UnicodeEncodeError → None` (argv surrogateescape no CLI
+  trilha o mesmo caminho).
+- **Ordem de validação**: `_eval_specs` (barato) antes de
+  `_eval_traces` (fan-out de lookups) — spec inválido não custa 500
+  queries antes do 422.
+- **`project_id` por side documentado** em api.md + docstring —
+  comparação cross-project explícita, não silenciosa.
+- **Comentários honestos**: flag binary = fração de pass por trace
+  (não "score∈{0,1}"); `summary` documenta `sum`.
+
+Testes: +2 (surrogates em trace_ids/project_id/side → 422;
+Infinity/-Infinity/NaN/1e999 → score=None, nunca veredito fabricado).
