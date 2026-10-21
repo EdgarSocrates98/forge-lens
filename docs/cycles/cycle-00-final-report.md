@@ -18,7 +18,7 @@
 
 ## 2. Decisões arquiteturais (ADRs)
 
-- **0001** Contratos = Pydantic v1 + JSON Schema gerado commitado (CI verifica drift). ACCEPTED.
+- **0001** Contratos = Pydantic 2 (`pydantic>=2.7`) com `schema_version` v1 + JSON Schema gerado commitado (CI verifica drift). ACCEPTED.
 - **0002** SQLite WAL é o store default (único arquivo, transacional, zero infra). ACCEPTED.
 - **0003** Sanitização pré-persistência com `capture=metadata|full`. ACCEPTED.
 - **0004** `Provenance` obrigatório — espinha epistêmica. ACCEPTED.

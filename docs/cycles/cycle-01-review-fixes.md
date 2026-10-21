@@ -763,3 +763,53 @@ NaN→null+json_valid, dead-letter cap+overflow, fingerprint metadata).
 
 Testes: +1 (mixed/tuple keys × capture_args — host nunca recebe exceção,
 marcadores corretos por caminho).
+
+## Round 18 — reconciliação de docs + cleanups do reviewer
+
+Docs escritas nos ciclos 00/01 ainda afirmavam que trabalho já
+implementado não existia (P1 no próprio taxonomia do projeto — claims
+devem casar com evidência). Reconciliadas com numeração canônica do
+roadmap (Studio=02, graph=03, cost=04, investigação=05, eval=06,
+MCP/hosts=10):
+
+- `overview.md`: diagrama de componentes agora inclui a camada
+  query/intel implementada; lista roadmap usa números canônicos e
+  separa "implementado" (03–06) de roadmap real (02, 07–12).
+- `graph.md`: `DOCUMENTED_ONLY` → descrição do motor real em
+  `graph/` (EdgeKind parent/sequence/link, critical_path cycle-safe,
+  self_time, cycle_member_ids, endpoints `/v1/graph/*`); arestas
+  semânticas e BlobRef ficam explicitamente futuras.
+- `graph-explorer.md`/`trace-explorer.md`: backend existe (ciclo 03);
+  a UI interativa é ciclo 02 `NOT_STARTED`.
+- `evaluations.md`: `DOCUMENTED_ONLY` → backend ciclo 06 real
+  (evaluators, endpoints, score=None, z-test, bounds); datasets
+  persistidos/CI gates/evaluators custom ficam como roadmap.
+- `replay.md`: observed replay implementado (ciclo 05);
+  simulação/re-execução seguem roadmap (spec do 05, não implementado).
+- `cost-analysis.md`: registry de preços, `/cost`, `/pricing` e waste
+  detection documentados como implementados (ciclo 04).
+- `mcp.md`/`integrations.md`/`competitive-analysis.md`/`threat-model.md`:
+  números de ciclo corrigidos para o mapa canônico.
+- `cycle-01-final-report.md`: rodapé de limitações reescrito com
+  numeração canônica + ponteiro para status atual.
+- **`cycle-02-final-report.md` criado**: `NOT_STARTED`, tabela do spec,
+  por que ficou para trás, e as APIs backend prontas para a UI.
+
+Cleanups de código (não-bloqueantes do review):
+
+- `pipeline.py`: agregação de `SanitizeReport` itera
+  `dataclasses.fields()` — um contador futuro não pode ser dropado
+  silenciosamente por lista de nomes stale.
+- `evaluators._token_budget`: `bool`/`str` rejeitados explicitamente
+  (`True`→budget 1 e `"500"` silencioso eram arestas sloppies);
+  `score=None` + reason, como todo param inválido.
+- `cycle-00-final-report.md`: "Pydantic v1" → "Pydantic 2
+  (`pydantic>=2.7`) com `schema_version` v1" (era ambíguo contra a
+  dependência real).
+- `jsonschema.py`: comentário explicando `parents[3]` (assume checkout
+  do repo — correto em CI/dev, errado se instalado).
+- Dirs scaffold órfãos removidos: `api/routes/`, `ingestion/`,
+  `security/` (vazios, não trackeados).
+
+Testes: +2 (`_token_budget` rejeita bool/str → `score=None`;
+agregação sanitize cobre todos os fields do dataclass).

@@ -24,6 +24,21 @@ def test_end_to_end_ingest(tmp_store: SQLiteTraceStore, synthetic_trace: Trace) 
     assert tmp_store.get_trace(synthetic_trace.trace_id) is not None
 
 
+def test_sanitize_aggregation_covers_all_report_fields(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """result.sanitize aggregates every SanitizeReport counter — a new field
+    on the report must appear in the aggregate without a code change here."""
+    from dataclasses import fields as dc_fields
+
+    from forge_lens.sanitize.redact import SanitizeReport
+
+    synthetic_trace.spans[0].attributes = {"openai.api_key": "sk-test"}
+    result = _pipeline(tmp_store).ingest([synthetic_trace])
+    assert set(result.sanitize) == {f.name for f in dc_fields(SanitizeReport)}
+    assert result.sanitize["redacted_keys"] >= 1
+
+
 def test_dedupe_on_reingest(tmp_store: SQLiteTraceStore, synthetic_trace: Trace) -> None:
     p = _pipeline(tmp_store)
     p.ingest([synthetic_trace])

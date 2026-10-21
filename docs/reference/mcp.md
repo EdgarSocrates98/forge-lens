@@ -1,8 +1,8 @@
 # Referência — MCP (Model Context Protocol)
 
-> Estado: **`DOCUMENTED_ONLY`** — roadmap ciclo 09. Nenhum código MCP existe
-> no ciclo 01 e nenhuma afirmação de suporte deve ser feita além do escopo
-> descrito aqui.
+> Estado: **`DOCUMENTED_ONLY`** — roadmap ciclo 10 (Forge ecosystem, hosts,
+> MCP & portable installation). Nenhum código MCP existe até o ciclo 06 e
+> nenhuma afirmação de suporte deve ser feita além do escopo descrito aqui.
 
 ## Escopo honesto
 

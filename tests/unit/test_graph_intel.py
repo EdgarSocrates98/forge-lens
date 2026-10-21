@@ -613,6 +613,20 @@ def test_eval_latency_and_token_budget() -> None:
     assert res2[1].score == 1.0  # 500 ≤ 600
 
 
+def test_eval_token_budget_rejects_bool_and_string() -> None:
+    """`True` must not become budget 1; "500" is a wire string, not a number."""
+    from forge_lens.eval import run_evaluators
+
+    t = _trace([_span("a1", "x")])
+    for bad in (True, False, "500", "0"):
+        res = run_evaluators(
+            t, [{"name": "token_budget", "params": {"max_total_tokens": bad}}]
+        )
+        assert res[0].score is None, f"{bad!r} must not produce a verdict"
+        assert res[0].metric == "evaluator_error"
+        assert "number" in res[0].details["reason"]
+
+
 def test_eval_unknown_evaluator_and_missing_params() -> None:
     from forge_lens.eval import run_evaluators
 

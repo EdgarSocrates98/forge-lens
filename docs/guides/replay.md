@@ -1,7 +1,8 @@
 # Guia — Replay
 
-> Estado: **observed replay = leitura determinística do trace** (hoje, via
-> CLI/API). Simulação e re-execução são roadmap (ciclo 06) —
+> Estado: **observed replay implementado** (ciclo 05) — leitura
+> determinística do trace via `/v1/traces/{id}/replay` e CLI. Simulação e
+> re-execução são roadmap (ciclo 05 spec, não implementado) —
 > `DOCUMENTED_ONLY` abaixo.
 
 ## Os três modos (definições do produto)
@@ -19,7 +20,7 @@
 - Nunca mistura evento observado com evento simulado sem rótulo:
   `provenance` distingue `observed` de qualquer coisa sintética.
 
-## Simulation Replay (proposta ciclo 06)
+## Simulation Replay (proposta — ciclo 05 spec, não implementado)
 
 - Entradas: trace + artefatos registrados (`BlobRef`) + política declarativa.
 - Saída: execução *rotulada* `provenance=inferred`/nova trace vinculada por

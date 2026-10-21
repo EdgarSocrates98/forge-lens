@@ -11,13 +11,13 @@
 | Local-first leve (SQLite) | ❌ ClickHouse+PG | parcial | ❌ | ❌ | ✅ SQLite WAL |
 | Agent/tool graph | sessões | trace tree | runs/tree | spans | ✅ graph temporal |
 | Replay observado | re-render | ✅ | parcial | ❌ | ✅ (padrão) |
-| Replay simulado/seguro | ❌ | ❌ | ❌ | ❌ | roadmap ciclo 06 |
+| Replay simulado/seguro | ❌ | ❌ | ❌ | ❌ | roadmap ciclo 05 spec |
 | Root-cause c/ evidência | scores | evals | evals | ❌ | ✅ hipóteses+evidência |
 | Cost estimado vs faturado | estimado | estimado | estimado | estimado | ✅ separados |
-| Loop/no-progress detection | ❌ | ❌ | ❌ | ❌ | roadmap ciclo 05 |
-| Evals linkadas a spans | parcial | ✅ | ✅ | ❌ | roadmap ciclo 07 |
+| Loop/no-progress detection | ❌ | ❌ | ❌ | ❌ | roadmap ciclo 07 |
+| Evals linkadas a spans | parcial | ✅ | ✅ | ❌ | ✅ backend ciclo 06 |
 | SDK zero-dep | ❌ | ❌ | ❌ | ❌ | ✅ TS (stdlib Py) |
-| MCP instrumentation | ❌ | ❌ | ❌ | ❌ | opcional (ciclo 09) |
+| MCP instrumentation | ❌ | ❌ | ❌ | ❌ | opcional (ciclo 10) |
 | Open-source real | AGPL/core+cloud | ELv2 | ❌ | ❌ | MIT |
 
 ## Posicionamento

@@ -1,36 +1,53 @@
 # Arquitetura — Grafo Agêntico
 
-> Estado: **roadmap (ciclo 04)**. A fundação de dados já persiste tudo que o
-> grafo precisa; o motor de consulta temporal e o Graph Explorer são
-> documentados aqui, não implementados. Status: `DOCUMENTED_ONLY`.
+> Estado: **implementado** (ciclo 03) em `src/forge_lens/graph/` — projeção
+> determinística de traces/sessões em nós+arestas, exposta via
+> `/v1/graph/*`. Relatório: `docs/cycles/cycle-03-final-report.md`.
 
-## Nós
+## Nós (hoje)
 
-- `AgentExecution` (por `run_id`), `Span` (granular), `ToolInvocation`,
-  `ModelCall` (span kind=llm), `Session`, `Project`.
+- `GraphNode` por `Span` — `id=span_id`, `kind` tipado por `SpanKind`
+  (`agent|tool|llm|…`), `name`, `status`, `duration_ms`, token usage.
+- Session graph (`build_session_graph`): um nó por `Trace`, com stats
+  agregados e `truncated` explícito quando a janela corta.
 
-## Arestas (todas com intervalo temporal quando observável)
+## Arestas implementadas (`EdgeKind`)
 
 | Aresta | Origem evidencial |
 |---|---|
-| `contains` | trace→span (PK), session→trace |
-| `parent_of` | `parent_span_id` observado |
-| `calls_tool` | span kind=tool dentro de agente / `ToolInvocation` |
-| `invokes_model` | span kind=llm + `llm.model_name` |
-| `delegates_to` | `parent_run_id` / link entre traces — só quando observado |
-| `retries` | `retry_count`>0 / mesmo tool_call_id repetido |
-| `produces`/`consumes` | refs de BlobRef entre spans (futuro) |
+| `parent` | `parent_span_id` observado no span filho |
+| `sequence` | sucessão temporal entre siblings ordenados por `start_time` |
+| `link` | `SpanLink` explícito — pode apontar para nó fora do grafo (`dangling_edges` conta isso) |
 
-## Consultas alvo (ciclo 04)
+## Algoritmos
 
-- Sub-árvore de uma execução com ordem temporal exata.
-- Caminho causal candidato de uma falha (ancestrais de spans `error`).
-- Difusão de custo: agregar `TokenUsage`/`CostObservation` por sub-árvore.
-- Delegações observadas entre agentes/runs.
+- `critical_path` — caminho de maior duração acumulada; iterativo e
+  cycle-safe (ciclos em `parent` não travam nem corrompem o resultado).
+- `self_time_ranking` — bottlenecks por tempo próprio (duração − filhos),
+  `duration_ms` negativo de clock-skew clampado a 0.
+- `cycle_member_ids` — detecção O(n) de membros de ciclo, exposta em
+  `ExecutionGraph.stats`.
+
+## Endpoints
+
+- `GET /v1/graph/traces/{trace_id}` — grafo completo da trace.
+- `GET /v1/graph/traces/{trace_id}/critical-path`
+- `GET /v1/graph/traces/{trace_id}/bottlenecks?top=N` (N ≤ 100)
+- `GET /v1/graph/sessions/{session_id}?limit=N` (N ≤ 500)
+
+## Não implementado (futuro)
+
+- Arestas semânticas `calls_tool`/`invokes_model`/`delegates_to`/`retries`
+  e `produces`/`consumes` (BlobRef) — requerem projeção além de
+  parent/sequence/link; não são inferidas.
+- Agregação de custo por sub-árvore no grafo (hoje custo por span via
+  `/v1/traces/{id}/cost`, ciclo 04).
+- Loop/stagnation detection — ciclo 07; ciclo em `parent` é detectado como
+  anomalia estrutural, não como sinal de loop agêntico.
 
 ## O que o grafo **não** faz
 
-- Não infere aresta por correlação temporal — ausência de `parent_run_id`
-  registrado vira `unknown`, não aresta inventada.
-- Não classifica repetição legítima como loop — detecção de loop/no-progress
-  é ciclo 05 e exige evidência explícita de estagnação.
+- Não infere aresta por correlação temporal — ausência de `parent_span_id`
+  ou `SpanLink` registrado fica sem aresta, não vira hipótese.
+- Não apresenta `link` para nó ausente como falha — vira `dangling_edges`
+  em `stats`, evidência declarada.

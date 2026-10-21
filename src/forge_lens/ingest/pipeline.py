@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 
 from forge_lens.contracts.v1.trace import IntegrityFlag, SpanKind, Trace
 from forge_lens.core.bounded import BoundedList
@@ -266,14 +266,14 @@ class IngestPipeline:
                 result.updated_spans += updated
                 result.duplicate_spans += duplicates
                 result.traces.append(trace.trace_id)
-                for key in (
-                    "redacted_keys",
-                    "redacted_values",
-                    "dropped_content",
-                    "truncated_values",
-                    "emails_masked",
-                ):
-                    result.sanitize[key] = result.sanitize.get(key, 0) + getattr(report, key)
+                # every SanitizeReport field is a counter — iterating
+                # fields() means a future counter can't be dropped
+                # from the aggregate by a stale name list
+                for field in fields(SanitizeReport):
+                    result.sanitize[field.name] = (
+                        result.sanitize.get(field.name, 0)
+                        + getattr(report, field.name)
+                    )
 
         METRICS.inc(M_TRACES_INGESTED, len(traces))
         METRICS.inc(M_SPANS_INGESTED, result.accepted_spans)

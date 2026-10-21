@@ -62,6 +62,9 @@ def write_schemas(target_dir: Path) -> list[Path]:
 
 
 if __name__ == "__main__":
+    # parents[3] resolves <repo>/src/forge_lens/contracts/jsonschema.py → repo
+    # root. This assumes execution from a source checkout (which is how CI
+    # runs it); from an installed site-packages layout the path is wrong.
     root = Path(__file__).resolve().parents[3]
     for p in write_schemas(root / "schemas" / "v1"):
         print(p)

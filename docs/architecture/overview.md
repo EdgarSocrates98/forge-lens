@@ -1,7 +1,9 @@
 # Arquitetura — Visão Geral
 
-> Status: **implementado** no ciclo 01 para o núcleo descrito como "atual";
-> itens marcados *roadmap* estão documentados mas não construídos.
+> Status: núcleo de ingest/storage implementado no ciclo 01; backends de
+> grafo (ciclo 03), custo/tokens (ciclo 04), investigação+replay (ciclo 05)
+> e avaliação (ciclo 06) implementados — ver `docs/cycles/`. Itens marcados
+> *roadmap* estão documentados mas não construídos.
 
 ## Princípios estruturais
 
@@ -46,20 +48,36 @@
 └───────────────────────────┬──────────────────┘
                             ▼
 ┌─────────────────────────────────────────────┐
-│ Query layer: /v1/traces, /v1/traces/{id},    │
-│ /v1/health, /v1/metrics · CLI traces show    │
+│ Query/Intel layer (implementada)             │
+│  /v1/traces*, /v1/graph/*, /v1/traces/{id}/  │
+│  cost·failure·replay·incident·eval,          │
+│  /v1/eval/run·compare, /v1/health, /v1/      │
+│  metrics · CLI traces show                   │
 └─────────────────────────────────────────────┘
 ```
 
+## Componentes implementados além do núcleo
+
+- **Graph engine** (ciclo 03) — `graph/` reconstrói nós/arestas por trace e
+  sessão: critical path, self-time/bottlenecks, cycle-safe.
+- **Token/cost intelligence** (ciclo 04) — `intel/` pricing registry,
+  `TokenUsage`→`estimated_usd`, waste signals.
+- **Investigação/replay** (ciclo 05) — `investigate/` failure
+  classification, observed replay timeline, incident bundles.
+- **Evaluation backend** (ciclo 06) — `eval/` evaluators determinísticos,
+  `EvalReport`, A/B compare com z-test honesto.
+
 ## Componentes (roadmap)
 
-- **Trace/Graph Explorer UI** (Studio) — ciclo 03/04.
-- **Graph engine temporal** — ciclo 04 (camada sobre o store).
-- **Replay/simulação** — ciclo 06 (observed replay é a única leitura hoje).
-- **Evaluations/experimentos** — ciclo 07.
-- **Specialist agents / loop detection** — ciclos 05, 08.
-- **MCP instrumentation** — ciclo 09, opcional e declarado com escopo real.
-- **Export/integração Forge** — ciclo 10 (via artefatos, sem acoplamento).
+- **Studio/Trace Explorer UI** (Angular) — ciclo 02, `NOT_STARTED`; as
+  APIs acima são o backend que a UI consumirá.
+- **Agentic ops / loop detection / alerts** — ciclo 07.
+- **RBAC, retenção, auditoria, criptografia** — ciclo 08.
+- **Postgres/ClickHouse path + benchmarks 100k–1M spans** — ciclo 09.
+- **MCP instrumentation + host adapters + installer** — ciclo 10,
+  opcional e declarado com escopo real.
+- **Release engineering / quality freeze** — ciclo 11.
+- **Specialist analysis agents / advanced intelligence** — ciclo 12.
 
 ## Fluxo de uma execução (verificado e2e no ciclo 01)
 

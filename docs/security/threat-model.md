@@ -28,7 +28,8 @@
   expondo a porta, a proteção é de rede/proxy.
 - **OTLP protobuf recusado** — reduz parser e superfície de ataque.
 - **Nenhuma execução de código** a partir de dados ingeridos: abrir trace é
-  read-only; replay não executa nada (ciclo 06 exigirá política explícita).
+  read-only; replay não executa nada (simulation/re-execution exigirão
+  política explícita — spec do ciclo 05 + governança do ciclo 08).
 
 ## Resíduos aceitos / roadmap
 

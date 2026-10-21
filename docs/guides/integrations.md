@@ -20,7 +20,7 @@ Integração é **por artefato**, nunca por dependência de código:
 3. O Lens **não exige** The Forge, Forge CLI, Forge Portal, Data Sentinel,
    LLMs pagos, AWS, Docker, K8s ou ClickHouse — funciona standalone.
 
-## MCP (roadmap ciclo 09)
+## MCP (roadmap ciclo 10)
 
 Ver `docs/reference/mcp.md` — escopo declarado: só onde existir ponto real
 de instrumentação (cliente/server/gateway).

@@ -99,6 +99,13 @@ def _token_budget(
     trace: Trace, params: dict[str, Any], now: datetime | None
 ) -> EvaluationResult:
     raw_budget = params["max_total_tokens"]
+    # bool is a subclass of int — True would silently become budget 1;
+    # strings parse fine through int() but a wire string is not a
+    # number the caller verified. Both are invalid params → no verdict.
+    if isinstance(raw_budget, (bool, str)):
+        raise TypeError(
+            f"max_total_tokens must be a number, got {type(raw_budget).__name__}"
+        )
     if isinstance(raw_budget, float) and not math.isfinite(raw_budget):
         raise ValueError("max_total_tokens must be finite")
     budget = int(raw_budget)

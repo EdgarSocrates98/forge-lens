@@ -87,10 +87,13 @@ Trace observado no smoke test: `47da2021625f82ef5414f7a72db60798`
   testes automatizados cobrem o mesmo fluxo via TestClient (sem socket real).
 - Métricas são in-process — exportar o Lens via OTLP é decisão futura
   (evita auto-instrumentação recursiva).
-- Studio/UI: `DOCUMENTED_ONLY` (ciclo 03); graph explorer: `DOCUMENTED_ONLY`
-  (ciclo 04); replay simulado/re-execução: `DOCUMENTED_ONLY` (ciclo 06);
-  evals: contrato pronto, runner `DOCUMENTED_ONLY` (ciclo 07); MCP:
-  `DOCUMENTED_ONLY` (ciclo 09).
+- Estado na data deste relatório (numeração canônica do roadmap):
+  Studio/UI `DOCUMENTED_ONLY` (ciclo 02); graph engine `DOCUMENTED_ONLY`
+  (ciclo 03 — implementado depois, ver `cycle-03-final-report.md`);
+  replay simulado/re-execução `DOCUMENTED_ONLY` (ciclo 05 — observed
+  replay implementado depois); evals: contrato pronto, runner
+  `DOCUMENTED_ONLY` (ciclo 06 — implementado depois); MCP:
+  `DOCUMENTED_ONLY` (ciclo 10). Status atual: `docs/architecture/overview.md`.
 
 ## 8. Backlog para o ciclo 02
 
