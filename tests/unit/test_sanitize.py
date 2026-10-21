@@ -241,3 +241,30 @@ def test_status_message_and_names_scrubbed(synthetic_trace: Trace) -> None:
     assert "[REDACTED:anthropic-key]" in trace.session_id  # type: ignore[operator]
     assert "[REDACTED:anthropic-key]" in trace.source.system  # type: ignore[operator]
     assert report.redacted_values >= 6
+
+
+def test_project_id_and_source_host_scrubbed(synthetic_trace: Trace) -> None:
+    """project_id and source.host are producer-controlled free text —
+    credential patterns apply (no e-mail mask: they are join keys)."""
+    trace = synthetic_trace.model_copy(deep=True)
+    key = "sk-ant-" + "b" * 30
+    trace.project_id = f"proj-{key}"
+    trace.source.host = f"host-{key}"
+
+    sanitize_trace(trace)
+    assert "[REDACTED:anthropic-key]" in trace.project_id
+    assert "[REDACTED:anthropic-key]" in (trace.source.host or "")
+    assert key not in repr(trace)
+
+
+def test_depth_limit_drop_is_counted() -> None:
+    """depth>8 returns a marker — and the report must count it."""
+    report = SanitizeReport()
+    deep: dict = {"a": 1}
+    for _ in range(12):
+        deep = {"n": deep}
+    out = sanitize_attributes(
+        {"deep": deep}, report, capture=CaptureLevel.FULL, max_chars=4096
+    )
+    assert "[DROPPED:depth-limit]" in repr(out)
+    assert report.dropped_content > 0

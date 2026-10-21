@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import atexit
 import functools
+import inspect
 import json
 import sys
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Any, ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar, cast
 
 from forge_lens import __version__
 from forge_lens.contracts.v1.trace import (
@@ -232,7 +233,14 @@ class LensTracer:
         """
         attrs.setdefault("tool.name", tool_name)
         if capture_args and arguments is not None:
-            attrs["tool.parameters"] = json.dumps(arguments, default=str)[:4096]
+            params_json = json.dumps(arguments, default=str)
+            if len(params_json) > 4096:
+                # mid-string truncation would yield unparseable JSON —
+                # emit an explicit parseable marker instead
+                params_json = json.dumps(
+                    {"_forge_lens.truncated": True, "_approx_bytes": len(params_json)}
+                )
+            attrs["tool.parameters"] = params_json
         with self.start_span(f"tool {tool_name}", kind=SpanKind.TOOL, attributes=attrs) as s:
             yield s
 
@@ -444,6 +452,39 @@ def span(
     def decorator(fn: Callable[P, R]) -> Callable[P, R]:
         span_name = name or fn.__qualname__
 
+        if inspect.iscoroutinefunction(fn):
+
+            @functools.wraps(fn)
+            async def async_wrapper(*args: P.args, **kw: P.kwargs) -> Any:
+                t = tracer or get_tracer()
+                # contextvars make the span current for the whole await —
+                # a sync `with` is correct here, `async with` is not needed
+                with t.start_span(span_name, kind=kind):
+                    return await fn(*args, **kw)
+
+            return cast("Callable[P, R]", async_wrapper)
+        if inspect.isasyncgenfunction(fn):
+
+            @functools.wraps(fn)
+            async def agen_wrapper(*args: P.args, **kw: P.kwargs) -> Any:
+                t = tracer or get_tracer()
+                with t.start_span(span_name, kind=kind):
+                    async for item in fn(*args, **kw):
+                        yield item
+
+            return cast("Callable[P, R]", agen_wrapper)
+        if inspect.isgeneratorfunction(fn):
+            # the body runs on iteration, not on call — the span must
+            # cover iteration or it would measure ~0ms and mis-parent
+            # any spans created inside the generator
+            @functools.wraps(fn)
+            def gen_wrapper(*args: P.args, **kw: P.kwargs) -> Any:
+                t = tracer or get_tracer()
+                with t.start_span(span_name, kind=kind):
+                    yield from fn(*args, **kw)
+
+            return cast("Callable[P, R]", gen_wrapper)
+
         @functools.wraps(fn)
         def wrapper(*args: P.args, **kw: P.kwargs) -> R:
             t = tracer or get_tracer()
@@ -466,6 +507,50 @@ def instrument_tool(
 
     def decorator(f: Callable[P, R]) -> Callable[P, R]:
         tool_name = name or f.__name__
+
+        if inspect.iscoroutinefunction(f):
+
+            @functools.wraps(f)
+            async def async_wrapper(*args: P.args, **kw: P.kwargs) -> Any:
+                t = tracer or get_tracer()
+                arguments = (
+                    {"args": list(args), "kwargs": dict(kw)} if capture_args else None
+                )
+                with t.tool_call(
+                    tool_name, arguments=arguments, capture_args=capture_args
+                ):
+                    return await f(*args, **kw)
+
+            return cast("Callable[P, R]", async_wrapper)
+        if inspect.isasyncgenfunction(f):
+
+            @functools.wraps(f)
+            async def agen_wrapper(*args: P.args, **kw: P.kwargs) -> Any:
+                t = tracer or get_tracer()
+                arguments = (
+                    {"args": list(args), "kwargs": dict(kw)} if capture_args else None
+                )
+                with t.tool_call(
+                    tool_name, arguments=arguments, capture_args=capture_args
+                ):
+                    async for item in f(*args, **kw):
+                        yield item
+
+            return cast("Callable[P, R]", agen_wrapper)
+        if inspect.isgeneratorfunction(f):
+
+            @functools.wraps(f)
+            def gen_wrapper(*args: P.args, **kw: P.kwargs) -> Any:
+                t = tracer or get_tracer()
+                arguments = (
+                    {"args": list(args), "kwargs": dict(kw)} if capture_args else None
+                )
+                with t.tool_call(
+                    tool_name, arguments=arguments, capture_args=capture_args
+                ):
+                    yield from f(*args, **kw)
+
+            return cast("Callable[P, R]", gen_wrapper)
 
         @functools.wraps(f)
         def wrapper(*args: P.args, **kw: P.kwargs) -> R:

@@ -29,9 +29,15 @@ from forge_lens.core.errors import ValidationError
 from forge_lens.core.time import from_unix_nano
 from forge_lens.otlp.openinference import extract_token_usage, map_span_kind
 
+# AnyValue can nest arbitrarily (arrayValue/kvlistValue). Uncapped
+# recursion turns a small hostile payload into RecursionError → HTTP 500.
+_MAX_ANYVALUE_DEPTH = 32
 
-def _attr_value(raw: Any) -> Any:
+
+def _attr_value(raw: Any, depth: int = 0) -> Any:
     """Flatten an OTLP AnyValue to a Python scalar/list."""
+    if depth > _MAX_ANYVALUE_DEPTH:
+        return "[DROPPED:depth-limit]"  # same marker as sanitize
     if not isinstance(raw, dict):
         return raw
     for key in ("stringValue", "intValue", "doubleValue", "boolValue"):
@@ -45,7 +51,11 @@ def _attr_value(raw: Any) -> Any:
             return v
     if "arrayValue" in raw:
         arr = raw["arrayValue"]
-        return [_attr_value(v) for v in arr.get("values", [])] if isinstance(arr, dict) else raw
+        return (
+            [_attr_value(v, depth + 1) for v in arr.get("values", [])]
+            if isinstance(arr, dict)
+            else raw
+        )
     if "kvlistValue" in raw:
         kvl = raw["kvlistValue"]
         if not isinstance(kvl, dict):
@@ -56,7 +66,7 @@ def _attr_value(raw: Any) -> Any:
             # key must be a string — an array/object key is unhashable
             # and would crash dict insertion (→ HTTP 500)
             if isinstance(kv, dict) and isinstance(kv.get("key"), str):
-                out[kv["key"]] = _attr_value(kv.get("value"))
+                out[kv["key"]] = _attr_value(kv.get("value"), depth + 1)
             else:
                 dropped += 1
         if dropped:

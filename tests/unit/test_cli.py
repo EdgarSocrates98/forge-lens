@@ -167,3 +167,48 @@ def test_cli_otlp_import_marks_provenance_imported(
     assert trace.provenance == Provenance.IMPORTED
     assert all(s.provenance == Provenance.IMPORTED for s in trace.spans)
     store.close()
+
+
+def test_serve_binds_from_endpoint_config(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """cfg.endpoint is live config: serve derives its default bind from
+    it, and --host/--port still override."""
+    import uvicorn
+
+    calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        uvicorn, "run",
+        lambda app, host, port, **kw: calls.append((host, port)),
+    )
+    (tmp_path / ".forge-lens").mkdir()
+    (tmp_path / ".forge-lens" / "config.toml").write_text(
+        '[lens]\nendpoint = "http://10.1.2.3:8888"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("FORGE_LENS_ENDPOINT", raising=False)
+
+    result = CliRunner().invoke(app, ["serve", "--db", str(tmp_path / "x.db")])
+    assert result.exit_code == 0, result.output
+    assert calls == [("10.1.2.3", 8888)]
+
+    # explicit flag wins over endpoint config
+    result = CliRunner().invoke(
+        app, ["serve", "--db", str(tmp_path / "x.db"), "--port", "9000"]
+    )
+    assert calls[-1] == ("10.1.2.3", 9000)
+
+
+def test_serve_rejects_malformed_endpoint(tmp_path: Path, monkeypatch) -> None:
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: None)
+    (tmp_path / ".forge-lens").mkdir()
+    (tmp_path / ".forge-lens" / "config.toml").write_text(
+        '[lens]\nendpoint = "http://x:notaport"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("FORGE_LENS_ENDPOINT", raising=False)
+    result = CliRunner().invoke(app, ["serve", "--db", str(tmp_path / "x.db")])
+    assert result.exit_code == 2
+    assert "invalid endpoint" in result.output

@@ -332,3 +332,38 @@ def test_ingest_rejections_count_as_ingest_errors(
     )
     after = METRICS.snapshot()["counters"].get("lens.ingest.errors", 0)
     assert after == before + 1
+
+
+def test_otlp_deeply_nested_anyvalue_not_500(client: TestClient) -> None:
+    """A ~2000-deep nested AnyValue used to RecursionError → HTTP 500.
+    The depth cap makes it a bounded parse with an explicit marker."""
+    deep: dict = {"stringValue": "bottom"}
+    for _ in range(2_000):
+        deep = {"arrayValue": {"values": [deep]}}
+    r = client.post(
+        "/v1/otlp/traces",
+        json={
+            "resourceSpans": [{"scopeSpans": [{"spans": [{
+                "traceId": "a" * 32, "spanId": "b" * 16, "name": "s",
+                "startTimeUnixNano": "1", "endTimeUnixNano": "2",
+                "attributes": [{"key": "deep", "value": deep}],
+            }]}]}]
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["accepted_spans"] == 1
+
+
+def test_oversized_content_length_rejected_before_read(
+    client: TestClient,
+) -> None:
+    """Content-Length beyond the cap rejects without buffering the body."""
+    r = client.post(
+        "/v1/traces",
+        content=b"{}",
+        headers={
+            "Content-Type": "application/json",
+            "Content-Length": str(999 * 1024 * 1024),
+        },
+    )
+    assert r.status_code == 413

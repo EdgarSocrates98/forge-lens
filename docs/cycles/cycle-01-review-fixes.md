@@ -272,3 +272,71 @@ persistido — o primeiro `name`/`kind`/`start_time` observado continua
 sendo a verdade mantida (first-observed wins), e a entrega conflitante
 fica evidenciada pelo flag. Não há `warnings` no `IngestResult` para
 conflito porque a dedupe acontece no store, abaixo do pipeline.
+
+## Rodada 5 — achados → correções
+
+### Críticos
+
+- **`traces.ended_ns` nunca preenchido após entrega parcial**: `MAX(a, NULL)`
+  retorna NULL no SQLite — trace armazenada parcial (flush mid-flight)
+  ficava `ended_at=None` para sempre mesmo com a redelivery completa.
+  `COALESCE` aplicado nos dois lados do `MAX` —
+  `test_partial_trace_completes_ended_at_filled`.
+- **OTLP nesting profundo → HTTP 500**: `_attr_value` recursivo sem cap;
+  ~2.000 níveis (60 KB) → `RecursionError` fora do handler de quarentena.
+  `_MAX_ANYVALUE_DEPTH=32` → `[DROPPED:depth-limit]` no atributo —
+  `test_otlp_deeply_nested_anyvalue_does_not_crash` +
+  `test_otlp_deeply_nested_anyvalue_not_500` (e2e).
+- **Decoradores corrompiam telemetria em `async def`**: `@span`/
+  `@instrument_tool` mediam a *criação* da corrotina (~0 ms) e
+  mis-parentavam spans internos. `inspect.iscoroutinefunction` /
+  `isasyncgenfunction` / `isgeneratorfunction` emitem wrappers
+  async/generator que cobrem o corpo real (contextvars isolam por task) —
+  `test_span_decorator_covers_async_body`, `test_instrument_tool_async`,
+  `test_span_decorator_covers_generator_iteration`.
+
+### Warnings
+
+- **`await request.body()` antes do size check**: `Content-Length` é
+  checado primeiro (fast-path 413 sem buffer) — a verificação pós-leitura
+  permanece (chunked/lie) — `test_oversized_content_length_rejected_before_read`.
+- **`end_time` fora de ordem regredia o span**: `incoming or stored` →
+  `max(stored, incoming)`; entrega com `end_time` anterior registra
+  `OUT_OF_ORDER` (enum existia, nunca emitido) —
+  `test_older_end_time_does_not_regress_and_flags_out_of_order`.
+- **`_merge_events` descartava attrs divergentes**: e pior — mutava o
+  objeto stored, então o check `merged==stored` não via a diferença e o
+  merge nunca persistia (mesmo bug latente em `_merge_links`). Ambos
+  agora produzem cópias — `test_same_key_event_attributes_merge`.
+- **Sanitize gaps**: `source.host` e `project_id` agora passam pelos
+  padrões de credencial (sem e-mail-mask — chaves de lookup/partição);
+  drop por `depth>8` conta em `SanitizeReport.dropped_content` —
+  `test_project_id_and_source_host_scrubbed`, `test_depth_limit_drop_is_counted`.
+- **`cfg.endpoint` era config morta**: `serve` deriva host/port do
+  endpoint configurado; `--host`/`--port` sobrescrevem; endpoint
+  malformado → exit 2 com contexto — `test_serve_binds_from_endpoint_config`,
+  `test_serve_rejects_malformed_endpoint`.
+- **Status de trace sem spans descartado**: o rollup só por SELECT
+  zerava para `unset`; `COALESCE(subquery HAVING COUNT(*)>0,
+  NULLIF(excluded,'unset'), stored)` preserva o status declarado —
+  `test_spanless_trace_status_not_clobbered`.
+- **Guarda de wall-clock estreita**: `test_wall_clock_free` agora cobre
+  `storage/`+`ingest/`+`api/`+`otlp/`+`sanitize/` (monotonic/
+  perf_counter permitidos — timers de intervalo, injetáveis).
+
+### Sugestões
+
+- **Env mapping incompleto**: `FORGE_LENS_MAX_PAYLOAD_BYTES`,
+  `_MAX_SPANS_PER_REQUEST`, `_MAX_EVENTS_PER_SPAN`, `_MAX_ATTR_VALUE_CHARS`
+  agora mapeados (int, com erro contextual) —
+  `test_env_covers_all_int_bounds`, `test_env_bad_int_reports_variable_name`.
+- **`tool.parameters` truncado mid-string**: acima de 4 KB vira
+  `{"_forge_lens.truncated": true, "_approx_bytes": N}` — JSON sempre
+  parseável — `test_tool_parameters_truncation_stays_parseable`.
+- **`get_trace` cross-project**: documentado em `api.md` (partição, não
+  fronteira).
+
+## Estado pós-fix (rodada 5)
+
+151 testes py + 17 ts + smoke de pacote; `ruff` limpo; `mypy --strict`
+0 erros; schemas sem drift; `uv build` ok; `pip-audit` 0 vulns.

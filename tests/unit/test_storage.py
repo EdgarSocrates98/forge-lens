@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import forge_lens.storage.sqlite as store_mod
-from forge_lens.contracts.v1.trace import IntegrityFlag, StatusCode, Trace
+from forge_lens.contracts.v1.trace import IntegrityFlag, Status, StatusCode, Trace
 from forge_lens.storage.sqlite import SQLiteTraceStore
 
 
@@ -214,14 +214,27 @@ def test_epoch_zero_started_ns_is_not_treated_as_missing(
 
 
 def test_wall_clock_free(tmp_store: SQLiteTraceStore) -> None:
-    """storage/ must not read the wall clock (AGENTS.md hard rule)."""
+    """The deterministic core must not read the wall clock (AGENTS.md
+    hard rule). Interval timers (monotonic/perf_counter — injectable in
+    ingest/) are fine; datetime.now/time.time are not."""
     import inspect
 
-    import forge_lens.storage.sqlite as mod
+    import forge_lens.api.app
+    import forge_lens.ingest.pipeline
+    import forge_lens.otlp.normalize
+    import forge_lens.sanitize.redact
+    import forge_lens.storage.sqlite
 
-    src = inspect.getsource(mod)
-    assert "datetime.now" not in src
-    assert "time.time()" not in src
+    for mod in (
+        forge_lens.storage.sqlite,
+        forge_lens.ingest.pipeline,
+        forge_lens.api.app,
+        forge_lens.otlp.normalize,
+        forge_lens.sanitize.redact,
+    ):
+        src = inspect.getsource(mod)
+        assert "datetime.now" not in src, mod.__name__
+        assert "time.time()" not in src, mod.__name__
 
 
 def test_list_and_stats(tmp_store: SQLiteTraceStore, synthetic_trace: Trace) -> None:
@@ -396,3 +409,96 @@ def test_db_size_includes_wal_sidecars(
     assert tmp_store.stats()["db_size_bytes"] == expected
     # the wal dominates here — main file alone would undercount badly
     assert expected > (tmp_path / "lens.db").stat().st_size
+
+
+def test_partial_trace_completes_ended_at_filled(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """SQLite multi-arg MAX(x, NULL) → NULL — a stored partial trace
+    (ended_ns NULL) must still gain ended_at when the completed
+    redelivery arrives (the mid-flight-flush → root-end flow)."""
+    partial = synthetic_trace.model_copy(deep=True)
+    partial.ended_at = None
+    partial.spans = [partial.spans[0].model_copy(update={"end_time": None})]
+    tmp_store.upsert_trace(partial)
+    assert tmp_store.get_trace(synthetic_trace.trace_id).ended_at is None  # type: ignore[union-attr]
+
+    tmp_store.upsert_trace(synthetic_trace)  # completed re-delivery
+    loaded = tmp_store.get_trace(synthetic_trace.trace_id)
+    assert loaded is not None
+    assert loaded.ended_at == synthetic_trace.ended_at
+    item = tmp_store.list_traces()[0]
+    assert item["ended_at"] is not None
+
+
+def test_spanless_trace_status_not_clobbered(
+    tmp_store: SQLiteTraceStore,
+) -> None:
+    """A spanless trace's declared status must survive re-delivery —
+    the rollup has no spans to derive from and must not reset to unset."""
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    declared = Trace(
+        trace_id="c" * 32,
+        started_at=t0,
+        status=Status(code=StatusCode.ERROR, message="crashed before spans"),
+        spans=[],
+    )
+    tmp_store.upsert_trace(declared)
+    tmp_store.upsert_trace(declared.model_copy(deep=True))  # re-deliver
+    loaded = tmp_store.get_trace("c" * 32)
+    assert loaded is not None
+    assert loaded.status.code == StatusCode.ERROR
+
+
+def test_older_end_time_does_not_regress_and_flags_out_of_order(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """An out-of-order delivery carrying an *earlier* end_time must not
+    overwrite the stored later one — it records OUT_OF_ORDER evidence."""
+    tmp_store.upsert_trace(synthetic_trace)
+    stored_end = synthetic_trace.spans[0].end_time
+
+    stale = synthetic_trace.model_copy(deep=True)
+    stale.spans = [stale.spans[0]]
+    stale.spans[0].end_time = stored_end - timedelta(milliseconds=500)  # type: ignore[operator]
+    stale.spans[0].attributes = {"late": "attr"}  # force a real merge path
+    tmp_store.upsert_trace(stale)
+
+    loaded = tmp_store.get_trace(synthetic_trace.trace_id)
+    assert loaded is not None
+    span = loaded.spans[0]
+    assert span.end_time == stored_end  # never regressed
+    assert IntegrityFlag.OUT_OF_ORDER in span.integrity_flags
+    assert span.attributes["late"] == "attr"  # merge still applied
+
+
+def test_same_key_event_attributes_merge(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """A re-delivered event with the same (name, time) but richer
+    attributes must merge them, not discard the difference."""
+    from forge_lens.contracts.v1.trace import SpanEvent
+
+    ev_time = synthetic_trace.spans[0].start_time
+    first = synthetic_trace.model_copy(deep=True)
+    first.spans = [first.spans[0]]
+    first.spans[0].events = [
+        SpanEvent(name="retry", time=ev_time, attributes={"attempt": 1})
+    ]
+    tmp_store.upsert_trace(first)
+
+    second = synthetic_trace.model_copy(deep=True)
+    second.spans = [second.spans[0]]
+    second.spans[0].events = [
+        SpanEvent(
+            name="retry", time=ev_time,
+            attributes={"attempt": 1, "backoff_ms": 250},
+        )
+    ]
+    tmp_store.upsert_trace(second)
+
+    loaded = tmp_store.get_trace(synthetic_trace.trace_id)
+    assert loaded is not None
+    ev = loaded.spans[0].events[0]
+    assert ev.attributes == {"attempt": 1, "backoff_ms": 250}
+    assert len(loaded.spans[0].events) == 1  # still deduped by key

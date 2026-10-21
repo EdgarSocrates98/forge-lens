@@ -20,9 +20,10 @@
    xox*, blocos PEM, `Bearer x`, JWT) → `[REDACTED:…]` inline — em
    atributos *e* em campos de texto livre do contrato: `status.message`
    (span+trace — carrega texto de exceção), `span.name`, `event.name`,
-   `session_id` (sem e-mail-mask: é chave de lookup), `source.*`
-   (`system`, `sdk_name`, `sdk_version`, `runtime`, `language`).
-   IDs de join (`trace_id`, `span_id`) nunca são tocados.
+   `source.*` (`system`, `sdk_name`, `sdk_version`, `host`, `runtime`,
+   `language`), `session_id` e `project_id` (esses dois sem e-mail-mask:
+   são chaves de lookup/partição — mascarar quebraria o join). IDs de
+   join (`trace_id`, `span_id`) nunca são tocados.
 3. **`capture=metadata`**: atributos de conteúdo (`input.value`,
    `output.value`, `llm.*_messages`, `tool.parameters`,
    `retrieval.documents`) → `{"_forge_lens.dropped": true, _approx_bytes}`;

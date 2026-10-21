@@ -42,5 +42,13 @@ contagens), extras de servidor e import do SDK. Exit 0/1.
 
 Ordem: argumento > env (`FORGE_LENS_*`) > `.forge-lens/config.toml` > default.
 Chaves: `project_id`, `db_path`, `capture` (`metadata|full`), `api_key`,
-`endpoint`, `max_payload_bytes`, `max_spans_per_request`,
-`max_events_per_span`, `max_attr_value_chars`, `rate_limit_per_minute`.
+`endpoint`, `max_payload_bytes`, `max_traces_per_request`,
+`max_spans_per_request`, `max_events_per_span`, `max_attr_value_chars`,
+`rate_limit_per_minute`. Env: `FORGE_LENS_PROJECT`, `_DB`, `_CAPTURE`,
+`_API_KEY`, `_ENDPOINT`, `_MAX_PAYLOAD_BYTES`, `_MAX_TRACES_PER_REQUEST`,
+`_MAX_SPANS_PER_REQUEST`, `_MAX_EVENTS_PER_SPAN`, `_MAX_ATTR_VALUE_CHARS`,
+`_RATE_LIMIT_PER_MINUTE` — valor malformado → `invalid env FORGE_LENS_*=…`.
+
+`serve` deriva o bind de `endpoint` (host+port) quando `--host`/`--port`
+não são passados — `endpoint` é a config que diz onde esta instância
+escuta *e* onde clientes a alcançam.

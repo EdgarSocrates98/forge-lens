@@ -344,3 +344,99 @@ def test_concurrent_spans_during_export_are_not_lost() -> None:
     names = {s.name for tr in exporter.traces for s in tr.spans}
     assert "during-flight" in names
     assert not tracer._pending
+
+
+def test_span_decorator_covers_async_body() -> None:
+    """@span on `async def` must span the awaited body — not just the
+    coroutine creation (which would end in ~0ms and mis-parent children)."""
+    import asyncio
+
+    tracer, exporter = _tracer()
+
+    @span("outer-async", tracer=tracer)
+    async def work() -> int:
+        await asyncio.sleep(0.01)
+        with tracer.start_span("inner"):
+            pass
+        return 7
+
+    async def run() -> int:
+        with tracer.agent("root"):
+            return await work()
+
+    assert asyncio.run(run()) == 7
+    trace = exporter.traces[0]
+    outer = next(s for s in trace.spans if s.name == "outer-async")
+    inner = next(s for s in trace.spans if s.name == "inner")
+    root = next(s for s in trace.spans if s.name == "root")
+    # the async body ran *inside* the span: duration covers the sleep
+    assert outer.duration_ms is not None
+    assert outer.duration_ms >= 9
+    # and inner spans are parented to it, not to the enclosing root
+    assert inner.parent_span_id == outer.span_id
+    assert outer.parent_span_id == root.span_id
+
+
+def test_instrument_tool_async() -> None:
+    import asyncio
+
+    tracer, exporter = _tracer()
+
+    @instrument_tool(name="fetch", capture_args=True, tracer=tracer)
+    async def fetch(url: str) -> str:
+        await asyncio.sleep(0.005)
+        return "body"
+
+    async def run() -> str:
+        with tracer.agent("root"):
+            return await fetch("http://x")
+
+    assert asyncio.run(run()) == "body"
+    trace = exporter.traces[0]
+    tool = next(s for s in trace.spans if s.kind == SpanKind.TOOL)
+    assert tool.end_time is not None
+    import json as _json
+    params = _json.loads(tool.attributes["tool.parameters"])
+    assert params["args"] == ["http://x"]
+
+
+def test_span_decorator_covers_generator_iteration() -> None:
+    """A generator's body runs on iteration — the span must wrap the
+    iterator, not the call (which returns instantly)."""
+    tracer, exporter = _tracer()
+
+    @span("gen", tracer=tracer)
+    def produce():
+        with tracer.start_span("gen-inner"):
+            pass
+        yield 1
+        yield 2
+
+    with tracer.agent("root"):
+        assert list(produce()) == [1, 2]
+
+    trace = exporter.traces[0]
+    gen = next(s for s in trace.spans if s.name == "gen")
+    inner = next(s for s in trace.spans if s.name == "gen-inner")
+    assert inner.parent_span_id == gen.span_id
+
+
+def test_tool_parameters_truncation_stays_parseable() -> None:
+    """Oversized tool.parameters must not be a mid-string cut producing
+    unparseable JSON — emit an explicit marker object instead."""
+    import json as _json
+
+    tracer, exporter = _tracer()
+
+    @instrument_tool(name="big", capture_args=True, tracer=tracer)
+    def big(payload: str) -> None:
+        return None
+
+    with tracer.agent("root"):
+        big("x" * 10_000)
+
+    trace = exporter.traces[0]
+    tool = next(s for s in trace.spans if s.kind == SpanKind.TOOL)
+    params = _json.loads(tool.attributes["tool.parameters"])  # must parse
+    assert params["_forge_lens.truncated"] is True
+    assert params["_approx_bytes"] > 4096

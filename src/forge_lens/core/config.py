@@ -97,7 +97,11 @@ def load_config(project_dir: Path | None = None) -> LensConfig:
         "FORGE_LENS_CAPTURE": "capture",
         "FORGE_LENS_API_KEY": "api_key",
         "FORGE_LENS_ENDPOINT": "endpoint",
+        "FORGE_LENS_MAX_PAYLOAD_BYTES": "max_payload_bytes",
         "FORGE_LENS_MAX_TRACES_PER_REQUEST": "max_traces_per_request",
+        "FORGE_LENS_MAX_SPANS_PER_REQUEST": "max_spans_per_request",
+        "FORGE_LENS_MAX_EVENTS_PER_SPAN": "max_events_per_span",
+        "FORGE_LENS_MAX_ATTR_VALUE_CHARS": "max_attr_value_chars",
         "FORGE_LENS_RATE_LIMIT_PER_MINUTE": "rate_limit_per_minute",
     }
     overrides: dict[str, object] = {}
@@ -110,10 +114,10 @@ def load_config(project_dir: Path | None = None) -> LensConfig:
                 overrides[field_name] = Path(raw).expanduser()
             elif field_name == "capture":
                 overrides[field_name] = CaptureLevel(raw)
-            elif field_name in {"rate_limit_per_minute", "max_traces_per_request"}:
-                overrides[field_name] = int(raw)
-            else:
+            elif field_name in {"endpoint", "project_id", "api_key"}:
                 overrides[field_name] = raw
+            else:  # every remaining mapped field is int-valued
+                overrides[field_name] = int(raw)
         except ValueError as exc:
             raise ValueError(f"invalid env {env}={raw!r}: {exc}") from exc
     if overrides:

@@ -61,7 +61,9 @@ Anexadas no span, visíveis em `traces show` e na API:
 - `duplicate` — span re-entregue com conteúdo idêntico (evidência de retry)
 - `conflict` — mesma chave, campos de identidade (`name`/`kind`/
   `start_time`) divergentes — first-observed mantido, divergência registrada
-- `partial_trace`/`orphan`/`out_of_order`/`unknown_tokens` —
+- `out_of_order` — re-entrega com `end_time` anterior ao armazenado
+  (o mais recente vence; a chegada tardia fica registrada)
+- `partial_trace`/`orphan`/`unknown_tokens` —
   reservados no enum para regras futuras
 
 ### Normalização OTLP (`otlp/normalize.py`)

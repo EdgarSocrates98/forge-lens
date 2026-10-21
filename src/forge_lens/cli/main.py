@@ -81,11 +81,22 @@ def init(
 
 @app.command()
 def serve(
-    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
-    port: Annotated[int, typer.Option("--port", "-p")] = 7777,
+    host: Annotated[
+        str | None, typer.Option("--host", help="defaults to the endpoint config")
+    ] = None,
+    port: Annotated[
+        int | None, typer.Option("--port", "-p", help="defaults to the endpoint config")
+    ] = None,
     db: Annotated[Path | None, typer.Option("--db")] = None,
 ) -> None:
-    """Run the Forge Lens ingestion + query API."""
+    """Run the Forge Lens ingestion + query API.
+
+    Bind defaults come from the configured ``endpoint``
+    (``.forge-lens/config.toml`` / ``FORGE_LENS_ENDPOINT``); ``--host``
+    and ``--port`` override it.
+    """
+    from urllib.parse import urlsplit
+
     try:
         import uvicorn
     except ImportError:
@@ -96,6 +107,16 @@ def serve(
     from forge_lens.api.app import create_app
 
     cfg = _config(db)
+    try:
+        ep = urlsplit(cfg.endpoint)
+        ep_port = ep.port  # raises ValueError on a malformed port
+    except ValueError as exc:
+        typer.echo(
+            f"serve failed: invalid endpoint {cfg.endpoint!r}: {exc}", err=True
+        )
+        raise typer.Exit(2) from None
+    host = host or ep.hostname or "127.0.0.1"
+    port = port or ep_port or 7777
     application = create_app(config=cfg)
     _warn_if_exposed(host, cfg)
     typer.echo(f"Forge Lens v{__version__} listening on http://{host}:{port}")

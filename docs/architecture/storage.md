@@ -31,12 +31,16 @@ portável, leitura concorrente com escrita (WAL).
   status, eventos/links adicionados) é **merge**, não duplicata —
   spans parciais podem completar e retentativas pós-crash não viram
   falsos duplicados.
-- **Merge determinístico**: por span, `end_time`/`parent` preenchem o que
+- **Merge determinístico**: por span, `end_time` fica com o *mais
+  recente* observado (uma entrega fora de ordem com `end_time` anterior
+  não regride o span — registra `OUT_OF_ORDER`), `parent` preenche o que
   faltava, attributes unem (incoming vence), eventos/links unem por
-  identidade, status mantém a maior severidade observada
-  (`error>ok>unset` — monotônico, um `ok` tardio não apaga um erro
-  observado). Na trace: `started=min`, `ended=max`, status e contagens
-  recomputados por SELECT sobre os spans persistidos; `status_message`
+  identidade (atributos de mesma chave mesclam), status mantém a maior
+  severidade observada (`error>ok>unset` — monotônico, um `ok` tardio
+  não apaga um erro observado). Na trace: `started=min`, `ended=max`
+  (NULL-safe — uma trace parcial ganha `ended_at` quando completa),
+  status e contagens recomputados por SELECT sobre os spans persistidos
+  (trace sem spans preserva o status declarado); `status_message`
   atualiza quando o incoming traz mensagem (`COALESCE`);
   `resource_attributes` unem por chave (`json_patch`); `source_json`
   cede a um `system` identificado (nunca regride a `"unknown"`);

@@ -115,6 +115,7 @@ def _sanitize_value(
     depth: int = 0,
 ) -> Any:
     if depth > 8:
+        report.dropped_content += 1  # never a silent drop
         return "[DROPPED:depth-limit]"
     if isinstance(value, str):
         value = _redact_string(value, report)
@@ -188,9 +189,9 @@ def sanitize_trace(
     Attributes carry the obvious risk, but credentials also leak through
     free-text fields — ``status.message`` embeds exception text, span
     names are producer-controlled. Identity fields (trace/span ids) are
-    never touched: they are join keys, and ``session_id`` gets credential
-    patterns only (it is a legitimate lookup key — e-mail masking would
-    silently collapse sessions).
+    never touched. ``session_id`` and ``project_id`` get credential
+    patterns only (they are lookup/partition keys — e-mail masking would
+    silently collapse or repartition them).
     """
     report = SanitizeReport()
     mask = capture == CaptureLevel.METADATA
@@ -223,7 +224,17 @@ def sanitize_trace(
         trace.session_id = _scrub_text(
             trace.session_id, report, mask_emails=False
         )
-    for field_name in ("system", "sdk_name", "sdk_version", "runtime", "language"):
+    # project_id is a join key (like session_id): credential patterns
+    # apply, e-mail masking does not — masking would silently repartition
+    trace.project_id = _scrub_text(trace.project_id, report, mask_emails=False)
+    for field_name in (
+        "system",
+        "sdk_name",
+        "sdk_version",
+        "host",
+        "runtime",
+        "language",
+    ):
         value = getattr(trace.source, field_name)
         if value is not None:
             setattr(

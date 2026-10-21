@@ -46,6 +46,18 @@ def _reject_ingest(status_code: int, detail: str) -> HTTPException:
     return HTTPException(status_code=status_code, detail=detail)
 
 
+def _check_declared_size(request: Request, max_bytes: int) -> None:
+    """Fast-path 413 on Content-Length before buffering the body.
+
+    Doesn't replace the post-read check — chunked bodies may lack the
+    header and a client can lie low — but it keeps the common oversized
+    case from being fully buffered into memory first.
+    """
+    cl = request.headers.get("content-length")
+    if cl is not None and cl.isdigit() and int(cl) > max_bytes:
+        raise _reject_ingest(413, "payload too large")
+
+
 def _ingest_error(exc: Exception) -> HTTPException:
     if isinstance(exc, PayloadTooLargeError):
         return _reject_ingest(413, str(exc))
@@ -114,6 +126,7 @@ def create_app(
     @app.post(f"/{API_VERSION}/traces", dependencies=[Depends(check_auth)])
     async def ingest_native(request: Request) -> dict[str, Any]:
         """Native ingest endpoint — accepts the versioned TraceIngest contract."""
+        _check_declared_size(request, cfg.max_payload_bytes)
         raw = await request.body()
         if len(raw) > cfg.max_payload_bytes:
             raise _reject_ingest(413, "payload too large")
@@ -165,6 +178,7 @@ def create_app(
             raise _reject_ingest(
                 415, "OTLP/protobuf is not supported — POST application/json"
             )
+        _check_declared_size(request, cfg.max_payload_bytes)
         body = await request.body()
         if len(body) > cfg.max_payload_bytes:
             raise _reject_ingest(413, "payload too large")

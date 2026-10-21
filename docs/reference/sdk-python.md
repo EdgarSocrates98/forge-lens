@@ -73,13 +73,24 @@ silenciosamente: o span ganha `forge_lens.trace_id_regenerated=true` +
 @span("nome", kind=SpanKind.INTERNAL, tracer=t)
 def f(...): ...
 
+@span("async-op", tracer=t)
+async def g(...): ...          # coroutines: o span cobre o await inteiro
+
 @instrument_tool(name="search", capture_args=True, tracer=t)
 def search(q): ...
 ```
 
+Decoradores detectam `async def`, `async def` geradores e geradores
+síncronos (`inspect.iscoroutinefunction`/`isasyncgenfunction`/
+`isgeneratorfunction`) — o span cobre o corpo real (o `await`, a
+iteração), nunca apenas a criação do objeto. `with t.start_span(...)`
+também funciona direto dentro de `async def` (contextvars isolam por
+task).
+
 Com `capture_args=True`, os argumentos da chamada são gravados em
-`tool.parameters` como `{"args": [...], "kwargs": {...}}` (JSON,
-truncado em 4 KB); com `False` nada é capturado.
+`tool.parameters` como `{"args": [...], "kwargs": {...}}` (JSON; acima
+de 4 KB vira `{"_forge_lens.truncated": true, "_approx_bytes": N}` —
+sempre parseável); com `False` nada é capturado.
 
 ## `SpanContext` / propagação
 

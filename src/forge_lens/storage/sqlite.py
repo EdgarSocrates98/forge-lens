@@ -37,7 +37,7 @@ from forge_lens.contracts.v1.trace import (
     TraceSource,
 )
 from forge_lens.core.errors import ValidationError
-from forge_lens.core.time import from_unix_nano, to_unix_nano
+from forge_lens.core.time import ensure_aware, from_unix_nano, to_unix_nano
 
 SCHEMA_VERSION = "1.0.0"
 
@@ -103,6 +103,15 @@ def _dt(ns: int | None) -> datetime | None:
     return from_unix_nano(ns) if ns is not None else None
 
 
+def _max_dt(a: datetime | None, b: datetime | None) -> datetime | None:
+    """Latest of two optional datetimes; aware-safe on mixed input."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return max(ensure_aware(a), ensure_aware(b))
+
+
 def _span_digest(span: Span) -> str:
     """Content hash of a span, excluding integrity flags (they evolve)."""
     payload = json.dumps(
@@ -120,15 +129,29 @@ def _merge_status(stored: Status, incoming: Status) -> Status:
 
 
 def _merge_events(stored: list[SpanEvent], incoming: list[SpanEvent]) -> list[SpanEvent]:
-    """Union of events, deduplicated by (name, timestamp), order preserved."""
-    seen = {(e.name, e.time.isoformat()) for e in stored}
-    out = list(stored)
+    """Union of events by (name, timestamp); same-key attributes merge.
+
+    Same-key events produce a *copy* — mutating the stored event in
+    place would make the merged==stored no-op check invisible to the
+    difference (the new attributes would never be persisted).
+    """
+    by_key: dict[tuple[str, str], SpanEvent] = {
+        (e.name, e.time.isoformat()): e for e in stored
+    }
+    order = [(e.name, e.time.isoformat()) for e in stored]
     for ev in incoming:
         key = (ev.name, ev.time.isoformat())
-        if key not in seen:
-            seen.add(key)
-            out.append(ev)
-    return out
+        if key in by_key:
+            stored_ev = by_key[key]
+            merged_attrs = {**stored_ev.attributes, **ev.attributes}
+            if merged_attrs != stored_ev.attributes:
+                by_key[key] = stored_ev.model_copy(
+                    update={"attributes": merged_attrs}
+                )
+        else:
+            by_key[key] = ev
+            order.append(key)
+    return [by_key[k] for k in order]
 
 
 def _merge_links(stored: list[SpanLink], incoming: list[SpanLink]) -> list[SpanLink]:
@@ -138,7 +161,12 @@ def _merge_links(stored: list[SpanLink], incoming: list[SpanLink]) -> list[SpanL
     for lk in incoming:
         key = (lk.trace_id, lk.span_id)
         if key in by_id:
-            by_id[key].attributes = {**by_id[key].attributes, **lk.attributes}
+            stored_lk = by_id[key]
+            merged_attrs = {**stored_lk.attributes, **lk.attributes}
+            if merged_attrs != stored_lk.attributes:
+                by_id[key] = stored_lk.model_copy(
+                    update={"attributes": merged_attrs}
+                )
         else:
             by_id[key] = lk
             order.append(key)
@@ -245,20 +273,24 @@ class SQLiteTraceStore:
                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(project_id, trace_id) DO UPDATE SET
                     ended_ns = MAX(
-                        COALESCE(excluded.ended_ns, traces.ended_ns), traces.ended_ns),
+                        COALESCE(excluded.ended_ns, traces.ended_ns),
+                        COALESCE(traces.ended_ns, excluded.ended_ns)),
                     started_ns = MIN(
                         COALESCE(excluded.started_ns, traces.started_ns), traces.started_ns),
                     session_id = COALESCE(traces.session_id, excluded.session_id),
                     root_span_id = COALESCE(traces.root_span_id, excluded.root_span_id),
-                    status_code = (
-                        SELECT CASE
+                    status_code = COALESCE(
+                        (SELECT CASE
                             WHEN SUM(s.status_code='error') > 0 THEN 'error'
                             WHEN COUNT(*) > 0 AND SUM(s.status_code='ok') = COUNT(*)
                                 THEN 'ok'
                             ELSE 'unset' END
                         FROM spans s
                         WHERE s.project_id=traces.project_id
-                          AND s.trace_id=traces.trace_id),
+                          AND s.trace_id=traces.trace_id
+                        HAVING COUNT(*) > 0),
+                        NULLIF(excluded.status_code, 'unset'),
+                        traces.status_code),
                     status_message = COALESCE(
                         excluded.status_message, traces.status_message),
                     source_json = CASE
@@ -411,10 +443,18 @@ class SQLiteTraceStore:
         Mutable fields merge; identity fields (name/kind/start) stay
         first-observed.
         """
+        # end_time: the latest observation wins — an older end_time must
+        # not regress a completed span (flagged OUT_OF_ORDER as evidence
+        # of a late-arriving stale delivery)
+        out_of_order = (
+            stored.end_time is not None
+            and incoming.end_time is not None
+            and ensure_aware(incoming.end_time) < ensure_aware(stored.end_time)
+        )
         merged = stored.model_copy(
             update={
                 "parent_span_id": stored.parent_span_id or incoming.parent_span_id,
-                "end_time": incoming.end_time or stored.end_time,
+                "end_time": _max_dt(stored.end_time, incoming.end_time),
                 "attributes": {**stored.attributes, **incoming.attributes},
                 "events": _merge_events(stored.events, incoming.events),
                 "links": _merge_links(stored.links, incoming.links),
@@ -423,6 +463,8 @@ class SQLiteTraceStore:
         )
         # integrity flags: union minus flags resolved by the merged data
         flags = set(stored.integrity_flags) | set(incoming.integrity_flags)
+        if out_of_order:
+            flags.add(IntegrityFlag.OUT_OF_ORDER)
         if merged.end_time is not None:
             flags.discard(IntegrityFlag.MISSING_END)
         if merged.parent_span_id is None or self._span_exists(

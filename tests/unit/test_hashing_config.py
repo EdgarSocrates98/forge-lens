@@ -62,3 +62,22 @@ def test_load_config_bad_env_reports_variable_name(monkeypatch) -> None:
     monkeypatch.setenv("FORGE_LENS_MAX_TRACES_PER_REQUEST", "abc")
     with pytest.raises(ValueError, match="FORGE_LENS_MAX_TRACES_PER_REQUEST"):
         load_config()
+
+
+def test_env_covers_all_int_bounds(monkeypatch) -> None:
+    """Every int bound maps to FORGE_LENS_* and parses as an int."""
+    monkeypatch.setenv("FORGE_LENS_MAX_PAYLOAD_BYTES", "1024")
+    monkeypatch.setenv("FORGE_LENS_MAX_SPANS_PER_REQUEST", "7")
+    monkeypatch.setenv("FORGE_LENS_MAX_EVENTS_PER_SPAN", "3")
+    monkeypatch.setenv("FORGE_LENS_MAX_ATTR_VALUE_CHARS", "64")
+    cfg = load_config()
+    assert cfg.max_payload_bytes == 1024
+    assert cfg.max_spans_per_request == 7
+    assert cfg.max_events_per_span == 3
+    assert cfg.max_attr_value_chars == 64
+
+
+def test_env_bad_int_reports_variable_name(monkeypatch) -> None:
+    monkeypatch.setenv("FORGE_LENS_MAX_PAYLOAD_BYTES", "huge")
+    with pytest.raises(ValueError, match="FORGE_LENS_MAX_PAYLOAD_BYTES"):
+        load_config()

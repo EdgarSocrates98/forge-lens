@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from forge_lens.contracts.v1.trace import SpanKind, StatusCode
@@ -252,3 +254,15 @@ def test_otlp_kvlist_nonstring_key_quarantined() -> None:
         "real": "ok",
         "_otlp.dropped_kv_pairs": 2,  # evidence — the drop is not silent
     }
+
+
+def test_otlp_deeply_nested_anyvalue_does_not_crash() -> None:
+    """Unbounded _attr_value recursion → RecursionError → HTTP 500.
+    Deep nesting must hit the depth cap and leave a marker instead."""
+    deep: dict[str, Any] = {"stringValue": "bottom"}
+    for _ in range(2_000):
+        deep = {"arrayValue": {"values": [deep]}}
+    payload = _span_payload(attributes=[{"key": "deep", "value": deep}])
+    trace = normalize_otlp_request(payload)[0]
+    # parses without RecursionError; the marker proves the cap fired
+    assert "[DROPPED:depth-limit]" in repr(trace.spans[0].attributes["deep"])
