@@ -374,3 +374,25 @@ def test_parse_session_project_id_lands(tmp_path: Path) -> None:
     t = parse_session(f, project_id="my-proj")
     assert t is not None
     assert t.project_id == "my-proj"
+
+
+def test_alerts_non_list_rules_file(tmp_path: Path) -> None:
+    """load_rules must be TOTAL — 42, "x", null, {"rules": 42} → []
+    so save/delete can still repair the file."""
+    from forge_lens.ops.alerts import load_rules, save_rule
+
+    p = tmp_path / "alert-rules.json"
+    for junk in ("42", '"x"', "null", '{"rules": 42}', "{", ""):
+        p.write_text(junk)
+        assert load_rules(p) == [], junk
+        out = save_rule(p, {"rule_id": "r", "metric": "trace_count",
+                            "op": ">", "threshold": 0})
+        assert [r["rule_id"] for r in out] == ["r"]
+
+
+def test_doctor_no_install_dir_side_effect(tmp_path: Path) -> None:
+    from forge_lens.install.lifecycle import doctor, status
+
+    status(tmp_path)
+    doctor(tmp_path)
+    assert not (tmp_path / "install").exists()

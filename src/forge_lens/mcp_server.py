@@ -38,7 +38,7 @@ def _tools() -> list[dict[str, Any]]:
 
 def serve(db_path: str) -> int:
     """Blocking stdio loop — one JSON-RPC message per line."""
-    store = SQLiteTraceStore(db_path)
+    store = SQLiteTraceStore(db_path, readonly=True)
 
     def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name == "lens.list_traces":
@@ -55,8 +55,7 @@ def serve(db_path: str) -> int:
             pid = args.get("project_id")
             if pid is not None and not isinstance(pid, str):
                 raise TypeError("project_id must be a string")
-            t = store.get_trace(tid,
-                                project_id=args.get("project_id"))
+            t = store.get_trace(tid, project_id=pid)
             return {"trace": t.model_dump(mode="json") if t else None}
         if name == "lens.stats":
             return store.stats()

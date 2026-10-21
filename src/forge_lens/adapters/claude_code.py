@@ -30,14 +30,19 @@ def _hex32(raw: Any) -> str:
     return hashlib.sha256(str(raw).encode()).hexdigest()[:32]
 
 
-def _ts(value: Any) -> datetime:
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _ts(value: Any) -> datetime | None:
+    """Parsed timestamp or None — callers mark the fallback explicitly
+    rather than letting an epoch value pose as a real observation."""
     if isinstance(value, str):
         try:
             return ensure_aware(datetime.fromisoformat(
                 value.replace("Z", "+00:00")))
         except ValueError:
             pass
-    return datetime(1970, 1, 1, tzinfo=UTC)
+    return None
 
 
 def parse_session(path: Path, *, project_id: str = "claude-code") -> Trace | None:
@@ -76,7 +81,9 @@ def parse_session(path: Path, *, project_id: str = "claude-code") -> Trace | Non
                 span_id=f"{n:016x}",
                 name=f"tool {name}",
                 kind=SpanKind.TOOL,
-                start_time=ts, end_time=ts,
+                # unparseable ts falls back to epoch AND is flagged —
+                # the marker distinguishes it from a real 1970 event
+                start_time=ts or _EPOCH, end_time=ts or _EPOCH,
                 status=Status(code=(
                     StatusCode.ERROR if ev.get("is_error") else StatusCode.OK
                 )),
@@ -84,6 +91,8 @@ def parse_session(path: Path, *, project_id: str = "claude-code") -> Trace | Non
                     "adapter": "claude_code",
                     "tool.name": name,
                     "evidence.kind": "log_derived",
+                    **({"integrity.timestamp_fallback": True}
+                       if ts is None else {}),
                 },
             ))
     if not spans:

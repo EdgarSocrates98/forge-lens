@@ -1327,3 +1327,112 @@ def test_eval_omitted_pid_resolves_default_for_scoped_key(
             assert r.status_code == 200
     finally:
         store.close()
+
+
+def test_scoped_admin_cannot_escape_scope(tmp_path) -> None:
+    """P0: a p1-scoped admin key must not mint unscoped/foreign keys,
+    revoke keys outside its scope, list foreign keys, or read the
+    global audit trail."""
+    from forge_lens.security.keys import generate_key
+
+    store = SQLiteTraceStore(tmp_path / "a.db")
+    cfg = LensConfig(
+        data_dir=tmp_path, db_path=tmp_path / "a.db", auth_mode="keys"
+    )
+    app = create_app(store=store, config=cfg)
+    _, root_secret, h = generate_key()
+    store.create_api_key("root", name="root", key_hash=h, role="admin")
+    try:
+        with TestClient(app) as c:
+            admin = {"X-Forge-Lens-Key": root_secret}
+            r = c.post("/v1/admin/keys", headers=admin,
+                       json={"name": "sa", "role": "admin",
+                             "projects": ["p1"]})
+            sa = {"X-Forge-Lens-Key": r.json()["secret"]}
+            sa_id = r.json()["key_id"]
+
+            # minting beyond scope → 403 (foreign and unscoped)
+            for proj in (["p2"], None, []):
+                body = {"name": "esc", "role": "admin"}
+                if proj is not None:
+                    body["projects"] = proj
+                assert c.post("/v1/admin/keys", json=body,
+                              headers=sa).status_code == 403, proj
+            # minting inside scope → 200
+            r = c.post("/v1/admin/keys", headers=sa,
+                       json={"name": "ok", "role": "reader",
+                             "projects": ["p1"]})
+            assert r.status_code == 200
+            victim_id = r.json()["key_id"]
+            # revoking the unscoped root key → 403
+            assert c.delete("/v1/admin/keys/root",
+                            headers=sa).status_code == 403
+            # revoking an in-scope key → 200
+            assert c.delete(f"/v1/admin/keys/{victim_id}",
+                            headers=sa).status_code == 200
+            # key list shows only in-scope keys (root is hidden)
+            mine = c.get("/v1/admin/keys", headers=sa).json()
+            assert all(k["projects"] == ["p1"] for k in mine)
+            assert "root" not in {k["key_id"] for k in mine}
+            # audit trail → 403 for scoped admins
+            assert c.get("/v1/admin/audit", headers=sa).status_code == 403
+            assert c.get("/v1/admin/audit", headers=admin).status_code == 200
+            assert sa_id
+    finally:
+        store.close()
+
+
+def test_lone_surrogate_strings_422_not_500(
+    client: TestClient, synthetic_trace: Trace,
+) -> None:
+    # \ud800 escape in raw JSON — json.loads decodes it to a lone
+    # surrogate; the strict client serializer can't emit one directly
+    esc = "x\\ud800"
+    def _post(url: str, raw: str) -> int:
+        return client.post(url, content=raw,
+                           headers={"content-type": "application/json"}
+                           ).status_code
+
+    def _put(url: str, raw: str) -> int:
+        return client.put(url, content=raw,
+                          headers={"content-type": "application/json"}
+                          ).status_code
+
+    # OTLP — json.loads path (native path is already safe via jiter)
+    assert _post("/v1/otlp/traces", (
+        '{"resourceSpans": [{"scopeSpans": [{"spans": [{'
+        '"traceId": "' + "ab" * 16 + '", "spanId": "' + "cd" * 8 + '",'
+        '"name": "' + esc + '", "startTimeUnixNano": "1",'
+        '"endTimeUnixNano": "2"}]}]}]}')) == 422
+    # datasets
+    assert _put("/v1/datasets/ds-s",
+                '{"name": "' + esc + '"}') == 422
+    assert _put("/v1/datasets/ds-ok", '{"name": "d"}') == 200
+    assert _put("/v1/datasets/ds-ok/versions/v1",
+                '{"cases": [{"case_id": "' + esc + '"}]}') == 422
+    assert _put("/v1/datasets/ds-ok/versions/v1", (
+        '{"cases": [{"case_id": "c1"}],'
+        ' "description": "' + esc + '"}')) == 422
+    # prune + admin keys
+    assert _post("/v1/admin/prune", (
+        '{"before": "2030-01-01T00:00:00Z",'
+        ' "project_id": "' + esc + '"}')) == 422
+
+
+def test_nonfinite_boundary_numbers_422(
+    client: TestClient, synthetic_trace: Trace,
+) -> None:
+    env = {"traces": [synthetic_trace.model_dump(mode="json")]}
+    assert client.post("/v1/traces", json=env).status_code == 200
+    tid = synthetic_trace.trace_id
+    # NaN/Infinity literals reach json.loads — raw content needed
+    for bad in ("NaN", "Infinity"):
+        r = client.post("/v1/admin/prune", content=(
+            '{"older_than_days": ' + bad + '}'),
+            headers={"content-type": "application/json"})
+        assert r.status_code == 422, (bad, r.status_code)
+        r = client.post(
+            f"/v1/analyze/loop_detection_specialist/{tid}", content=(
+                '{"budget": {"max_iterations": ' + bad + '}}'),
+            headers={"content-type": "application/json"})
+        assert r.status_code == 422, (bad, r.status_code)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import secrets
 import threading
 from collections.abc import Awaitable, Callable
@@ -17,6 +18,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from pydantic import ValidationError as PydanticValidationError
+from starlette.concurrency import run_in_threadpool
 
 from forge_lens import __version__
 from forge_lens.api.clock import wall_clock_ns
@@ -346,6 +348,7 @@ def create_app(
             raise _reject_ingest(
                 422, "OTLP body must be a JSON object (ExportTraceServiceRequest)"
             )
+        _reject_unencodable(payload)
         quarantine: list[str] = []
         try:
             traces = normalize_otlp_request(
@@ -626,6 +629,27 @@ def create_app(
             ) from None
         return value
 
+    def _reject_unencodable(obj: Any) -> None:
+        """Walk a parsed payload iteratively (deep AnyValue nesting must
+        not hit the recursion limit); any string that can't bind to
+        SQLite TEXT is a 422 — json.loads accepts \\ud800 escapes that
+        jiter (native path) would already have refused."""
+        stack = [obj]
+        while stack:
+            cur = stack.pop()
+            if isinstance(cur, str):
+                try:
+                    cur.encode("utf-8")
+                except UnicodeEncodeError:
+                    raise _reject_ingest(
+                        422, "unencodable string (lone surrogate)"
+                    ) from None
+            elif isinstance(cur, dict):
+                stack.extend(cur.keys())
+                stack.extend(cur.values())
+            elif isinstance(cur, list):
+                stack.extend(cur)
+
     def _eval_specs(body: dict[str, Any]) -> list[Any]:
         specs = body.get("evaluators")
         if (
@@ -883,12 +907,12 @@ def create_app(
     )
     async def put_dataset(dataset_id: str, request: Request) -> dict[str, Any]:
         body = await _eval_body(request)
-        name = body.get("name")
-        if not isinstance(name, str) or not name.strip():
+        name = _eval_str(body.get("name"), "name")
+        if not name.strip():
             raise _reject_request(422, "name: non-empty string required")
         task = body.get("task")
-        if task is not None and not isinstance(task, str):
-            raise _reject_request(422, "task: string required")
+        if task is not None:
+            task = _eval_str(task, "task")
         metadata = body.get("metadata")
         if metadata is not None and not isinstance(metadata, dict):
             raise _reject_request(422, "metadata: object required")
@@ -947,9 +971,11 @@ def create_app(
             raise _reject_request(
                 422, "cases: list of objects each with a non-empty case_id"
             )
+        for c in cases:
+            _eval_str(c["case_id"], "cases[].case_id")
         description = body.get("description")
-        if description is not None and not isinstance(description, str):
-            raise _reject_request(422, "description: string required")
+        if description is not None:
+            description = _eval_str(description, "description")
         metadata = body.get("metadata")
         if metadata is not None and not isinstance(metadata, dict):
             raise _reject_request(422, "metadata: object required")
@@ -1003,10 +1029,10 @@ def create_app(
         from forge_lens.security.keys import ROLES, generate_key
 
         body = await _eval_body(request)
-        name = body.get("name")
+        name = _eval_str(body.get("name"), "name")
         role = body.get("role")
         projects = body.get("projects")
-        if not isinstance(name, str) or not name.strip():
+        if not name.strip():
             raise _reject_request(422, "name: non-empty string required")
         if not isinstance(role, str) or role not in ROLES:
             raise _reject_request(422, f"role: one of {ROLES}")
@@ -1015,6 +1041,18 @@ def create_app(
             or any(not isinstance(p, str) for p in projects)
         ):
             raise _reject_request(422, "projects: list of strings required")
+        ident = getattr(request.state, "lens_identity", None)
+        # a scoped admin may only mint keys INSIDE its own scope —
+        # never unscoped (projects=None/[]) and never a foreign
+        # project; otherwise key creation is a tenant escape hatch
+        if (
+            ident is not None and ident.projects
+            and (not projects
+                 or any(p not in ident.projects for p in projects))
+        ):
+            raise _reject_request(
+                403, "requested projects outside caller scope"
+            )
         key_id, secret, hashed = generate_key()
         get_store().create_api_key(
             key_id,
@@ -1024,7 +1062,6 @@ def create_app(
             projects=projects,
             now_ns=wall_clock_ns(),
         )
-        ident = getattr(request.state, "lens_identity", None)
         _audit(
             ident.actor if ident else "unknown",
             "key.create",
@@ -1041,11 +1078,32 @@ def create_app(
         }
 
     @app.get(f"/{API_VERSION}/admin/keys", dependencies=admin_deps)
-    async def admin_list_keys() -> list[dict[str, Any]]:
-        return get_store().list_api_keys()
+    async def admin_list_keys(request: Request) -> list[dict[str, Any]]:
+        keys = get_store().list_api_keys()
+        ident = getattr(request.state, "lens_identity", None)
+        if ident is not None and ident.projects:
+            # scoped admins see only keys fully inside their scope
+            keys = [k for k in keys
+                    if k["projects"]
+                    and all(p in ident.projects for p in k["projects"])]
+        return keys
 
     @app.delete(f"/{API_VERSION}/admin/keys/{{key_id}}", dependencies=admin_deps)
     async def admin_revoke_key(request: Request, key_id: str) -> dict[str, Any]:
+        ident = getattr(request.state, "lens_identity", None)
+        if ident is not None and ident.projects:
+            target = next(
+                (k for k in get_store().list_api_keys()
+                 if k["key_id"] == key_id), None,
+            )
+            if target is None:
+                raise _reject_request(
+                    404, f"key {key_id!r} not found or already revoked")
+            if (not target["projects"]
+                    or any(p not in ident.projects
+                           for p in target["projects"])):
+                raise _reject_request(
+                    403, "key outside caller scope")
         if not get_store().revoke_api_key(key_id, now_ns=wall_clock_ns()):
             raise _reject_request(404, f"key {key_id!r} not found or already revoked")
         ident = getattr(request.state, "lens_identity", None)
@@ -1057,11 +1115,19 @@ def create_app(
 
     @app.get(f"/{API_VERSION}/admin/audit", dependencies=admin_deps)
     async def admin_audit(
+        request: Request,
         action: str | None = None,
         actor: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        # audit events carry no reliable per-project attribution —
+        # scoped admins would see (or miss) cross-tenant noise, so the
+        # trail is restricted to unscoped admins entirely
+        ident = getattr(request.state, "lens_identity", None)
+        if ident is not None and ident.projects:
+            raise _reject_request(
+                403, "audit trail requires an unscoped admin key")
         if limit > 500 or limit < 0:
             raise _reject_request(422, "limit: 0..500")
         return get_store().list_audit(
@@ -1077,10 +1143,7 @@ def create_app(
         body = await _eval_body(request)
         before = body.get("before")
         older_days = body.get("older_than_days")
-        pid = body.get("project_id")
-        if pid is not None and not isinstance(pid, str):
-            raise _reject_request(422, "project_id: string required")
-        _require_scope(request, pid)
+        pid = _resolve_pid(request, _eval_project_id(body))
         if before is not None and older_days is not None:
             raise _reject_request(422, "before and older_than_days are exclusive")
         if before is not None:
@@ -1091,9 +1154,10 @@ def create_app(
             if (
                 not isinstance(older_days, (int, float))
                 or isinstance(older_days, bool)
+                or not math.isfinite(older_days)
                 or older_days < 0
             ):
-                raise _reject_request(422, "older_than_days: non-negative number required")
+                raise _reject_request(422, "older_than_days: finite non-negative number required")
             cutoff = wall_clock_ns() - int(older_days * 86_400_000_000_000)
         else:
             raise _reject_request(422, "before or older_than_days required")
@@ -1139,8 +1203,11 @@ def create_app(
     ) -> dict[str, Any]:
         """Run a registered specialist under explicit budgets.
 
-        Body (optional): {"budget": {...}, "context": {...},
-        "project_id": "..."} — budgets default to AgentBudget().
+        Body: {"budget": {...}, "context": {...}, "project_id": "..."}
+        (all fields optional; body itself must be a JSON object).
+        Budgets are cooperative — timeout_s bounds iterations, not
+        preemption mid-iteration; execution runs in a worker thread so
+        a slow pass does not stall other requests.
         """
         from forge_lens.ops.agents import AgentBudget, run_specialist
 
@@ -1153,9 +1220,12 @@ def create_app(
             v = b.get(field, default)
             if isinstance(v, bool) or not isinstance(v, (int, float, str)):
                 raise _reject_request(422, f"budget.{field} must be a number")
+            if isinstance(v, (int, float)) and not math.isfinite(v):
+                raise _reject_request(
+                    422, f"budget.{field} must be finite")
             try:
                 return cast(v)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 raise _reject_request(
                     422, f"budget.{field} must be a number"
                 ) from None
@@ -1175,7 +1245,8 @@ def create_app(
             trace_id, _eval_project_id(body), request
         )
         try:
-            run = run_specialist(
+            run = await run_in_threadpool(
+                run_specialist,
                 specialist, trace, budget=budget, context=ctx,
                 run_id=run_id or f"{specialist}:{trace_id}",
             )

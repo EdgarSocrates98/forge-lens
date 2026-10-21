@@ -30,7 +30,13 @@ def load_rules(path: Path) -> list[dict[str, Any]]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return []
-    raw = data if isinstance(data, list) else data.get("rules", [])
+    if isinstance(data, list):
+        raw = data
+    elif isinstance(data, dict):
+        inner = data.get("rules")
+        raw = inner if isinstance(inner, list) else []
+    else:  # scalars/null — not a rules document at all
+        return []
     return [r for r in raw if _valid_rule(r)]
 
 

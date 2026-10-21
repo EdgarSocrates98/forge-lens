@@ -16,18 +16,19 @@ PROFILES = ("minimal", "recommended", "full")
 _SOURCES = ("pypi", "wheel", "git", "zip", "local", "gitless", "offline")
 
 
-def _dir(data_dir: Path) -> Path:
+def _dir(data_dir: Path, *, create: bool = True) -> Path:
     d = data_dir / "install"
-    d.mkdir(parents=True, exist_ok=True)
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def _receipt_path(data_dir: Path) -> Path:
-    return _dir(data_dir) / "receipt.json"
+def _receipt_path(data_dir: Path, *, create: bool = True) -> Path:
+    return _dir(data_dir, create=create) / "receipt.json"
 
 
 def read_receipt(data_dir: Path) -> dict[str, Any] | None:
-    p = _receipt_path(data_dir)
+    p = _receipt_path(data_dir, create=False)
     if not p.exists():
         return None
     try:
@@ -74,7 +75,7 @@ def doctor(data_dir: Path) -> dict[str, Any]:
     r = read_receipt(data_dir)
     checks.append({"check": "receipt", "ok": r is not None})
     try:
-        probe = _dir(data_dir) / ".probe"
+        probe = data_dir / ".lens-probe"
         probe.write_text("ok")
         probe.unlink()
         checks.append({"check": "data_dir_writable", "ok": True})
