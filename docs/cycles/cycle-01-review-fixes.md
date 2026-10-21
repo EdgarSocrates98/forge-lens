@@ -448,3 +448,35 @@ conflito porque a dedupe acontece no store, abaixo do pipeline.
 
 169 testes py + 20 ts + smoke de pacote; `ruff` limpo; `mypy --strict`
 0 erros; schemas sem drift; `uv build` ok; `pip-audit` 0 vulns.
+
+## Rodada 8 — revisão externa (sugestões de fundação)
+
+Sem bugs bloqueantes; as seis sugestões do reviewer foram aplicadas:
+
+- **`runtime` ≠ `language`**: `TraceSource.runtime` agora vem de
+  `process.runtime.name`/`process.runtime.version` (semconv OTel) —
+  ex. `cpython-3.12.1` — em vez de duplicar `telemetry.sdk.language`.
+  Golden fixture atualizado para carregar os attrs realistas —
+  `test_otlp_runtime_uses_process_runtime_attrs`.
+- **Endpoint sem scheme**: `endpoint = "localhost:7777"` era lido por
+  `urlsplit` com `localhost` como *scheme* e caía silenciosamente para
+  `127.0.0.1:7777`. Agora sem `://` é parseado como `//host:port` —
+  `test_serve_schemeless_endpoint_parses_host_port`.
+- **Warning de exposição com api_key**: `_warn_if_exposed` só avisava
+  quando *não* havia chave; com chave num bind não-loopback, GETs de
+  leitura continuam abertos por design — agora avisa também nesse caso
+  — `test_serve_warns_on_exposed_bind` atualizado.
+- **`LIKE '%missing_parent%'`**: `_` é wildcard SQL; trocado por
+  `json_each(...)` com match exato do elemento — seguro mesmo fora do
+  enum fechado atual.
+- **Rate limiter / atomicidade documentadas**: `ingestion.md` deixa
+  explícito que o limiter é janela fixa (burst ~2× na fronteira) e que
+  a transação é por trace, não por request (re-ingest idempotente
+  torna reenvio seguro).
+- **`get_tracer()` kwargs**: docstring agora declara que argumentos
+  posteriores à primeira construção são ignorados (singleton).
+
+## Estado pós-fix (rodada 8)
+
+171 testes py + 20 ts; `ruff` limpo; `mypy --strict` 0 erros; golden
+fixture exercitando `process.runtime.*`; schemas sem drift.

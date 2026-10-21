@@ -32,6 +32,19 @@ payload ──► limites de tamanho/spans ──► rate limiter ──►
 | `max_attr_value_chars` | 4 096 | trunca + marcador |
 | `rate_limit_per_minute` | 0 (off) | 429 |
 
+`rate_limit_per_minute` usa **janela fixa**: o contador zera a cada
+minuto de relógio monotônico, então na fronteira entre janelas um burst
+de até ~2× o limite pode passar (N no fim da janela + N no início da
+seguinte). É proteção de volume, não shaping preciso — para um throttle
+rígido seria necessário sliding-window ou token bucket (registrado como
+decisão consciente: local-first, single-user).
+
+A atomicidade do pipeline é **por trace, não por request**: cada trace
+escreve em sua própria transação (`upsert_trace`). Uma falha a meio do
+lote deixa as traces anteriores já persistidas — mitigado por re-ingest
+idempotente (dedupe por hash + merge), então reenviar o lote inteiro é
+seguro e converge para o mesmo estado.
+
 ### Dedupe e merge
 
 - Chave de span: `(project_id, trace_id, span_id)` — re-ingestão é idempotente.

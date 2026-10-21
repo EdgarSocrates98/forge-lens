@@ -130,6 +130,18 @@ def _parse_status(raw: Any) -> Status:
     return Status(code=mapping.get(code, StatusCode.UNSET), message=raw.get("message") or None)
 
 
+def _runtime_from(resource_attrs: dict[str, Any]) -> str | None:
+    """OTel semconv ``process.runtime.name`` + ``.version`` → e.g.
+    ``"cpython-3.12.1"``; absent → None (never duplicates ``language``)."""
+    name = resource_attrs.get("process.runtime.name")
+    version = resource_attrs.get("process.runtime.version")
+    if name and version:
+        return f"{name}-{version}"
+    if name or version:
+        return str(name or version)
+    return None
+
+
 def _parse_span(
     raw: dict[str, Any],
     provenance: Provenance,
@@ -320,11 +332,7 @@ def normalize_otlp_request(
                             system=str(service) if service else "otlp",
                             sdk_name=sdk_name,
                             sdk_version=sdk_version,
-                            runtime=(
-                                str(resource_attrs["telemetry.sdk.language"])
-                                if "telemetry.sdk.language" in resource_attrs
-                                else None
-                            ),
+                            runtime=_runtime_from(resource_attrs),
                             language=(
                                 str(resource_attrs["telemetry.sdk.language"])
                                 if "telemetry.sdk.language" in resource_attrs

@@ -132,9 +132,12 @@ def test_serve_warns_on_exposed_bind(capsys) -> None:
     _warn_if_exposed("127.0.0.1", LensConfig())
     assert capsys.readouterr().err == ""
 
-    # non-loopback with a key configured: no warning
+    # non-loopback with a key: still warns — the key guards ingest only,
+    # GET /v1/traces stays unauthenticated by design
     _warn_if_exposed("0.0.0.0", LensConfig(api_key="k"))  # noqa: S104
-    assert capsys.readouterr().err == ""
+    err = capsys.readouterr().err
+    assert "ingest only" in err
+    assert "unauthenticated" in err
 
 
 def test_ingest_rejects_unknown_format(tmp_path: Path) -> None:
@@ -249,3 +252,27 @@ def test_ingest_malformed_json_uses_formatted_error(tmp_path: Path) -> None:
     assert r.exit_code == 1
     assert "ingest failed" in r.output
     assert "Traceback" not in r.output
+
+
+def test_serve_schemeless_endpoint_parses_host_port(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """`endpoint = "localhost:7777"` (no scheme) must read as host:port —
+    urlsplit alone would treat `localhost` as the *scheme*."""
+    import uvicorn
+
+    calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        uvicorn, "run",
+        lambda app, host, port, **kw: calls.append((host, port)),
+    )
+    (tmp_path / ".forge-lens").mkdir()
+    (tmp_path / ".forge-lens" / "config.toml").write_text(
+        '[lens]\nendpoint = "localhost:8888"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, ["serve"])
+    assert result.exit_code == 0, result.output
+    assert calls == [("localhost", 8888)]
+
+

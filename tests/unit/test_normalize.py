@@ -383,3 +383,38 @@ def test_otlp_null_name_becomes_unnamed() -> None:
     """`name: null` must not stringify into the literal "None"."""
     trace = normalize_otlp_request(_span_payload(name=None))[0]
     assert trace.spans[0].name == "unnamed"
+
+
+def test_otlp_runtime_uses_process_runtime_attrs() -> None:
+    """runtime comes from process.runtime.*, not duplicated from
+    telemetry.sdk.language — semconv-accurate, never the same string."""
+    payload = {
+        "resourceSpans": [
+            {
+                "resource": {
+                    "attributes": [
+                        {
+                            "key": "telemetry.sdk.language",
+                            "value": {"stringValue": "python"},
+                        },
+                        {
+                            "key": "process.runtime.name",
+                            "value": {"stringValue": "cpython"},
+                        },
+                        {
+                            "key": "process.runtime.version",
+                            "value": {"stringValue": "3.12.1"},
+                        },
+                    ]
+                },
+                "scopeSpans": [{"spans": [dict(_SPAN_BASE)]}],
+            }
+        ]
+    }
+    trace = normalize_otlp_request(payload)[0]
+    assert trace.source.language == "python"
+    assert trace.source.runtime == "cpython-3.12.1"
+    # name-only fallback
+    payload["resourceSpans"][0]["resource"]["attributes"].pop()
+    trace = normalize_otlp_request(payload)[0]
+    assert trace.source.runtime == "cpython"

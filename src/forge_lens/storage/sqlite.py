@@ -536,11 +536,13 @@ class SQLiteTraceStore:
 
     def _refresh_integrity_flags(self, trace: Trace) -> None:
         """Clear MISSING_PARENT/MISSING_END flags the stored data resolved."""
+        # json_each gives an exact element match — LIKE '%missing_end%'
+        # would treat '_' as a single-char wildcard
         rows = self._conn.execute(
             "SELECT span_id, parent_span_id, ended_ns, integrity_flags_json FROM spans "
-            "WHERE project_id=? AND trace_id=? AND ("
-            "  integrity_flags_json LIKE '%missing_parent%' OR"
-            "  integrity_flags_json LIKE '%missing_end%')",
+            "WHERE project_id=? AND trace_id=? AND EXISTS ("
+            "  SELECT 1 FROM json_each(spans.integrity_flags_json) je"
+            "  WHERE je.value IN ('missing_parent','missing_end'))",
             (trace.project_id, trace.trace_id),
         ).fetchall()
         for r in rows:

@@ -41,12 +41,21 @@ _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
 
 def _warn_if_exposed(host: str, cfg: LensConfig) -> None:
-    """Binding non-loopback without an API key exposes every stored trace."""
-    if host.lower() not in _LOOPBACK and not cfg.api_key:
+    """Binding non-loopback exposes the API — warn about what's reachable."""
+    if host.lower() in _LOOPBACK:
+        return
+    if not cfg.api_key:
         typer.echo(
             f"warning: binding {host} with no api_key — all trace data is "
             "readable and ingest is open to anyone on the network. "
             "Set FORGE_LENS_API_KEY or api_key in config.toml.",
+            err=True,
+        )
+    else:
+        typer.echo(
+            f"warning: binding {host} — api_key protects ingest only; "
+            "GET /v1/traces, /v1/health and /v1/metrics stay unauthenticated "
+            "by design (local-first reads).",
             err=True,
         )
 
@@ -108,7 +117,11 @@ def serve(
 
     cfg = _config(db)
     try:
-        ep = urlsplit(cfg.endpoint)
+        # a schemeless "localhost:7777" would parse "localhost" as the
+        # *scheme* — prefix // so it reads as host:port authority
+        ep = urlsplit(
+            cfg.endpoint if "://" in cfg.endpoint else f"//{cfg.endpoint}"
+        )
         ep_port = ep.port  # raises ValueError on a malformed port
     except ValueError as exc:
         typer.echo(

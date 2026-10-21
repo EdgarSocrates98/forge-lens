@@ -5,7 +5,9 @@
     "provenance": "observed",
     "resource_attributes": {
       "service.name": "otlp-test-svc",
-      "telemetry.sdk.language": "python"
+      "telemetry.sdk.language": "python",
+      "process.runtime.name": "cpython",
+      "process.runtime.version": "3.12.1"
     },
     "root_span_id": "dddddddddddddddd",
     "schema_version": "1.0.0",
@@ -13,7 +15,7 @@
     "source": {
       "host": null,
       "language": "python",
-      "runtime": "python",
+      "runtime": "cpython-3.12.1",
       "sdk_name": "test-lib",
       "sdk_version": "0.0.1",
       "system": "otlp-test-svc"
