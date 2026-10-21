@@ -274,9 +274,18 @@ curl -X POST http://127.0.0.1:7777/v1/alerts/evaluate \
        "rules": [{"rule_id": "inline", "metric": "error_count", "op": ">=", "threshold": 1}]}'
 ```
 
-- Métricas disponíveis: `span_count`, `trace_count`, `error_count`,
-  `error_rate` — computadas do store na hora do request (escopo de
-  `project_id`).
+- Métricas disponíveis — contadores sobre o corpus inteiro do projeto
+  (`store.stats`): `span_count`, `trace_count`, `error_count`,
+  `error_rate`. Derivadas sobre a **janela das ≤200 traces mais
+  recentes** (bound documentado, mesmo de `/v1/ops/summary`):
+  `avg_duration_ms`, `max_duration_ms`, `p95_duration_ms`
+  (nearest-rank; traces rodando excluídas), `error_traces` +
+  `error_trace_rate` (nível de trace, distinto de spans),
+  `token_total`, `cost_total_usd`, `cost_per_trace_usd` (modelos sem
+  preço no registry são excluídos, não zerados),
+  `unpriced_model_count`, `loop_traces` (`detect_loops` em ≤200
+  traces). Unidades/semântica por métrica: `docs/reference/api.md`.
+  `eval_pass_rate` não existe — evals não são persistidas por-run.
 - Ops: `>`, `>=`, `<`, `<=`, `==`. Regra sem `rule_id` string ou
   `threshold` não-numérico é ignorada; métrica desconhecida nunca dispara.
 - **Cap de 100**: `use_saved` mescla o arquivo às regras do body; total

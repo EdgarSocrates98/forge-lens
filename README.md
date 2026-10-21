@@ -71,3 +71,4 @@ See `docs/` — architecture, guides, API/CLI/contracts reference, ADRs and cycl
 - `docs/guides/quickstart.md` — first trace in minutes
 - `docs/guides/operations-runbook.md` — serve, auth modes, retention, backups, monitoring, alert rules
 - `docs/guides/troubleshooting.md` — symptom → cause → fix
+- `docs/guides/failure-investigation.md` — failure taxonomy (§05.3), root-cause hypotheses (§05.4), eval suggestions (§12.7)

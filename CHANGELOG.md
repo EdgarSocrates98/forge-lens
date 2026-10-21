@@ -23,6 +23,17 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
   `lens.capabilities` (11 tools read-only).
 - Avaliadores `contains`, `regex`, `tool_call_count`;
   `latency_budget` aceita `max_duration_ms` (`budget_ms` segue como alias).
+- Avaliadores `schema_validation` (subconjunto JSON-Schema:
+  `type`/`properties`/`required`/`items`, keywords fora do subconjunto →
+  `evaluator_error`), `evidence_coverage` (`required_attrs` com match
+  exato/prefixo `attr.` sobre spans + resource attributes, threshold
+  `min_coverage`), `human_review` (marcador de fila — sempre
+  `score=None`, `verdict=neutral`, rubric ecoado), `precision_recall`
+  (P/R/F1 de conjunto: modos `tool` ou `field`, contínuo → MWU no
+  compare) e `claims_grounded` (heurística lexical de grounding contra
+  `required_source_attr` — overlap de tokens ≥ `min_overlap`; sem fonte
+  observada → `score=None`, nunca fail fabricado). Fecha os gaps de
+  métodos/métricas do spec §06.2/§06.5; registry 12 → 17.
 - Studio: barra de filtros completa no Trace Explorer (deep-linkável,
   saved views) e nova view `/sessions`.
 - SDK Python read-side: `forge_lens.sdk.query.LensClient` (+ `QueryError`)
@@ -81,6 +92,132 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
   registry — e nota `multiple_comparisons` quando >1 teste roda (α=0.05
   sem correção); `fail_on_significant_regression` passa a alcançar
   regressões contínuas significativas.
+- §05.5 correlation (`forge_lens.intel.correlation`):
+  `correlate_trace(trace)` pareia sinais dentro de uma execução —
+  retries que precederam erro, cluster de falhas de tool, troca de
+  modelo, crescimento de contexto antes de erro/score de eval, erros
+  antes de score — cada associação com `evidence_span_ids`, `strength`
+  (números reais) e `caveat`, rotulada `temporal_association` (nunca
+  causal); `correlate_fleet(store, project_id, *, limit=200)` monta
+  tabelas de co-ocorrência sobre janela ≤500 (tool↔falha,
+  modelo↔falha, tamanho-de-sessão↔falha, retries↔score de eval
+  observado) com `n` por cohort e `insufficient_data` honesto sob os
+  pisos (≥5/cohort, ≥3 scored/bucket). Doc:
+  `docs/reference/correlation.md`; testes em
+  `tests/unit/test_correlation.py`.
+- §07.5 métricas derivadas de alerta (`forge_lens.ops.alerts`):
+  `resolve_metrics(store, project_id, registry, *, window, only)` —
+  cada nome em `METRICS` tem resolver próprio. Contadores seguem
+  idênticos sobre `store.stats` (corpus do projeto: `span_count`,
+  `trace_count`, `error_count`, `error_rate`); os novos resolvem sobre
+  a janela limitada das ≤`METRIC_WINDOW` (200) traces mais recentes:
+  `avg_duration_ms`, `max_duration_ms`, `p95_duration_ms`
+  (nearest-rank — o store não calcula percentis; trace rodando é
+  excluída), `error_traces`/`error_trace_rate` (nível de trace,
+  distinto de spans), `token_total` (mesmo fallback de `trace_cost`),
+  `cost_total_usd`/`cost_per_trace_usd` (uso de modelo sem preço é
+  excluído, não zerado), `unpriced_model_count` (gasto cego) e
+  `loop_traces` (`detect_loops` bound na janela). Sem
+  `PricingRegistry` as métricas de custo são omitidas, nunca
+  fabricadas como zero. `eval_pass_rate` deliberadamente ausente:
+  resultados de eval são efêmeros e reports de experimento são deltas
+  por experiment/cohort/evaluator — escalar por projeto não resolvível
+  honestamente. `/v1/alerts/evaluate` passa `only` com as métricas das
+  regras — avaliação só de contadores não escaneia traces. Tabela de
+  unidades/bounds em `docs/reference/api.md`; 12 testes em
+  `tests/unit/test_alert_metrics.py`.
+- §05.3 taxonomia completa de falha (`forge_lens.investigate.classify`):
+  7 categorias novas detectadas só por evidência registrada —
+  `invalid_arguments` (400/422, `ValidationError`/`TypeError`,
+  "invalid/missing argument"), `schema_mismatch` (schema/structured-
+  output/parse — antes de invalid_args por especificidade),
+  `auth_error` (401, `*Auth*`/`Unauthorized` types, credencial
+  inválida/expirada), `missing_permissions` (403, `PermissionError`,
+  forbidden/denied), `retry_exhaustion` (counters `retry.*`/`attempt*`
+  ≥ max registrado ou ≥3, `retry` events ×3, `RetryError`), 
+  `agent_cancelled` (`CancelledError`/flags `cancelled` — sinal forte em
+  span não-errored também falha a trace; "order cancelled" em span
+  saudável não conta) e `budget_exceeded` (flags `*.budget.exceeded`,
+  termos quota/budget — um 429 nomeando quota é exaustão de conta,
+  ganha de `rate_limit`). `evidence` agora carrega `signals`
+  (labels por span) + `names`; chaves legadas (`status`, `message`)
+  preservadas.
+- §05.4 `Hypothesis` + `build_hypotheses(trace)` em
+  `forge_lens.investigate.hypothesis`: `{hypothesis_id, label, symptom,
+  supporting_evidence, contradictory_evidence, missing_evidence,
+  suggested_verification, confidence, status}` — uma hipótese por
+  categoria sinalizada (primária + concorrentes), `status` honesto
+  (`proposed`/`supported`/`refuted` só com evidência contraditória/
+  `unverifiable` para falha sem assinatura), bounded por
+  `MAX_HYPOTHESES`.
+- §12.7 `suggest_evaluators(reports)` em
+  `forge_lens.investigate.eval_suggest`: mapeia categorias (single ou
+  recorrentes entre traces, `recurring` ≥2) para specs candidatas de
+  avaliador/dataset-case com `rationale` + `evidence` — ex.:
+  `invalid_arguments` → `allowed_tools`/`tool_call_count` guard +
+  dataset case, `timeout` → `latency_budget`. Datasets nunca são
+  modificados.
+- `failure_investigator` embute nos findings `hypotheses` (cap
+  `context.max_hypotheses`, default 5, com `hypothesis_count`/
+  `hypotheses_truncated`) + `eval_suggestions`; o bundle `/incident`
+  ganha as mesmas seções. Doc: `docs/guides/failure-investigation.md`;
+  23 testes em `tests/unit/test_failure_categories.py`.
+
+### Added — docs & community (post-review wave)
+
+- `.github/ISSUE_TEMPLATE/`: `bug_report.md` e `feature_request.md` (com
+  checklist honesto) + `config.yml` roteando vulnerabilidades para
+  Security Advisories e dúvidas para `docs/`.
+- `docs/roadmap.md` — roadmap público: resumo da superfície entregue e
+  tabela **Declared deferrals** convertendo todo deferral conhecido em
+  descope explícito com racional e gatilho de revisita (encryption-at-
+  rest, scalable mode, browser matrix, 1M spans, SSO/OIDC, re-execution
+  replay, canais de alerta, MCP ao vivo, adapters restantes, §12.5–12.8
+  residuais, OTLP/protobuf, filtros/virtual-scroll do Studio, eval CI
+  gate) + itens PLANNED priorizados por valor medido.
+- `docs/cycles/cycle-07..12-final-report.md` — relatórios individuais
+  por ciclo (escopo/verificável, semântica honesta, exclusões,
+  evidência) conforme o layout mandatório da spec §9; `cycle-06-12.md`
+  segue como índice consolidado com nota apontando para eles.
+- `docs/adoption.md` — matriz de valor real (§12.10): quem se
+  beneficia, o que custa, o que NÃO faz ainda (link p/ roadmap) e como
+  feedback vira prioridade.
+- `examples/sample-otlp.json` — dump `ExportTraceServiceRequest` mínimo
+  (agente → llm + tool) pronto para `forge-lens import-otel`.
+
+### Added — integration hardening (post-review wave)
+
+- §02.6 — `list_traces` ganha `model`/`agent`/`host`/`min_total_tokens`
+  em todas as superfícies: store (`sqlite.py`), `GET /v1/traces`, CLI
+  `--model/--agent/--host/--min-tokens`, SDK Python
+  (`list_traces(model=…)`), SDK TS (`listTraces({model, agent, host,
+  minTotalTokens})`). Deliberado: sem filtro `cost` — custo deriva do
+  pricing na leitura, nunca predicado persistido.
+- §05.5 roteado: `GET /v1/traces/{id}/correlate` (co-ocorrências
+  temporais por trace) + `POST /v1/intel/correlate` (tabelas de frota,
+  janela ≤500) — classificações `temporal_association`/
+  `descriptive_co_occurrence`, zero claim causal. Paridade: CLI
+  `forge-lens correlate`, MCP `lens.correlate`, SDKs
+  `trace_correlate`/`fleet_correlate` + `traceCorrelate`/
+  `fleetCorrelate`.
+- MCP hardening: `tools/call` exige `initialize` (pré-init → `-32602`),
+  falhas de dados pós-init viram `result.isError`, exceções viram
+  `-32603` sem vazar `str(exc)` no canal.
+- `/v1/traces/{id}/incident`: export-boundary re-sanitize
+  (`redact_export`) — findings derivados não podem ecoar segredos
+  capturados sob `capture=full`; resposta ganha `export_sanitize`
+  `{redacted_keys, redacted_values, emails_masked}`. Regressão em
+  `test_security.py`.
+- Studio: replay playback controls (step/play/pause/velocidade/jump-to
+  error·tool·event + teclado; `Date.parse` por row por CD →
+  pré-computado), rota `/experiments` (list/create/run/gate verdict),
+  `compare-report` compartilhado com failure examples recomputados e
+  Pareto quando há means reais, mirror de avaliadores 12 → 17.
+- Docs: `api.md` (novos filtros + rotas correlate + `export_sanitize`),
+  `cli.md` (novas flags + `correlate`), `mcp.md` (init gate +
+  `lens.correlate`), `sdk-python.md`/`sdk-typescript.md` (filtros +
+  métodos), `architecture/security.md` e `security/threat-model.md`
+  (drift corrigido: TLS passthrough, keys/RBAC/audit do ciclo 08).
 
 ### Added — cycles 06–12
 

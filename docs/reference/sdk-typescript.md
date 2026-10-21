@@ -120,7 +120,7 @@ status HTTP quando o servidor respondeu (401/403/404/422…) e fica
 
 | Método | Rota | Retorno |
 |---|---|---|
-| `listTraces({projectId?, sessionId?, status?, since?, until?, minDurationMs?, maxDurationMs?, q?, tool?, limit=50, offset=0})` | `GET /v1/traces` | `{items, limit, offset}` |
+| `listTraces({projectId?, sessionId?, status?, since?, until?, minDurationMs?, maxDurationMs?, q?, tool?, model?, agent?, host?, minTotalTokens?, limit=50, offset=0})` | `GET /v1/traces` | `{items, limit, offset}` |
 | `getTrace(traceId, {projectId?})` | `GET /v1/traces/{id}` | contrato `Trace` completo |
 | `listSessions({projectId?, limit=100, offset=0})` | `GET /v1/sessions` | `{items, limit, offset}` |
 | `listTools({projectId?, limit=100, offset=0})` | `GET /v1/tools` | `{items, limit, offset}` |
@@ -137,6 +137,7 @@ status HTTP quando o servidor respondeu (401/403/404/422…) e fica
 | `traceEval(traceId, {projectId?})` | `…/eval` | `{trace_id, results}` |
 | `traceEfficiency(traceId, {projectId?})` | `…/efficiency` | tokens/tools/retries |
 | `traceRecommendations(traceId, {projectId?})` | `…/recommendations` | recomendações com evidência |
+| `traceCorrelate(traceId, {projectId?})` | `…/correlate` | co-ocorrências temporais (não-causal) |
 | `traceLoops(traceId, {projectId?, repeatThreshold=3})` | `…/loops` | findings heurísticos |
 | `listDatasets({projectId?})` | `GET /v1/datasets` | **array puro** (sem envelope) |
 | `getDataset(datasetId, {projectId?})` | `GET /v1/datasets/{id}` | metadados do dataset |
@@ -169,6 +170,8 @@ Notas:
     fail_on_significant_regression}` → resposta inclui `gate.gate_passed`.
   - `fleetEfficiency(traceIds?, {projectId?})` → `POST /v1/intel/efficiency`
     — roll-up sobre ids explícitos ou a janela recente limitada.
+  - `fleetCorrelate({projectId?, limit?})` → `POST /v1/intel/correlate` —
+    tabelas de co-ocorrência da frota (descritivo, não-causal).
   - `compareCohorts(a, b, {projectId?})` → `POST /v1/intel/regress` —
     deltas observados entre cohorts (significância fica com eval/compare).
   - `runAnalysis(specialist, traceId, {budget?, context?, runId?,

@@ -83,6 +83,11 @@ def _tools() -> list[dict[str, Any]]:
          "description": "Per-trace efficiency roll-up "
                         "(tokens/tools/retries).",
          "inputSchema": _TRACE_INPUT},
+        {"name": "lens.correlate",
+         "description": "Temporal co-occurrence signals within a trace "
+                        "(retries→errors, model switches, context growth). "
+                        "Descriptive associations, never causal claims.",
+         "inputSchema": _TRACE_INPUT},
     ]
 
 
@@ -168,6 +173,13 @@ def serve(db_path: str) -> int:
             if trace is None:
                 return _missing(tid)
             return trace_efficiency(trace)
+        if name == "lens.correlate":
+            from forge_lens.intel.correlation import correlate_trace
+
+            tid, trace = _trace_lookup(args)
+            if trace is None:
+                return _missing(tid)
+            return correlate_trace(trace)
         if name == "lens.cost":
             from forge_lens.intel import detect_waste, trace_cost
 
@@ -218,6 +230,7 @@ def serve(db_path: str) -> int:
             return capability_matrix()
         return {"error": f"unknown tool {name!r}"}
 
+    initialized = False
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -232,8 +245,15 @@ def serve(db_path: str) -> int:
         rid = req.get("id")
         if method in ("notifications/initialized",) or rid is None:
             continue  # notifications need no reply
+        if method != "initialize" and not initialized:
+            out = {"jsonrpc": "2.0", "id": rid,
+                   "error": {"code": -32602,
+                             "message": "expected 'initialize' first"}}
+            print(json.dumps(out), flush=True)
+            continue
         result: dict[str, Any]
         if method == "initialize":
+            initialized = True
             result = {"protocolVersion": "2024-11-05",
                       "capabilities": {"tools": {}},
                       "serverInfo": {"name": "forge-lens", "version": __version__}}
@@ -255,12 +275,19 @@ def serve(db_path: str) -> int:
                 payload = _call(str(p.get("name")), args)
                 content: list[dict[str, str]] = [{
                     "type": "text", "text": json.dumps(payload)}]
+                # Tool-level failure is a successful call carrying
+                # isError content — distinct from a protocol fault.
                 result = {"content": content}
+                if isinstance(payload, dict) and "error" in payload:
+                    result["isError"] = True
             except Exception as exc:  # observer loop: a bad call never kills it
-                # one malformed call must not kill the stdio loop
+                # one malformed call must not kill the stdio loop; the
+                # message is bounded so exception text stays opaque
                 out = {"jsonrpc": "2.0", "id": rid,
                        "error": {"code": -32603,
-                                 "message": f"tool error: {exc}"}}
+                                 "message": "tool error: "
+                                    f"{type(exc).__name__}: "
+                                    f"{str(exc)[:180]}"}}
                 print(json.dumps(out), flush=True)
                 continue
         else:

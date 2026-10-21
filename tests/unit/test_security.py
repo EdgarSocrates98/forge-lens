@@ -87,3 +87,57 @@ def test_mcp_inspect_flags_and_stays_an_observer(
     report = inspect_trace(synthetic_trace)
     assert report["mode"] == "observer"
     assert isinstance(report["observations"], list)
+
+
+def test_incident_export_resanitizes(tmp_store: SQLiteTraceStore) -> None:
+    """§05.7 boundary: stored data was ingest-sanitized, but a trace
+    upserted with verbatim secrets (capture=full, or a store populated
+    out-of-band) must not leak them through the incident bundle —
+    the export boundary re-scrubs and discloses via export_sanitize."""
+    import json
+
+    from fastapi.testclient import TestClient
+
+    from forge_lens.api.app import create_app
+    from forge_lens.contracts.v1.trace import Trace
+    from forge_lens.core.config import LensConfig
+
+    secret = "sk-ant-" + "a1B2" * 8
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    span = Span(
+        trace_id="e" * 32,
+        span_id="3" * 16,
+        name="llm call",
+        kind=SpanKind.LLM,
+        start_time=t0,
+        end_time=t0 + timedelta(milliseconds=50),
+        status=Status(
+            code=StatusCode.ERROR,
+            message=f"provider rejected key {secret} for ops@corp.io",
+        ),
+        attributes={
+            "gen_ai.usage.total_tokens": 42,
+            "request.headers.api_key": secret,
+        },
+    )
+    tmp_store.upsert_trace(Trace(
+        trace_id="e" * 32, project_id="p1", started_at=t0,
+        ended_at=t0 + timedelta(milliseconds=50),
+        status=Status(code=StatusCode.ERROR), spans=[span],
+    ))
+    cfg = LensConfig(data_dir=tmp_store.path.parent,
+                     db_path=tmp_store.path)
+    with TestClient(create_app(store=tmp_store, config=cfg)) as c:
+        r = c.get(f"/v1/traces/{'e' * 32}/incident",
+                  params={"project_id": "p1"})
+    assert r.status_code == 200
+    body = json.dumps(r.json())
+    assert secret not in body
+    assert "ops@corp.io" not in body
+    rep = r.json()["export_sanitize"]
+    # Value-patterns catch the key echoed into status.message; the
+    # bundle never echoes raw attribute keys, so key-redaction stays 0.
+    assert rep["redacted_values"] >= 1
+    assert rep["emails_masked"] >= 1
+    assert rep["redacted_keys"] == 0
+    assert r.json()["bundle_version"] == "1.0.0"

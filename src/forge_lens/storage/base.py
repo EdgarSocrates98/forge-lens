@@ -41,6 +41,10 @@ class TraceStore(Protocol):
         max_duration_ns: int | None = None,
         q: str | None = None,
         tool: str | None = None,
+        model: str | None = None,
+        agent: str | None = None,
+        host: str | None = None,
+        min_total_tokens: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]: ...

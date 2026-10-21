@@ -276,6 +276,27 @@ def traces_list(
         str | None,
         typer.Option("--tool", help="substring match on span tool.name"),
     ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option(
+            "--model", help="substring on gen_ai.request/response.model"),
+    ] = None,
+    agent: Annotated[
+        str | None,
+        typer.Option(
+            "--agent",
+            help="substring on gen_ai.agent.name or producer identity"),
+    ] = None,
+    host: Annotated[
+        str | None,
+        typer.Option("--host", help="substring on source.host / host.name"),
+    ] = None,
+    min_tokens: Annotated[
+        int | None,
+        typer.Option(
+            "--min-tokens",
+            help="summed gen_ai.usage.total_tokens ≥ value"),
+    ] = None,
     q: Annotated[
         str | None,
         typer.Option("--q", help="substring match on trace_id or span name"),
@@ -324,6 +345,10 @@ def traces_list(
         return int(value * 1_000_000)
 
     store = _store(cfg)
+    if min_tokens is not None and min_tokens < 0:
+        typer.echo("invalid --min-tokens: non-negative integer expected",
+                   err=True)
+        raise typer.Exit(2)
     try:
         items = store.list_traces(
             project_id=project or cfg.project_id,
@@ -335,6 +360,10 @@ def traces_list(
             max_duration_ns=_dur_ns(max_duration_ms, "--max-duration-ms"),
             q=q,
             tool=tool,
+            model=model,
+            agent=agent,
+            host=host,
+            min_total_tokens=min_tokens,
             limit=limit,
         )
     finally:
@@ -852,6 +881,35 @@ def recommendations(
     )
     for r in recs:
         typer.echo(f"  {r['kind']}: {r['detail']}")
+
+
+@app.command()
+def correlate(
+    trace_id: Annotated[str, typer.Argument()],
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Temporal co-occurrence signals within one trace — descriptive
+    associations, never causal (``/v1/traces/{id}/correlate``)."""
+    from forge_lens.intel.correlation import correlate_trace
+
+    trace = _get_trace_or_exit(trace_id, _config(db), project)
+    out = correlate_trace(trace)
+    if json_out:
+        typer.echo(json.dumps(out, indent=2))
+        return
+    cors = out["correlations"]
+    if not cors:
+        typer.echo(f"trace {out['trace_id']}: no correlations")
+        return
+    typer.echo(
+        f"trace {out['trace_id']}: {len(cors)} temporal association(s)"
+        " — correlation is not causation"
+    )
+    for c in cors:
+        typer.echo(
+            f"  {c['kind']} (strength={c['strength']}): {c['detail']}")
 
 
 @app.command()

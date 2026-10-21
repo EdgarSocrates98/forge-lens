@@ -307,3 +307,33 @@ def sanitize_trace(
     METRICS.inc(M_ATTRS_REDACTED, report.redacted_keys + report.redacted_values)
     METRICS.inc(M_ATTRS_TRUNCATED, report.truncated_values)
     return report
+
+
+def redact_export(
+    obj: Any, report: SanitizeReport | None = None
+) -> Any:
+    """Export-time scrub for derived payloads (e.g. incident bundles).
+
+    Stored data was sanitized at ingest, but derived findings can echo
+    captured bodies verbatim when ``capture=full``. Re-apply the value
+    scrub at the export boundary so a leak removed at ingest cannot
+    re-enter through a report. Identity/lookup keys are untouched.
+    """
+    rep = report if report is not None else SanitizeReport()
+    if isinstance(obj, str):
+        return _scrub_text(obj, rep, mask_emails=True)
+    if isinstance(obj, dict):
+        out: dict[str, Any] = {}
+        for key, value in obj.items():
+            ks = key if isinstance(key, str) else str(key)
+            if not isinstance(key, str):
+                rep.normalized_keys += 1
+            if _is_sensitive_key(ks):
+                rep.redacted_keys += 1
+                out[ks] = "[REDACTED:key]"
+                continue
+            out[ks] = redact_export(value, rep)
+        return out
+    if isinstance(obj, (list, tuple)):
+        return [redact_export(v, rep) for v in obj]
+    return obj

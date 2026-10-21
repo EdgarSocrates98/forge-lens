@@ -42,7 +42,10 @@ existir um **ponto de instrumentação real**:
 
 JSON-RPC 2.0 sobre stdin/stdout (uma mensagem por linha), store SQLite
 aberta em modo **readonly**. Métodos: `initialize`, `ping`, `tools/list`,
-`tools/call`. Cada tool valida os argumentos (`TypeError` → erro JSON-RPC
+`tools/call`. **`tools/call` exige `initialize` antes** — chamadas
+pré-inicialização respondem `-32602`; falhas de dados pós-init viram
+`result.isError` (o loop nunca morre por dado faltante). Cada tool valida
+os argumentos (`TypeError` → erro JSON-RPC
 `-32603`); uma chamada malformada nunca derruba o loop. Tools expostas —
 espelham a inteligência de leitura da API HTTP:
 
@@ -53,6 +56,7 @@ espelham a inteligência de leitura da API HTTP:
 | `lens.stats` | `project_id?` | stats da store |
 | `lens.detect_loops` | `trace_id`, `project_id?` | `GET /v1/traces/{id}/loops` |
 | `lens.trace_efficiency` | `trace_id`, `project_id?` | `GET /v1/traces/{id}/efficiency` |
+| `lens.correlate` | `trace_id`, `project_id?` | `GET /v1/traces/{id}/correlate` |
 | `lens.cost` | `trace_id`, `project_id?` | `GET /v1/traces/{id}/cost` |
 | `lens.failure` | `trace_id`, `project_id?` | `GET /v1/traces/{id}/failure` |
 | `lens.list_datasets` | `project_id?` | `GET /v1/datasets` |

@@ -1,7 +1,8 @@
 """Advanced graph analysis — Cycle 12 §12.5.
 
-Centrality, dependency concentration, handoff inefficiency, repeated
-subgraphs — deterministic metrics over the built ExecutionGraph.
+Centrality (degree hubs), dependency concentration, failure
+propagation to children of error nodes, repeated subgraph signatures —
+deterministic metrics over the built ExecutionGraph.
 """
 
 from __future__ import annotations

@@ -839,6 +839,10 @@ class SQLiteTraceStore:
         max_duration_ns: int | None = None,
         q: str | None = None,
         tool: str | None = None,
+        model: str | None = None,
+        agent: str | None = None,
+        host: str | None = None,
+        min_total_tokens: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -853,6 +857,16 @@ class SQLiteTraceStore:
         any span ``name``; ``tool`` matches traces carrying a span
         whose ``tool.name`` attribute contains the value. Both are
         LIKE-escaped — user input can never inject wildcards.
+        ``model`` matches ``gen_ai.request.model``/``gen_ai.response.model``
+        span attrs; ``agent`` matches ``gen_ai.agent.name`` on spans OR
+        ``source.system``/``service.name`` producer identity; ``host``
+        matches ``source.host``/``host.name`` resource attrs.
+        ``min_total_tokens`` compares the summed
+        ``gen_ai.usage.total_tokens`` across a trace's spans — traces
+        without usage evidence never match (sum stays 0). ``cost`` is
+        deliberately NOT a filter: it derives from the pricing registry
+        at read time and isn't a stored column — post-computing it over
+        unbounded sets would be dishonest about scope.
         ``project_id=None`` stays the all-projects wildcard.
         """
         clauses: list[str] = []
@@ -899,6 +913,53 @@ class SQLiteTraceStore:
                 "AND s.attributes_json LIKE ? ESCAPE '\\')"
             )
             params.append(f'%"tool.name": "%{_like_escape(tool)}%"%')
+        if model:
+            pat = _like_escape(model)
+            clauses.append(
+                "EXISTS (SELECT 1 FROM spans s "
+                "WHERE s.project_id = traces.project_id "
+                "AND s.trace_id = traces.trace_id "
+                "AND (s.attributes_json LIKE ? ESCAPE '\\' "
+                "OR s.attributes_json LIKE ? ESCAPE '\\'))"
+            )
+            params.extend([
+                f'%"gen_ai.request.model": "%{pat}%"%',
+                f'%"gen_ai.response.model": "%{pat}%"%',
+            ])
+        if agent:
+            pat = _like_escape(agent)
+            clauses.append(
+                "(EXISTS (SELECT 1 FROM spans s "
+                "WHERE s.project_id = traces.project_id "
+                "AND s.trace_id = traces.trace_id "
+                "AND s.attributes_json LIKE ? ESCAPE '\\') "
+                "OR source_json LIKE ? ESCAPE '\\' "
+                "OR resource_attributes_json LIKE ? ESCAPE '\\')"
+            )
+            params.extend([
+                f'%"gen_ai.agent.name": "%{pat}%"%',
+                # source_json serializes compact (model_dump_json).
+                f'%"system":"%{pat}%"%',
+                f'%"service.name": "%{pat}%"%',
+            ])
+        if host:
+            pat = _like_escape(host)
+            clauses.append(
+                "(source_json LIKE ? ESCAPE '\\' "
+                "OR resource_attributes_json LIKE ? ESCAPE '\\')"
+            )
+            params.extend([
+                f'%"host":"%{pat}%"%',
+                f'%"host.name": "%{pat}%"%',
+            ])
+        if min_total_tokens is not None:
+            clauses.append(
+                "(SELECT COALESCE(SUM(json_extract(s.attributes_json, "
+                "'$.\"gen_ai.usage.total_tokens\"')), 0) FROM spans s "
+                "WHERE s.project_id = traces.project_id "
+                "AND s.trace_id = traces.trace_id) >= ?"
+            )
+            params.append(max(0, min_total_tokens))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._lock:
             rows = self._conn.execute(

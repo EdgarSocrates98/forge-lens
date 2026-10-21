@@ -80,7 +80,7 @@ inválida, `429` rate limit.
 
 ## Consulta
 
-### `GET /v1/traces?project_id&session_id&status&since&until&min_duration_ms&max_duration_ms&q&tool&limit≤500&offset`
+### `GET /v1/traces?project_id&session_id&status&since&until&min_duration_ms&max_duration_ms&q&tool&model&agent&host&min_total_tokens&limit≤500&offset`
 `{items:[{trace_id, project_id, session_id, root_span_id, started_at,
 ended_at, status, span_count, error_count}], limit, offset}`.
 
@@ -98,6 +98,18 @@ Todos os filtros combinam com `AND`; parâmetros malformados → `422`:
 - `tool`: substring literal sobre o valor do atributo `tool.name` de
   qualquer span. `q` e `tool` escapam `%`/`_`/`\` — um `%` no termo
   casa um sinal de porcentagem literal, nunca funciona como wildcard.
+- `model`: substring literal sobre os atributos `gen_ai.request.model`
+  ou `gen_ai.response.model` de qualquer span.
+- `agent`: substring literal sobre `gen_ai.agent.name` de qualquer span,
+  OU sobre a identidade do produtor (`source.system`, ou o atributo de
+  recurso `service.name`).
+- `host`: substring literal sobre `source.host` ou o atributo de recurso
+  `host.name`.
+- `min_total_tokens`: inteiro ≥ 0 — soma de `gen_ai.usage.total_tokens`
+  sobre todos os spans da trace ≥ limite. Traces sem uso observado
+  **nunca** casam. Não existe filtro `cost` — custo é derivado do
+  pricing registry na leitura, nunca um predicado persistido (§02.6:
+  filtrar SQL por custo exigiria materializar um valor derivado).
 
 ### `GET /v1/sessions?project_id&limit≤500&offset`
 Roll-up por sessão — `{items:[{session_id, traces, spans,
@@ -259,16 +271,33 @@ cached_input_per_mtok}}}` — a tabela efetiva em uso.
 ### `GET /v1/traces/{trace_id}/failure?project_id`
 Classificação determinística de falha: `{trace_id, failed, category,
 confidence, evidence, detail}`. `failed` é verdade somente quando o
-trabalho errou, nunca completou, ou a topologia declarada é impossível —
-flags de data-quality (`clock_skew`, `duplicate`, …) são evidência, não
-veredicto. Categorias: `timeout`, `rate_limit` (apenas em spans que
-erraram — um 429 recuperado não é causa), `tool_error`, `llm_error`,
-`guardrail`, `incomplete` (spans nunca fechados — host provável morto),
-`cycle` (qualquer ciclo de parentesco real — self-loop ou multi-nó,
-detectado pelo mesmo walk O(n) do graph builder), `unknown`. Regras
-correm em ordem de especificidade; `evidence` nomeia os
-spans/atributos que dispararam. `unknown` com `failed=false` é a
-resposta honesta para traces saudáveis.
+trabalho errou, nunca completou, foi cancelado, ou a topologia declarada
+é impossível — flags de data-quality (`clock_skew`, `duplicate`, …) são
+evidência, não veredicto. Categorias (§05.3): `cycle` (ciclo de
+parentesco real — self-loop ou multi-nó, mesmo walk O(n) do graph
+builder), `budget_exceeded` (429 nomeando quota/budget, ou flags
+`*.budget.exceeded` — exaustão de conta, não throttle transitório),
+`auth_error` (401 / `AuthenticationError` / credencial inválida),
+`missing_permissions` (403 / `PermissionError` / forbidden),
+`schema_mismatch` (schema/structured-output/parse — mais específico que
+um 400 nu), `invalid_arguments` (400/422 / `ValidationError` family),
+`retry_exhaustion` (counters `retry.*`/`attempt*` ≥ max registrado ou ≥
+3, flags `retry.exhausted`, eventos `retry` ×3+, `RetryError`),
+`rate_limit` (429 puro — um 429 recuperado não é causa), `timeout`
+(`TimeoutError`/`deadline` em status, attrs ou exception events),
+`agent_cancelled` (`CancelledError` / flags `cancelled` — span não-errored
+com sinal forte também falha a trace; texto fraco tipo "order
+cancelled" não conta), `tool_error`, `llm_error`, `guardrail` (erro em
+span do kind), `incomplete` (spans nunca fechados — host provável
+morto), `unknown`. Regras correm em ordem de especificidade sobre
+evidência registrada (HTTP status em attrs, `exception.type` em attrs e
+eventos, counters, flags, texto de status/eventos); `evidence` nomeia
+`span_ids` + `signals` + `names` que dispararam. `unknown` com
+`failed=false` é a resposta honesta para traces saudáveis. Hipóteses
+de causa-raiz (§05.4) e sugestões de cenários de avaliação (§12.7) são
+embutidas via `build_hypotheses`/`suggest_evaluators` (pacote
+`forge_lens.investigate`), no bundle `/incident` e nos findings do
+specialist `failure_investigator` — ver `docs/guides/failure-investigation.md`.
 
 ### `GET /v1/traces/{trace_id}/replay?project_id`
 Replay **registrado** (não re-executa código do agente): timeline único
@@ -278,9 +307,16 @@ timestamp. `unclosed_spans` conta spans sem `end_time`.
 
 ### `GET /v1/traces/{trace_id}/incident?project_id`
 Bundle de incidente versionado (`bundle_version`) compondo em um payload
-JSON: `failure` + `graph` (stats, critical path, top-5 bottlenecks) +
-`cost` + `waste` + `replay`. Um call, todo o evidence — feito para
-handoff/export.
+JSON: `failure` + `hypotheses` (§05.4 — lista bounded por
+`MAX_HYPOTHESES`) + `eval_suggestions` (§12.7 — candidatas) + `graph`
+(stats, critical path, top-5 bottlenecks) + `cost` + `waste` + `replay`.
+Um call, todo o evidence — feito para handoff/export.
+
+O bundle passa por um **segundo boundary de sanitização no export**
+(`redact_export`): dados já foram sanitizados na ingestão, mas findings
+derivados podem ecoar corpos capturados verbatim sob `capture=full`.
+`export_sanitize: {redacted_keys, redacted_values, emails_masked}` na
+resposta declara exatamente o que o scrub tocou.
 
 ### `GET /v1/traces/{trace_id}/security?project_id`
 Observações de segurança MCP/tool-call (Cycle 08 — modo **observer**,
@@ -400,6 +436,26 @@ Métricas: `success_rate`, `tokens_per_trace`, `tokens_per_success`,
 `error_rate`. Deltas são **diferenças observadas** — o veredicto
 estatístico é de `/v1/eval/compare`.
 
+### `GET /v1/traces/{trace_id}/correlate?project_id`
+§05.5 — sinais de co-ocorrência temporal dentro da trace:
+`{trace_id, correlations: [{kind, classification:
+"temporal_association", signals, strength, evidence_span_ids, caveat,
+detail}], signal_inventory, note}`. Kinds: `retries_preceded_error`,
+`tool_failure_cluster`, `model_switch`, `context_growth_preceded_error`,
+`context_growth_preceded_eval`, `errors_preceded_eval_score`. Toda
+correlação carrega caveat **não-causal** — associação temporal, nunca
+reivindicação de causa. `404` se a trace não existe.
+
+### `POST /v1/intel/correlate`
+§05.5 — tabelas de co-ocorrência da frota. Corpo:
+`{project_id?, limit?}` (`limit` ≤ 500, default 200 — janela das traces
+mais recentes). Resposta: `{project_id, window, outcomes, tables:
+{tool_error, model_error, session_length_error, retry_eval},
+classification: "descriptive_co_occurrence"}`. Taxas por coorte
+falha/ok com `n` completo; janelas sem ≥5 traces por lado são
+`insufficient_data` com os números ainda visíveis — nunca taxas sem
+base.
+
 ## Análise assistida — specialists (Cycle 07)
 
 Specialists são analisadores determinísticos sobre evidência — sem
@@ -423,18 +479,57 @@ findings[]}`. `stop_reason` ∈ `completed` | `budget_exceeded` |
 `token_budget_exceeded` | `timeout` | `cancelled` |
 `unknown_specialist` — specialist desconhecido retorna `200` com
 `findings` listando os disponíveis, não `404`. `context.pricing` é
-sempre injetado pelo servidor (valor de wire é descartado). Erros:
-`400`, `404` trace inexistente, `413`, `422` budget/context/run_id
-malformado.
+sempre injetado pelo servidor (valor de wire é descartado). O
+`failure_investigator` embute nos findings, além do `FailureReport`,
+`hypotheses` (§05.4 — limitadas por `context.max_hypotheses`, default 5;
+`hypothesis_count` + `hypotheses_truncated` declaram o corte) e
+`eval_suggestions` (§12.7 — candidatas, datasets nunca são modificados).
+Erros: `400`, `404` trace inexistente, `413`, `422` budget/context/
+run_id malformado.
 
 ## Alertas (Cycle 07)
 
-Regras são predicados de threshold sobre métricas agregadas do store
-(`span_count`, `trace_count`, `error_count`, `error_rate` — escopadas
-por `project_id`), computadas no momento do request. Regra: `{rule_id,
-metric, op, threshold, severity?, message?}` com `op` ∈ `>`, `>=`,
-`<`, `<=`, `==`; regra sem `rule_id`/`threshold` numérico/métrica
-conhecida é ignorada.
+Regras são predicados de threshold sobre métricas agregadas do store,
+computadas no momento do request e escopadas por `project_id`. Regra:
+`{rule_id, metric, op, threshold, severity?, message?}` com `op` ∈
+`>`, `>=`, `<`, `<=`, `==`; regra sem `rule_id`/`threshold`
+numérico/métrica conhecida é ignorada.
+
+### Métricas de alerta
+
+Dois escopos de resolução — o de cada métrica está declarado na
+tabela. Contadores vêm de `store.stats(project_id)` (corpus inteiro do
+projeto — a janela que sempre tiveram). Métricas derivadas (duração,
+custo, tokens, loops, erro por trace) precisam de dados por-trace que
+o roll-up não carrega: resolvem sobre a **janela limitada das ≤200
+traces mais recentes** por `started_at` — mesma convenção de
+`/v1/ops/summary`, nunca um scan de frota (`loop_traces` roda
+`detect_loops` em no máximo essas 200 — bound explícito). O endpoint
+só resolve as métricas que as regras da chamada pedem: uma avaliação
+puramente de contadores não escaneia traces.
+
+| Métrica | Unidade | Escopo | O que conta |
+|---|---|---|---|
+| `span_count` | spans | corpus | spans persistidos |
+| `trace_count` | traces | corpus | traces persistidas |
+| `error_count` | spans | corpus | spans `status=error` |
+| `error_rate` | fração 0–1 | corpus | `error_count` / `span_count` |
+| `avg_duration_ms` | ms | janela | média de `ended_at − started_at` das traces encerradas; trace ainda rodando não tem duração observável — excluída, não zerada; 0.0 se nenhuma encerrou |
+| `max_duration_ms` | ms | janela | idem, máximo |
+| `p95_duration_ms` | ms | janela | percentil 95 por nearest-rank sobre a janela — o store não calcula percentis, é um rank de janela e não quantil de frota |
+| `error_traces` | traces | janela | traces `status=error` — nível de trace, distinto de `error_count` (spans) |
+| `error_trace_rate` | fração 0–1 | janela | `error_traces` / traces da janela |
+| `token_total` | tokens | janela | soma de `forge_lens.token_usage` observada (`total_tokens` com fallback input+output, idêntico a `trace_cost`) |
+| `cost_total_usd` | USD estimado | janela | soma de `trace_cost` por trace; uso de modelo ausente do `PricingRegistry` é **excluído** — ver `unpriced_model_count` |
+| `cost_per_trace_usd` | USD estimado | janela | `cost_total_usd` / traces da janela |
+| `unpriced_model_count` | modelos | janela | modelos distintos com uso observado mas sem preço no registry — o sinal de gasto cego que acompanha as métricas de custo |
+| `loop_traces` | traces | janela | traces com ≥1 finding de `detect_loops` (heurístico — repetição pode ser polling legítimo) |
+
+`eval_pass_rate` deliberadamente **não existe**: resultados de
+`/v1/eval/run` são efêmeros (nunca persistidos) e reports gravados em
+`experiment_results` são deltas por experiment/cohort/evaluator — um
+escalar por projeto exigiria um seletor (experiment? cohort? métrica?)
+que o schema da regra não carrega.
 
 ### `POST /v1/alerts/evaluate`
 `{rules?: [≤100 objetos], use_saved?: bool, project_id?}` → `{fired:

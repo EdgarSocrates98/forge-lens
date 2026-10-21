@@ -15,7 +15,7 @@
 | mesma | ingest não autorizado (porta exposta) | `api_key` + bind `127.0.0.1` default + aviso no `serve` quando o bind não é loopback sem `api_key` |
 | atributos de spans | segredos em valores | redaction de chaves + padrões em valores |
 | corpos de prompt/tool | PII/segredos persistidos | `capture=metadata` descarta por default |
-| leitura `/v1/traces*` | vazamento de traces a terceiros locais | sem auth por design local — exponha só em rede confiável |
+| leitura `/v1/traces*` | vazamento de traces a terceiros locais | leitura aberta no modo `none` (default local); modo `keys` exige key `reader`+ e honra escopo de projeto (ciclo 08) — exponha só em rede confiável de qualquer forma |
 | `BlobRef` | SSRF por resolução de URI | referências nunca resolvidas pelo servidor |
 | SDK→API | MITM localhost | HTTP local; TLS fica a cargo do operador em exposição real |
 | dependências | supply chain | deps mínimas + `pip-audit` no CI + dependabot |
@@ -24,8 +24,10 @@
 
 ## Decisões assumidas (declaradas)
 
-- **Leitura aberta** no modelo local single-user — não é fronteira de auth;
-  expondo a porta, a proteção é de rede/proxy.
+- **Leitura aberta** apenas em `auth_mode=none` (default local
+  single-user); com `auth_mode=keys` (`FORGE_LENS_AUTH_MODE` ou
+  `config.toml`) toda rota exige `X-Forge-Lens-Key` com papel adequado.
+  Expondo a porta, a proteção final é sempre de rede/proxy.
 - **OTLP protobuf recusado** — reduz parser e superfície de ataque.
 - **Nenhuma execução de código** a partir de dados ingeridos: abrir trace é
   read-only; replay não executa nada (simulation/re-execution exigirão

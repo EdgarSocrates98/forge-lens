@@ -41,10 +41,15 @@
 
 ## O que está fora do escopo (honesto)
 
-- TLS: não embutido — atrás de proxy/local apenas (roadmap: ciclo deploy).
-- RBAC/tenancy forte: `project_id` particiona dados mas não é fronteira de
-  segurança; multi-tenant real é ciclo posterior.
-- Audit log dedicado: ciclo de governança; hoje há métricas de ingestão.
+- TLS: o `serve` aceita `--ssl-certfile`/`--ssl-keyfile` (passthrough do
+  uvicorn, ciclo 08); terminação dedicada fica a cargo de proxy
+  quando a exposição exige mais do que isso.
+- RBAC/tenancy forte: ciclo 08 entregou API keys (`X-Forge-Lens-Key`),
+  papéis `reader|writer|admin` e `project_id` como fronteira de escopo —
+  `project_id` particiona dados e agora bloqueia acesso cruzado por key
+  scoping; SSO/OIDC empresarial permanece fora do escopo local-first.
+- Audit log: existe (`list_audit`, ciclo 08) cobrindo ações administrativas;
+  cobertura forense completa (p.ex. leituras) é resíduo documentado.
 - `file:`/URIs remotos em `BlobRef`: referências são *dados*, nunca
   resolvidas pelo servidor (sem SSRF por design).
 

@@ -212,6 +212,10 @@ class LensClient:
         max_duration_ms: float | None = None,
         q: str | None = None,
         tool: str | None = None,
+        model: str | None = None,
+        agent: str | None = None,
+        host: str | None = None,
+        min_total_tokens: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -219,6 +223,11 @@ class LensClient:
 
         Filters mirror the route exactly: AND'd, ``since``/``until`` are
         ISO-8601 (or ``datetime``, read naive-as-UTC), durations in ms.
+        ``model`` matches request/response model attrs; ``agent`` matches
+        ``gen_ai.agent.name``/producer identity; ``host`` matches
+        ``source.host``/``host.name``; ``min_total_tokens`` bounds summed
+        ``gen_ai.usage.total_tokens``. No ``cost`` filter — cost is
+        derived from pricing at read time, never a stored predicate.
         """
         return self._get(
             "/traces",
@@ -232,6 +241,10 @@ class LensClient:
                 "max_duration_ms": max_duration_ms,
                 "q": q,
                 "tool": tool,
+                "model": model,
+                "agent": agent,
+                "host": host,
+                "min_total_tokens": min_total_tokens,
                 "limit": limit,
                 "offset": offset,
             },
@@ -411,6 +424,16 @@ class LensClient:
             {"project_id": self._pid(project_id)},
         )
 
+    def trace_correlate(
+        self, trace_id: str, *, project_id: str | None = None
+    ) -> dict[str, Any]:
+        """``GET /v1/traces/{id}/correlate`` → temporal co-occurrence
+        signals (non-causal; see ``classification``/``caveat`` fields)."""
+        return self._get(
+            f"/traces/{_seg(trace_id)}/correlate",
+            {"project_id": self._pid(project_id)},
+        )
+
     def trace_loops(
         self,
         trace_id: str,
@@ -523,6 +546,19 @@ class LensClient:
         if trace_ids is not None:
             body["trace_ids"] = list(trace_ids)
         return self._post("/intel/efficiency", body)
+
+    def fleet_correlate(
+        self,
+        *,
+        project_id: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """``POST /v1/intel/correlate`` — fleet co-occurrence tables
+        over the bounded recent window (descriptive, non-causal)."""
+        body: dict[str, Any] = {"project_id": self._pid(project_id)}
+        if limit is not None:
+            body["limit"] = limit
+        return self._post("/intel/correlate", body)
 
     def compare_cohorts(
         self,

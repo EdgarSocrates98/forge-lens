@@ -161,7 +161,7 @@ recurso ausente → `QueryError` com `status_code == 404`.
 
 | Método | Rota | Retorno |
 |---|---|---|
-| `list_traces(project_id?, session_id?, status?, since?, until?, min_duration_ms?, max_duration_ms?, q?, tool?, limit=50, offset=0)` | `GET /v1/traces` | `{items, limit, offset}` |
+| `list_traces(project_id?, session_id?, status?, since?, until?, min_duration_ms?, max_duration_ms?, q?, tool?, model?, agent?, host?, min_total_tokens?, limit=50, offset=0)` | `GET /v1/traces` | `{items, limit, offset}` |
 | `get_trace(trace_id, project_id?)` | `GET /v1/traces/{id}` | contrato `Trace` completo |
 | `list_sessions(project_id?, limit=100, offset=0)` | `GET /v1/sessions` | `{items, limit, offset}` |
 | `list_tools(project_id?, limit=100, offset=0)` | `GET /v1/tools` | `{items, limit, offset}` |
@@ -178,6 +178,7 @@ recurso ausente → `QueryError` com `status_code == 404`.
 | `trace_eval(trace_id, project_id?)` | `…/eval` | `{trace_id, results}` |
 | `trace_efficiency(trace_id, project_id?)` | `…/efficiency` | tokens/tools/retries |
 | `trace_recommendations(trace_id, project_id?)` | `…/recommendations` | recomendações com evidência |
+| `trace_correlate(trace_id, project_id?)` | `…/correlate` | co-ocorrências temporais (não-causal) |
 | `trace_loops(trace_id, project_id?, repeat_threshold=3)` | `…/loops` | findings heurísticos |
 | `list_datasets(project_id?)` | `GET /v1/datasets` | **array puro** (sem envelope) |
 | `get_dataset(dataset_id, project_id?)` | `GET /v1/datasets/{id}` | metadados do dataset |
@@ -210,6 +211,8 @@ Notas:
     fail_on_significant_regression}` → resposta inclui `gate.gate_passed`.
   - `fleet_efficiency(trace_ids?, project_id?)` → `POST /v1/intel/efficiency`
     — roll-up sobre ids explícitos ou a janela recente limitada.
+  - `fleet_correlate(project_id?, limit?)` → `POST /v1/intel/correlate` —
+    tabelas de co-ocorrência da frota (descritivo, não-causal)
   - `compare_cohorts(a, b, project_id?)` → `POST /v1/intel/regress` —
     deltas observados entre cohorts (significância fica com eval/compare).
   - `run_analysis(specialist, trace_id, budget?, context?, run_id?,

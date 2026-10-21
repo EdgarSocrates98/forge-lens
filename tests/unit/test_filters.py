@@ -662,3 +662,107 @@ def test_sessions_cli_renders_rollup(tmp_path: Path) -> None:
     assert r.exit_code == 0
     assert "sess-1" in r.output
     assert "traces=2" in r.output
+
+
+def _dimension_trace() -> Trace:
+    """Trace carrying model/agent/host/token evidence on real attrs."""
+    from forge_lens.contracts.v1.trace import TraceSource
+
+    span = Span(
+        trace_id="9" * 32,
+        span_id="2" * 16,
+        name="llm call",
+        kind=SpanKind.LLM,
+        start_time=T0,
+        end_time=T0 + timedelta(milliseconds=700),
+        attributes={
+            "gen_ai.request.model": "gpt-test-mini",
+            "gen_ai.agent.name": "researcher",
+            "gen_ai.usage.total_tokens": 1_500,
+        },
+        status=Status(code=StatusCode.OK),
+    )
+    return Trace(
+        trace_id="9" * 32,
+        project_id="default",
+        started_at=T0,
+        ended_at=T0 + timedelta(milliseconds=700),
+        status=Status(code=StatusCode.OK),
+        source=TraceSource(
+            system="forge-lens-sdk", host="runner-01"),
+        resource_attributes={"service.name": "checkout-agent",
+                             "host.name": "runner-01"},
+        spans=[span],
+    )
+
+
+def test_dimension_filters_store_api_cli(
+    store: SQLiteTraceStore, tmp_path: Path
+) -> None:
+    """model/agent/host/min-tokens dimensions AND on top of existing
+    filters — §02.6. Traces without the evidence never match."""
+    store.upsert_trace(_dimension_trace())
+
+    def ids(rows: list[dict[str, Any]]) -> set[str]:
+        return {r["trace_id"] for r in rows}
+
+    all_rows = store.list_traces(project_id="default")
+    assert "9" * 32 in ids(all_rows)
+
+    # model: span attr substring
+    assert ids(store.list_traces(project_id="default", model="gpt-test")) == {
+        "9" * 32}
+    assert not store.list_traces(project_id="default", model="claude")
+    # agent: gen_ai.agent.name OR producer identity
+    assert ids(store.list_traces(project_id="default", agent="researcher")) == {
+        "9" * 32}
+    assert ids(
+        store.list_traces(project_id="default", agent="checkout-agent")
+    ) == {"9" * 32}
+    assert ids(store.list_traces(
+        project_id="default", agent="forge-lens-sdk")) == {"9" * 32}
+    # host: source.host / host.name resource attr
+    assert ids(store.list_traces(project_id="default", host="runner-01")) == {
+        "9" * 32}
+    assert not store.list_traces(project_id="default", host="other-host")
+    # min_total_tokens: summed usage ≥ bound; no-usage traces never match
+    assert ids(store.list_traces(
+        project_id="default", min_total_tokens=1000)) == {"9" * 32}
+    assert not store.list_traces(
+        project_id="default", min_total_tokens=2000)
+
+    # API parity — same params over the wire (client fixture binds a
+    # different store; build one on `store` so the seeded trace exists)
+    from forge_lens.core.config import LensConfig
+
+    cfg = LensConfig(data_dir=tmp_path, db_path=tmp_path / "filters.db")
+    with TestClient(create_app(store=store, config=cfg)) as c:
+        r = c.get("/v1/traces", params={"model": "gpt-test"})
+        assert [i["trace_id"] for i in r.json()["items"]] == ["9" * 32]
+        r = c.get("/v1/traces", params={"min_total_tokens": 2000})
+        assert "9" * 32 not in {i["trace_id"] for i in r.json()["items"]}
+        r = c.get("/v1/traces", params={"min_total_tokens": "x"})
+        assert r.status_code == 422
+        r = c.get("/v1/traces", params={"agent": "runner"})  # host-ish
+        assert r.status_code == 200
+
+    # CLI parity
+    from typer.testing import CliRunner
+
+    from forge_lens.cli.main import app
+    s = SQLiteTraceStore(tmp_path / "dim.db")
+    s.upsert_trace(_dimension_trace())
+    s.close()
+    r = CliRunner().invoke(app, [
+        "traces", "list", "--db", str(tmp_path / "dim.db"),
+        "--model", "gpt-test", "--json"])
+    assert r.exit_code == 0
+    assert "9" * 32 in r.output
+    r = CliRunner().invoke(app, [
+        "traces", "list", "--db", str(tmp_path / "dim.db"),
+        "--host", "runner-01"])
+    assert "9" * 32 in r.output
+    r = CliRunner().invoke(app, [
+        "traces", "list", "--db", str(tmp_path / "dim.db"),
+        "--min-tokens", "9999"])
+    assert "9" * 32 not in r.output

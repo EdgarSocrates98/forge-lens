@@ -97,7 +97,13 @@ def _serve(
     msgs: list[dict[str, Any]],
     capsys: pytest.CaptureFixture[str],
 ) -> dict[int, dict[str, Any]]:
-    stdin = io.StringIO("".join(json.dumps(m) + "\n" for m in msgs))
+    init = {
+        "jsonrpc": "2.0", "id": 0, "method": "initialize",
+        "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                   "clientInfo": {"name": "test", "version": "0"}},
+    }
+    stdin = io.StringIO(
+        "".join(json.dumps(m) + "\n" for m in [init, *msgs]))
     old = sys.stdin
     sys.stdin = stdin
     try:
@@ -117,6 +123,37 @@ def _payload(resp: dict[str, Any]) -> dict[str, Any]:
     return json.loads(resp["result"]["content"][0]["text"])
 
 
+def test_pre_init_calls_are_rejected(
+    seeded_db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """MCP requires initialize first; tool failures mark isError."""
+    stdin = io.StringIO(
+        json.dumps(_call_tool(9, "lens.sessions", {})) + "\n"
+        + json.dumps(_rpc("tools/list", 10)) + "\n"
+    )
+    old = sys.stdin
+    sys.stdin = stdin
+    try:
+        serve(str(seeded_db))
+    finally:
+        sys.stdin = old
+    out = [json.loads(line)
+           for line in capsys.readouterr().out.splitlines() if line]
+    for resp in out:
+        assert resp["error"]["code"] == -32602
+        assert "initialize" in resp["error"]["message"]
+
+    # After init, a data-level miss is result content with isError —
+    # not a protocol fault (the loop keeps serving).
+    by_id = _serve(
+        seeded_db,
+        [_call_tool(1, "lens.failure", {"trace_id": "f" * 32})],
+        capsys,
+    )
+    assert by_id[1]["result"]["isError"] is True
+    assert "not found" in _payload(by_id[1])["error"]
+
+
 def test_tools_list_covers_read_intel(
     seeded_db: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -124,6 +161,7 @@ def test_tools_list_covers_read_intel(
     tools = by_id[1]["result"]["tools"]
     assert {t["name"] for t in tools} == {
         "lens.capabilities",
+        "lens.correlate",
         "lens.cost",
         "lens.detect_loops",
         "lens.failure",

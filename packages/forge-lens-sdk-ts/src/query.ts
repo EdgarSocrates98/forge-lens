@@ -84,6 +84,17 @@ export interface ListTracesFilters extends ProjectScoped {
   maxDurationMs?: number;
   q?: string;
   tool?: string;
+  /** Matches `gen_ai.request.model` / `gen_ai.response.model` span attrs. */
+  model?: string;
+  /** Matches `gen_ai.agent.name` or producer identity (source system /
+   *  `service.name`). */
+  agent?: string;
+  /** Matches `source.host` or the `host.name` resource attribute. */
+  host?: string;
+  /** Sum of `gen_ai.usage.total_tokens` across spans ≥ bound. No `cost`
+   *  filter exists — cost is derived from pricing at read time, never a
+   *  stored predicate. */
+  minTotalTokens?: number;
   limit?: number; // default 50
   offset?: number; // default 0
 }
@@ -296,6 +307,10 @@ export class LensClient {
       max_duration_ms: filters.maxDurationMs,
       q: filters.q,
       tool: filters.tool,
+      model: filters.model,
+      agent: filters.agent,
+      host: filters.host,
+      min_total_tokens: filters.minTotalTokens,
       limit: filters.limit ?? 50,
       offset: filters.offset ?? 0,
     });
@@ -440,6 +455,14 @@ export class LensClient {
     });
   }
 
+  /** `GET /v1/traces/{id}/correlate` → temporal co-occurrence signals
+   *  (non-causal; see `classification`/`caveat` fields). */
+  traceCorrelate(traceId: string, opts: ProjectScoped = {}): Promise<JsonObject> {
+    return this.get(`/traces/${seg(traceId)}/correlate`, {
+      project_id: this.pid(opts.projectId),
+    });
+  }
+
   /** `GET /v1/traces/{id}/loops` → heuristic loop/no-progress findings
    *  with span evidence. */
   traceLoops(
@@ -537,6 +560,17 @@ export class LensClient {
     const body: JsonObject = { project_id: this.pid(opts.projectId) };
     if (traceIds !== undefined) body.trace_ids = [...traceIds];
     return this.post("/intel/efficiency", body);
+  }
+
+  /** `POST /v1/intel/correlate` — fleet co-occurrence tables over the
+   *  bounded recent window (descriptive, non-causal). `limit` caps the
+   *  window server-side at 500. */
+  fleetCorrelate(
+    opts: ProjectScoped & { limit?: number } = {},
+  ): Promise<JsonObject> {
+    const body: JsonObject = { project_id: this.pid(opts.projectId) };
+    if (opts.limit !== undefined) body.limit = opts.limit;
+    return this.post("/intel/correlate", body);
   }
 
   /** `POST /v1/intel/regress` — cohort deltas over two

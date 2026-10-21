@@ -438,6 +438,10 @@ def create_app(
         max_duration_ms: float | None = None,
         q: str | None = None,
         tool: str | None = None,
+        model: str | None = None,
+        agent: str | None = None,
+        host: str | None = None,
+        min_total_tokens: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -452,6 +456,17 @@ def create_app(
         session_id = _query_str(session_id, "session_id")
         q = _query_str(q, "q")
         tool = _query_str(tool, "tool")
+        model = _query_str(model, "model")
+        agent = _query_str(agent, "agent")
+        host = _query_str(host, "host")
+        if min_total_tokens is not None and (
+            not isinstance(min_total_tokens, int)
+            or isinstance(min_total_tokens, bool)
+            or min_total_tokens < 0
+        ):
+            raise _reject_request(
+                422, "min_total_tokens: non-negative integer required"
+            )
         since_ns = _query_dt_ns(since, "since")
         until_ns = _query_dt_ns(until, "until")
         min_ns = _query_duration_ns(min_duration_ms, "min_duration_ms")
@@ -468,6 +483,10 @@ def create_app(
                 max_duration_ns=max_ns,
                 q=q,
                 tool=tool,
+                model=model,
+                agent=agent,
+                host=host,
+                min_total_tokens=min_total_tokens,
                 limit=limit,
                 offset=offset,
             )
@@ -645,9 +664,21 @@ def create_app(
         trace_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
         from forge_lens.investigate import incident_bundle
+        from forge_lens.sanitize.redact import SanitizeReport, redact_export
 
         trace = _get_trace_or_404(trace_id, project_id, request)
-        return incident_bundle(trace, _registry())
+        # Stored data was sanitized at ingest, but derived findings can
+        # echo captured bodies verbatim under capture=full — scrub at
+        # the export boundary and disclose what was touched.
+        rep = SanitizeReport()
+        bundle: dict[str, Any] = redact_export(
+            incident_bundle(trace, _registry()), rep)
+        bundle["export_sanitize"] = {
+            "redacted_keys": rep.redacted_keys,
+            "redacted_values": rep.redacted_values,
+            "emails_masked": rep.emails_masked,
+        }
+        return bundle
 
     @app.get(
         f"/{API_VERSION}/traces/{{trace_id}}/security", dependencies=read_deps
@@ -930,6 +961,40 @@ def create_app(
         if missing:
             out["missing_trace_ids"] = missing
         return out
+
+    @app.get(
+        f"/{API_VERSION}/traces/{{trace_id}}/correlate", dependencies=read_deps
+    )
+    async def trace_correlate_route(request: Request,
+        trace_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        """§05.5 — temporal co-occurrence signals within one trace.
+
+        Associations only — every correlation carries a non-causal
+        caveat; ``classification`` is ``temporal_association``.
+        """
+        from forge_lens.intel.correlation import correlate_trace
+
+        return correlate_trace(
+            _get_trace_or_404(trace_id, project_id, request))
+
+    @app.post(f"/{API_VERSION}/intel/correlate", dependencies=read_deps)
+    async def fleet_correlate_route(request: Request) -> dict[str, Any]:
+        """§05.5 — fleet co-occurrence tables over a bounded window.
+
+        Body: ``{project_id?, limit?}`` (limit capped at 500). Tables are
+        descriptive co-occurrence, not causation; sufficiency thresholds
+        are reported honestly as ``insufficient_data``.
+        """
+        from forge_lens.intel.correlation import correlate_fleet
+
+        body = await _eval_body(request)
+        pid = _resolve_pid(request, _eval_project_id(body))
+        limit_raw = body.get("limit", 200)
+        limit = limit_raw if isinstance(limit_raw, int) and not isinstance(
+            limit_raw, bool) else 200
+        return correlate_fleet(get_store(), pid,
+                               limit=max(0, min(limit, 500)))
 
     @app.post(f"/{API_VERSION}/intel/regress", dependencies=read_deps)
     async def regress_route(request: Request) -> dict[str, Any]:
@@ -1649,7 +1714,7 @@ def create_app(
 
         Metrics are computed from the store at request time — no clock.
         """
-        from forge_lens.ops.alerts import evaluate_rules
+        from forge_lens.ops.alerts import evaluate_rules, resolve_metrics
 
         body = await _eval_body(request)
         raw_rules = body.get("rules")
@@ -1672,6 +1737,12 @@ def create_app(
             "error_count": float(errors),
             "error_rate": errors / spans_total if spans_total else 0.0,
         }
+        # derived metrics (durations/cost/tokens/loops) resolve over a
+        # bounded recent-trace window — ops/alerts.py documents each
+        metrics.update(resolve_metrics(
+            get_store(), pid, _registry(),
+            only={str(r.get("metric")) for r in rules if isinstance(r, dict)},
+        ))
         out = evaluate_rules([r for r in rules if isinstance(r, dict)], metrics)
         out["project_id"] = pid
         return out

@@ -24,11 +24,15 @@ presença de `resourceSpans`; valor fora de `native|otlp|auto` → exit 2.
 Import de arquivo marca as traces `provenance=imported` (vs `observed`
 da ingestão viva) — `--format native` honra a provenance do envelope.
 
-## `forge-lens traces list [--db] [--project] [--status ok|error|unset] [--session S] [--tool T] [--q S] [--since ISO] [--until ISO] [--min-duration-ms N] [--max-duration-ms N] [--limit N] [--json]`
+## `forge-lens traces list [--db] [--project] [--status ok|error|unset] [--session S] [--tool T] [--q S] [--model M] [--agent A] [--host H] [--min-tokens N] [--since ISO] [--until ISO] [--min-duration-ms N] [--max-duration-ms N] [--limit N] [--json]`
 
 Lista traces mais recentes com status, span_count e error_count.
-`--tool`/`--q` são substring; `--since`/`--until` limitam `started_at`;
-filtros de duração excluem traces sem `ended_at`.
+`--tool`/`--q`/`--model`/`--agent`/`--host` são substring (`--model` casa
+`gen_ai.request|response.model`; `--agent` casa `gen_ai.agent.name` ou a
+identidade do produtor; `--host` casa `source.host`/`host.name`);
+`--min-tokens` exige soma de `gen_ai.usage.total_tokens` ≥ N;
+`--since`/`--until` limitam `started_at`; filtros de duração excluem
+traces sem `ended_at`.
 
 ## `forge-lens traces show <trace_id> [--db] [--project] [--json]`
 
@@ -61,7 +65,7 @@ Bateria de avaliadores determinísticos (Cycle 06): `error_free` +
 Score `n/a` + motivo quando a evidência é insuficiente — nunca inventa
 veredito.
 
-## `forge-lens failure|loops|efficiency|recommendations|security|replay <trace_id> [--db] [--project] [--json]`
+## `forge-lens failure|loops|efficiency|recommendations|security|replay|correlate <trace_id> [--db] [--project] [--json]`
 
 Análises por trace — paridade com os GETs `/v1/traces/{id}/…`:
 
@@ -76,6 +80,9 @@ Análises por trace — paridade com os GETs `/v1/traces/{id}/…`:
   só evidência, nunca bloqueio).
 - `replay`: timeline da execução gravada (span_start/event/span_end com
   offset em ms).
+- `correlate`: sinais de co-ocorrência temporal dentro da trace
+  (retries→erros, troca de modelo, crescimento de contexto) —
+  associação descritiva, nunca causal.
 
 Trace inexistente → mensagem limpa + exit 2. `--json` emite o mesmo
 contrato da rota correspondente.
