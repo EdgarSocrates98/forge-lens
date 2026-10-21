@@ -23,7 +23,11 @@ Status: IMPLEMENTED (this delivery). Reports for cycles 00–05 live in
 ## 08 — security & tenancy
 - `api_keys` (hashed secrets, role, project scope) + `audit_events`.
 - Auth modes `none|key|keys`; `reader|writer|admin` enforced per-route;
-  scoped keys cannot cross projects (E2E-tested).
+  `_get_trace_or_404` enforces scope centrally so a route that forgets
+  `_require_scope` still can't leak; E2E covers every read route
+  (traces family, graph family, ops, alerts, intel, analyze, eval)
+  with a p1-scoped key against p2 data → 403 on all, plus global-stats
+  scoping on health/ops/alerts.
 - Retention: `prune_traces`, `forge-lens prune`, `forge-lens archive`
   (export-before-delete), `POST /v1/admin/prune`; TLS flags on `serve`.
 - `api/clock.py` is the single wall-clock seam (audit/retention only).
@@ -70,3 +74,8 @@ Status: IMPLEMENTED (this delivery). Reports for cycles 00–05 live in
   local-first scale; ADR required before adding (per project rules).
 - Studio e2e browser suite (Playwright multi-browser): CI runs unit
   tests + build; cross-browser e2e is a documented follow-up.
+- Studio list filters cover status+limit only; server-side
+  duration/cost/token/model/host/agent/time-range filtering requires
+  store-level query params (follow-up, not faked client-side).
+- Studio virtualization is bounded rendering (200-row window +
+  load-more), not a CDK virtual-scroll viewport.

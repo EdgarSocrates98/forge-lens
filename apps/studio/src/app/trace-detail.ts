@@ -1,18 +1,20 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { JsonPipe, KeyValuePipe, NgClass } from '@angular/common';
+import { JsonPipe, KeyValuePipe } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { Api, Span, Trace } from './api';
 
 interface Row { span: Span; depth: number; }
 
 @Component({
   selector: 'lens-trace-detail',
-  imports: [RouterLink, JsonPipe, KeyValuePipe, NgClass],
+  imports: [RouterLink, JsonPipe, KeyValuePipe],
   template: `
   <a routerLink="/">← traces</a>
   <h1>Trace {{ id }}</h1>
-  @if (trace()) {
-    <p>status: <b [ngClass]="trace()!.status.code">{{ trace()!.status.code }}</b>
+  @if (error()) { <p class="err-banner">{{ error() }}</p> }
+  @else if (trace()) {
+    <p>status: <b [class]="trace()!.status.code">{{ trace()!.status.code }}</b>
        · {{ trace()!.spans.length }} spans</p>
     <nav class="tabs">
       @for (t of tabs; track t) {
@@ -55,11 +57,12 @@ export class TraceDetailComponent implements OnInit {
   trace = signal<Trace | null>(null);
   sel = signal<Span | null>(null);
   tab = signal<'waterfall' | 'evidence'>('waterfall');
-  tabs = ['waterfall', 'evidence'] as const;
+  readonly tabs = ['waterfall', 'evidence'] as const;
   rows = signal<Row[]>([]);
-  private t0 = 0; private span = 1;
+  error = signal<string | null>(null);
+  private t0 = 0; private spanMs = 1;
   extras = signal<Record<string, unknown>>({});
-  sections: [string, () => unknown][] = [
+  readonly sections: [string, () => unknown][] = [
     ['cost', () => this.extras()['cost']],
     ['failure', () => this.extras()['failure']],
     ['loops', () => this.extras()['loops']],
@@ -68,41 +71,60 @@ export class TraceDetailComponent implements OnInit {
 
   ngOnInit(): void {
     this.id = this.route.snapshot.paramMap.get('id') ?? '';
-    this.api.getTrace(this.id).subscribe(t => {
-      this.trace.set(t);
-      const sorted = [...t.spans].sort((a, b) =>
-        a.start_time.localeCompare(b.start_time));
-      const starts = sorted.map(s => Date.parse(s.start_time));
-      const ends = sorted.map(s => Date.parse(s.end_time ?? s.start_time));
-      this.t0 = Math.min(...starts);
-      this.span = Math.max(1, Math.max(...ends) - this.t0);
-      const depth = new Map<string, number>();
-      const byParent = new Map<string | null, Span[]>();
-      for (const s of sorted) {
-        const k = s.parent_span_id ?? null;
-        byParent.set(k, [...(byParent.get(k) ?? []), s]);
-      }
-      const out: Row[] = [];
-      const walk = (pid: string | null, d: number) => {
-        for (const s of byParent.get(pid) ?? []) {
-          out.push({ span: s, depth: d });
-          walk(s.span_id, d + 1);
-        }
-      };
-      walk(null, 0);
-      const seen = new Set(out.map(r => r.span.span_id));
-      for (const s of sorted) if (!seen.has(s.span_id)) out.push({ span: s, depth: 0 });
-      this.rows.set(out);
-      void depth;
+    this.api.getTrace(this.id).subscribe({
+      next: t => this.buildRows(t),
+      error: (e: HttpErrorResponse) =>
+        this.error.set(`cannot load trace (${e.status || e.message})`),
     });
-    this.api.getCost(this.id).subscribe(c => this.extras.update(e => ({ ...e, cost: c })));
-    this.api.getFailure(this.id).subscribe(f => this.extras.update(e => ({ ...e, failure: f })));
-    this.api.getLoops(this.id).subscribe(l => this.extras.update(e => ({ ...e, loops: l })));
-    this.api.getGraphAnalysis(this.id).subscribe(g => this.extras.update(e => ({ ...e, graph: g })));
+    const pull = (key: string, obs: import('rxjs').Observable<unknown>) =>
+      obs.subscribe({
+        next: v => this.extras.update(e => ({ ...e, [key]: v })),
+        error: () => this.extras.update(e => ({ ...e, [key]: { error: 'unavailable' } })),
+      });
+    pull('cost', this.api.getCost(this.id));
+    pull('failure', this.api.getFailure(this.id));
+    pull('loops', this.api.getLoops(this.id));
+    pull('graph', this.api.getGraphAnalysis(this.id));
   }
-  pct(iso: string): number { return (Date.parse(iso) - this.t0) / this.span * 100; }
+
+  private buildRows(t: Trace): void {
+    this.trace.set(t);
+    const sorted = [...t.spans].sort((a, b) =>
+      a.start_time.localeCompare(b.start_time));
+    // iterative walk — no recursion overflow on deep trees
+    let min = Infinity, max = -Infinity;
+    const byParent = new Map<string | null, Span[]>();
+    for (const s of sorted) {
+      const st = Date.parse(s.start_time);
+      const en = Date.parse(s.end_time ?? s.start_time);
+      if (st < min) min = st;
+      if (en > max) max = en;
+      const k = s.parent_span_id ?? null;
+      const arr = byParent.get(k); if (arr) arr.push(s); else byParent.set(k, [s]);
+    }
+    this.t0 = min === Infinity ? 0 : min;
+    this.spanMs = Math.max(1, max - this.t0);
+    const out: Row[] = [];
+    const seen = new Set<string>();
+    const stack: { s: Span; d: number }[] = [];
+    for (const s of [...(byParent.get(null) ?? [])].reverse()) {
+      stack.push({ s, d: 0 });
+    }
+    while (stack.length) {
+      const { s, d } = stack.pop()!;
+      if (seen.has(s.span_id)) continue;
+      seen.add(s.span_id);
+      out.push({ span: s, depth: d });
+      const kids = byParent.get(s.span_id) ?? [];
+      for (let i = kids.length - 1; i >= 0; i--) stack.push({ s: kids[i], d: d + 1 });
+    }
+    for (const s of sorted) if (!seen.has(s.span_id)) out.push({ span: s, depth: 0 });
+    this.rows.set(out);
+  }
+
+  pct(iso: string): number { return (Date.parse(iso) - this.t0) / this.spanMs * 100; }
   widthPct(s: Span): number {
     const d = Date.parse(s.end_time ?? s.start_time) - Date.parse(s.start_time);
-    return Math.max(0.5, d / this.span * 100);
+    return Math.max(0.5, d / this.spanMs * 100);
   }
 }

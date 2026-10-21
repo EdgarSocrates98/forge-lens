@@ -826,12 +826,20 @@ class SQLiteTraceStore:
             for r in rows
         ]
 
-    def stats(self) -> dict[str, Any]:
+    def stats(self, project_id: str | None = None) -> dict[str, Any]:
         with self._lock:
-            traces = self._conn.execute("SELECT COUNT(*) c FROM traces").fetchone()["c"]
-            spans = self._conn.execute("SELECT COUNT(*) c FROM spans").fetchone()["c"]
+            where = " WHERE project_id = ?" if project_id else ""
+            params = (project_id,) if project_id else ()
+            traces = self._conn.execute(
+                f"SELECT COUNT(*) c FROM traces{where}", params
+            ).fetchone()["c"]
+            spans = self._conn.execute(
+                f"SELECT COUNT(*) c FROM spans{where}", params
+            ).fetchone()["c"]
             errors = self._conn.execute(
                 "SELECT COUNT(*) c FROM spans WHERE status_code='error'"
+                + (" AND project_id = ?" if project_id else ""),
+                params if project_id else (),
             ).fetchone()["c"]
             # WAL mode: live data also sits in -wal/-shm sidecars.
             db_size = sum(
@@ -1223,6 +1231,32 @@ class SQLiteTraceStore:
                     "DELETE FROM traces WHERE project_id=? AND trace_id=?",
                     (row["project_id"], row["trace_id"]),
                 )
+        return {"traces": len(doomed)}
+
+    def delete_trace_ids(
+        self, trace_ids: list[str], *, project_id: str | None = None
+    ) -> dict[str, int]:
+        """Delete exactly the given trace_ids — archive's contract is
+        'only what was exported', never a re-computed criterion."""
+        doomed: list[tuple[str, str]] = []
+        with self._lock, self._conn:
+            for tid in trace_ids:
+                row = self._conn.execute(
+                    "SELECT project_id, trace_id FROM traces WHERE trace_id = ?"
+                    + (" AND project_id = ?" if project_id else ""),
+                    (tid, project_id) if project_id else (tid,),
+                ).fetchone()
+                if row is None:
+                    continue
+                self._conn.execute(
+                    "DELETE FROM spans WHERE project_id=? AND trace_id=?",
+                    (row["project_id"], row["trace_id"]),
+                )
+                self._conn.execute(
+                    "DELETE FROM traces WHERE project_id=? AND trace_id=?",
+                    (row["project_id"], row["trace_id"]),
+                )
+                doomed.append((row["project_id"], row["trace_id"]))
         return {"traces": len(doomed)}
 
     def close(self) -> None:

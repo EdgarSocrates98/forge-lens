@@ -23,6 +23,14 @@ from forge_lens.contracts.v1.trace import (
 from forge_lens.core.time import ensure_aware
 
 
+def _hex32(raw: Any) -> str:
+    """Deterministic hex trace_id from any session identifier — file
+    names and non-hex ids are hashed, never pattern-violating."""
+    import hashlib
+
+    return hashlib.sha256(str(raw).encode()).hexdigest()[:32]
+
+
 def _ts(value: Any) -> datetime:
     if isinstance(value, str):
         try:
@@ -52,13 +60,16 @@ def parse_session(path: Path, *, project_id: str = "claude-code") -> Trace | Non
                 ev = json.loads(line)
             except json.JSONDecodeError:
                 continue  # corrupt line — skipped, counted below
-            session_id = session_id or ev.get("sessionId") or ev.get("session_id")
+            if session_id is None:
+                cand = ev.get("sessionId") or ev.get("session_id")
+                if isinstance(cand, str) and cand:
+                    session_id = cand
             if ev.get("type") == "tool_use" or ev.get("tool_name"):
                 n += 1
                 name = str(ev.get("tool_name") or ev.get("name") or "tool")
                 ts = _ts(ev.get("timestamp"))
                 spans.append(Span(
-                    trace_id="cc" + (session_id or path.stem).replace("-", "")[:30],
+                    trace_id=_hex32(session_id or path.stem),
                     span_id=f"{n:016x}",
                     name=f"tool {name}",
                     kind=SpanKind.TOOL,
@@ -74,12 +85,8 @@ def parse_session(path: Path, *, project_id: str = "claude-code") -> Trace | Non
                 ))
     if not spans:
         return None
-    tid = "cc" + (session_id or path.stem).replace("-", "")[:30]
-    tid = (tid + "0" * 32)[:32]
-    for s in spans:
-        object.__setattr__(s, "trace_id", tid)
     return Trace(
-        trace_id=tid,
+        trace_id=_hex32(session_id or path.stem),
         root_span_id=spans[0].span_id,
         spans=spans,
         started_at=spans[0].start_time,

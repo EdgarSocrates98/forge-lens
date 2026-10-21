@@ -1024,3 +1024,98 @@ def test_keys_mode_tenancy(tmp_path, synthetic_trace: Trace) -> None:
             assert {"auth", "key.create", "scope"} <= actions
     finally:
         store.close()
+
+
+def test_keys_mode_tenancy_all_new_routes(tmp_path, synthetic_trace: Trace) -> None:
+    """P0 regression: every new-surface route enforces project scope —
+    a p1-scoped reader must never see p2 data."""
+    from forge_lens.security.keys import generate_key
+
+    store = SQLiteTraceStore(tmp_path / "k2.db")
+    # victim data lives in p2
+    victim = synthetic_trace.model_copy(update={"project_id": "p2"})
+    store.upsert_trace(victim)
+    cfg = LensConfig(
+        data_dir=tmp_path, db_path=tmp_path / "k2.db", auth_mode="keys"
+    )
+    app = create_app(store=store, config=cfg)
+    kid, secret, h = generate_key()
+    store.create_api_key(kid, name="root", key_hash=h, role="admin")
+    try:
+        with TestClient(app) as c:
+            admin = {"X-Forge-Lens-Key": secret}
+            r = c.post("/v1/admin/keys", headers=admin,
+                       json={"name": "p1-reader", "role": "reader",
+                             "projects": ["p1"]})
+            scoped = {"X-Forge-Lens-Key": r.json()["secret"]}
+            tid = synthetic_trace.trace_id
+            gets = [
+                f"/v1/traces/{tid}?project_id=p2",
+                f"/v1/traces/{tid}/stream?project_id=p2",
+                f"/v1/traces/{tid}/loops?project_id=p2",
+                f"/v1/traces/{tid}/efficiency?project_id=p2",
+                f"/v1/traces/{tid}/recommendations?project_id=p2",
+                f"/v1/traces/{tid}/eval?project_id=p2",
+                f"/v1/traces/{tid}/cost?project_id=p2",
+                f"/v1/traces/{tid}/failure?project_id=p2",
+                f"/v1/traces/{tid}/replay?project_id=p2",
+                f"/v1/traces/{tid}/incident?project_id=p2",
+                f"/v1/traces/{tid}/security?project_id=p2",
+                f"/v1/graph/traces/{tid}?project_id=p2",
+                f"/v1/graph/traces/{tid}/critical-path?project_id=p2",
+                f"/v1/graph/traces/{tid}/bottlenecks?project_id=p2",
+                f"/v1/graph/traces/{tid}/analysis?project_id=p2",
+                "/v1/graph/sessions/s1?project_id=p2",
+                "/v1/ops/summary?project_id=p2",
+            ]
+            for url in gets:
+                r = c.get(url, headers=scoped)
+                assert r.status_code == 403, f"{url} → {r.status_code}"
+            posts = [
+                (f"/v1/analyze/loop_detection_specialist/{tid}",
+                 {"project_id": "p2"}),
+                ("/v1/intel/efficiency",
+                 {"project_id": "p2", "trace_ids": [tid]}),
+                ("/v1/intel/regress",
+                 {"a": {"trace_ids": [tid], "project_id": "p2"},
+                  "b": {"trace_ids": [tid], "project_id": "p1"}}),
+                ("/v1/alerts/evaluate",
+                 {"project_id": "p2",
+                  "rules": [{"rule_id": "x", "metric": "trace_count",
+                             "op": ">", "threshold": -1}]}),
+                ("/v1/eval/run",
+                 {"project_id": "p2", "trace_ids": [tid],
+                  "evaluators": [{"name": "error_free"}]}),
+            ]
+            for url, body in posts:
+                r = c.post(url, json=body, headers=scoped)
+                assert r.status_code == 403, f"{url} → {r.status_code}: {r.text}"
+            # own-project reads still work
+            assert c.get("/v1/ops/summary?project_id=p1",
+                         headers=scoped).status_code == 200
+    finally:
+        store.close()
+
+
+def test_intel_and_analyze_malformed_422_not_500(client: TestClient) -> None:
+    """Boundary hardening on the new POST routes — same 4xx contract."""
+    assert client.post("/v1/intel/efficiency", json={
+        "trace_ids": "notalist"}).status_code == 422
+    assert client.post("/v1/intel/efficiency", json={
+        "project_id": {"x": 1}}).status_code == 422
+    assert client.post("/v1/intel/efficiency", json={
+        "trace_ids": [1, 2]}).status_code == 422
+    for bad in (
+        {"budget": {"max_iterations": "abc"}},
+        {"budget": {"max_iterations": True}},
+        {"budget": {"token_budget": [1]}},
+        {"budget": {"timeout_s": {"x": 1}}},
+        {"budget": "no"},
+        {"context": "no"},
+        {"project_id": {"x": 1}},
+    ):
+        r = client.post("/v1/analyze/trace_investigator/" + "ab" * 16,
+                        json=bad)
+        assert r.status_code == 422, f"{bad} → {r.status_code}"
+    r = client.post("/v1/intel/regress", json={"a": "no", "b": {}})
+    assert r.status_code == 422

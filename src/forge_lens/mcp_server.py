@@ -12,6 +12,7 @@ import json
 import sys
 from typing import Any
 
+from forge_lens import __version__
 from forge_lens.storage.sqlite import SQLiteTraceStore
 
 _METHODS = ("initialize", "ping", "tools/list", "tools/call", "notifications/initialized")
@@ -45,7 +46,10 @@ def serve(db_path: str) -> int:
                 project_id=args.get("project_id"),
                 limit=min(500, int(args.get("limit") or 20)))}
         if name == "lens.get_trace":
-            t = store.get_trace(str(args["trace_id"]),
+            tid = args.get("trace_id")
+            if not isinstance(tid, str) or not tid:
+                raise TypeError("trace_id must be a non-empty string")
+            t = store.get_trace(tid,
                                 project_id=args.get("project_id"))
             return {"trace": t.model_dump(mode="json") if t else None}
         if name == "lens.stats":
@@ -68,18 +72,28 @@ def serve(db_path: str) -> int:
         if method == "initialize":
             result = {"protocolVersion": "2024-11-05",
                       "capabilities": {"tools": {}},
-                      "serverInfo": {"name": "forge-lens", "version": "0.1.0"}}
+                      "serverInfo": {"name": "forge-lens", "version": __version__}}
         elif method == "ping":
             result = {}
         elif method == "tools/list":
             result = {"tools": _tools()}
         elif method == "tools/call":
             p = req.get("params") or {}
-            content: list[dict[str, str]] = [{
-                "type": "text",
-                "text": json.dumps(_call(str(p.get("name")),
-                                         p.get("arguments") or {}))}]
-            result = {"content": content}
+            try:
+                args = p.get("arguments") or {}
+                if not isinstance(args, dict):
+                    raise TypeError("arguments must be an object")
+                payload = _call(str(p.get("name")), args)
+                content: list[dict[str, str]] = [{
+                    "type": "text", "text": json.dumps(payload)}]
+                result = {"content": content}
+            except (KeyError, TypeError, ValueError) as exc:
+                # one malformed call must not kill the stdio loop
+                out = {"jsonrpc": "2.0", "id": rid,
+                       "error": {"code": -32603,
+                                 "message": f"tool error: {exc}"}}
+                print(json.dumps(out), flush=True)
+                continue
         else:
             out = {"jsonrpc": "2.0", "id": rid,
                    "error": {"code": -32601, "message": f"unknown {method!r}"}}

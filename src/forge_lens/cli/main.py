@@ -741,34 +741,48 @@ def archive(
     cfg = _config(db)
     store = _store(cfg)
     try:
-        rows = store.list_traces(project_id=project, limit=100_000)
-        written = 0
+        written_ids: list[str] = []
+        offset = 0
+        page = 1000
         with out.open("w", encoding="utf-8") as fh:
-            for row in rows:
-                tr = store.get_trace(row["trace_id"], project_id=project)
-                if tr is None:
-                    continue
-                end_ns = (
-                    to_unix_nano(tr.ended_at)
-                    if tr.ended_at is not None else None
+            while True:
+                rows = store.list_traces(
+                    project_id=project, limit=page, offset=offset
                 )
-                if end_ns is None or end_ns >= cutoff:
-                    continue
-                fh.write(_json.dumps(tr.model_dump(mode="json"),
-                                     default=str) + "\n")
-                written += 1
-        typer.echo(f"archived {written} trace(s) → {out}")
+                if not rows:
+                    break
+                for row in rows:
+                    end_iso = row.get("ended_at")
+                    if end_iso is None:
+                        continue  # un-ended trace: never archived
+                    if to_unix_nano(ensure_aware(
+                        datetime.fromisoformat(end_iso)
+                    )) >= cutoff:
+                        continue
+                    tr = store.get_trace(row["trace_id"], project_id=project)
+                    if tr is None:
+                        continue
+                    fh.write(_json.dumps(tr.model_dump(mode="json"),
+                                         default=str) + "\n")
+                    written_ids.append(tr.trace_id)
+                offset += len(rows)
+                if len(rows) < page:
+                    break
+        typer.echo(f"archived {len(written_ids)} trace(s) → {out}")
         if delete:
             if not yes:
                 typer.confirm(
-                    "delete the archived traces from the hot store?",
+                    f"delete the {len(written_ids)} archived trace(s) "
+                    "from the hot store?",
                     abort=True,
                 )
-            deleted = store.prune_traces(before_ns=cutoff, project_id=project)
+            deleted = store.delete_trace_ids(
+                written_ids, project_id=project
+            )
             store.record_audit(
                 actor="cli", action="traces.archive_prune",
                 resource=str(out), outcome="ok",
-                detail={"archived": written, **deleted},
+                detail={"archived": len(written_ids), **deleted},
                 ts_ns=wall_clock_ns(),
             )
             typer.echo(f"pruned {deleted['traces']} trace(s)")
@@ -782,7 +796,7 @@ def mcp_serve(db: Annotated[Path | None, typer.Option("--db")] = None) -> None:
     from forge_lens.mcp_server import serve
 
     cfg = _config(db)
-    raise typer.Exit(serve(str(cfg.db_path)))
+    raise typer.Exit(serve(str(cfg.resolved_db_path)))
 
 
 @app.command(name="import-claude")
@@ -794,7 +808,14 @@ def import_claude(
     """Import a Claude Code session JSONL as a log-derived trace."""
     from forge_lens.adapters.claude_code import parse_session
 
-    trace = parse_session(path, project_id=project)
+    try:
+        trace = parse_session(path, project_id=project)
+    except FileNotFoundError:
+        typer.echo(f"file not found: {path}", err=True)
+        raise typer.Exit(2) from None
+    except OSError as exc:
+        typer.echo(f"cannot read {path}: {exc}", err=True)
+        raise typer.Exit(2) from None
     if trace is None:
         typer.echo("no usable events in file — nothing imported", err=True)
         raise typer.Exit(1)

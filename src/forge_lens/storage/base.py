@@ -39,7 +39,7 @@ class TraceStore(Protocol):
         offset: int = 0,
     ) -> list[dict[str, Any]]: ...
 
-    def stats(self) -> dict[str, Any]: ...
+    def stats(self, project_id: str | None = None) -> dict[str, Any]: ...
 
     def span_trace_id(
         self, project_id: str, span_id: str, *, trace_id: str | None = None
@@ -133,6 +133,10 @@ class TraceStore(Protocol):
 
     def prune_traces(
         self, *, before_ns: int, project_id: str | None = None
+    ) -> dict[str, int]: ...
+
+    def delete_trace_ids(
+        self, trace_ids: list[str], *, project_id: str | None = None
     ) -> dict[str, int]: ...
 
     def close(self) -> None: ...

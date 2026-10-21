@@ -26,7 +26,6 @@ ToolFn = Callable[[Trace, dict[str, Any]], dict[str, Any]]
 class AgentBudget:
     max_iterations: int = 8
     token_budget: int = 200_000
-    cost_budget_usd: float = 0.0  # 0 = unbounded (deterministic tools cost ~0)
     timeout_s: float = 30.0
 
 
@@ -169,4 +168,7 @@ def run_specialist(
             break
         break  # deterministic specialists do their work in one pass —
         # the loop exists so future multi-step specialists stay bounded
+    else:
+        # loop exhausted all iterations without break → budget hit
+        run.stop_reason = "budget_exceeded"
     return run

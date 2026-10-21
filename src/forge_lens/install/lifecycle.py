@@ -91,9 +91,12 @@ def uninstall(data_dir: Path, *, ts_ns: int) -> dict[str, Any]:
     r = read_receipt(data_dir)
     removed: list[str] = []
     if r:
+        base = data_dir.resolve()
         for f in r.get("files", []):
-            fp = data_dir / f
-            if fp.exists() and fp.is_file() and data_dir in fp.parents:
+            fp = (data_dir / f).resolve()
+            # lexical containment is bypassable via '..' — compare
+            # resolved paths only
+            if fp.is_relative_to(base) and fp.is_file():
                 fp.unlink()
                 removed.append(f)
     write_receipt(data_dir, {"action": "uninstall", "ts_ns": ts_ns,

@@ -27,3 +27,5 @@ button.on { border-color: var(--accent); color: var(--accent); }
 dt { opacity: .7; } dd { margin: 0 0 .4rem; word-break: break-all; }
 b.error { color: var(--err); }
 @media (max-width: 720px) { .wf .name { width: 55%; } th:nth-child(1), td:nth-child(1) { display: none; } }
+.err-banner { color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent);
+  padding: .5rem .8rem; border-radius: 4px; }
