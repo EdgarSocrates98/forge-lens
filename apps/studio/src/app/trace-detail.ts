@@ -2,7 +2,8 @@ import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { JsonPipe, KeyValuePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Api, EvalResult, EvalSpec, Span, Trace, TraceEval } from './api';
+import { Api, EvalResult, EvalSpec, ReplayTimeline, Span, Trace, TraceEval }
+  from './api';
 
 interface Row { span: Span; depth: number; }
 
@@ -118,6 +119,46 @@ interface EvalParam {
           }
         }
       </section>
+      <details class="panel replay">
+        <summary>replay{{
+          replay() ? ' — ' + replay()!.entries.length + ' events · ' +
+            replay()!.total_ms + 'ms' : '' }}</summary>
+        @if (replayErr()) { <p class="err-banner">{{ replayErr() }}</p> }
+        @else if (!replayLoaded()) { <p class="muted">loading…</p> }
+        @else if (replay(); as rp) {
+          @if (rp.entries.length === 0) {
+            <p class="muted">no recorded timeline — the trace has no spans.</p>
+          } @else {
+            <p class="muted">{{ rp.span_count }} spans ·
+              {{ rp.total_ms }}ms total
+              @if (rp.unclosed_spans > 0) {
+                · {{ rp.unclosed_spans }} unclosed }</p>
+            <table class="replay-table">
+              <thead><tr>
+                <th>#</th><th>+ms</th><th>t</th><th>kind</th>
+                <th>name</th><th>event</th><th>status</th><th>span_id</th>
+              </tr></thead>
+              <tbody>
+                @for (e of replayEntries(); track $index) {
+                  <tr [class.err]="e.status === 'error'">
+                    <td>{{ $index + 1 }}</td>
+                    <td>{{ e.offset_ms }}</td>
+                    <td>{{ e.t }}</td>
+                    <td>{{ e.kind }}</td>
+                    <td>{{ e.name }}</td>
+                    <td>{{ e.event ?? '' }}</td>
+                    <td>{{ e.status ?? '' }}</td>
+                    <td><code>{{ e.span_id }}</code></td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+            @if (rp.entries.length > replayShown()) {
+              <button (click)="showMoreReplay()">show more
+                ({{ rp.entries.length - replayShown() }} hidden)</button> }
+          }
+        }
+      </details>
     }
   } @else { <p class="muted">loading…</p> }`,
 })
@@ -195,6 +236,16 @@ export class TraceDetailComponent implements OnInit {
   evalRunResults = signal<EvalResult[] | null>(null);
   evalRunning = signal(false);
   evalErr = signal<string | null>(null);
+  /** GET /v1/traces/{id}/replay — fetched once on init, rendered in the
+   *  server's own order (no client-side re-sort). */
+  replay = signal<ReplayTimeline | null>(null);
+  replayErr = signal<string | null>(null);
+  replayLoaded = signal(false);
+  /** Cap on rendered timeline rows — mirrors the datasets table. */
+  replayShown = signal(200);
+  replayEntries = computed(() =>
+    this.replay()?.entries.slice(0, this.replayShown()) ?? []);
+  showMoreReplay(): void { this.replayShown.update(n => n + 500); }
   /** Raw param input text — evaluator → key → typed string. */
   evalParams = signal<Record<string, Record<string, string>>>({});
   /** Checked evaluators that take params — sorted for stable render. */
@@ -233,6 +284,13 @@ export class TraceDetailComponent implements OnInit {
     pull('loops', this.api.getLoops(this.id));
     pull('graph', this.api.getGraphAnalysis(this.id));
     pull('eval', this.api.getTraceEval(this.id));
+    this.api.getReplay(this.id).subscribe({
+      next: r => { this.replay.set(r); this.replayLoaded.set(true); },
+      error: (e: HttpErrorResponse) => {
+        this.replayErr.set(`replay unavailable (${e.status || e.message})`);
+        this.replayLoaded.set(true);
+      },
+    });
   }
 
   toggleEval(name: string): void {

@@ -90,7 +90,7 @@ is only a report label. Results render per-metric `n`, means, delta, pass
 rates, significance and p-value, plus the gate verdict/failures when a gate
 was sent; `null`s render as `n/a`.
 
-The trace detail **evidence** tab ends with an **eval** panel that auto-loads `GET /v1/traces/:id/eval` and can run any of the built-in evaluators via `POST /v1/eval/run` (`score: null` renders as `n/a` with the evaluator's reason). Checking a param-taking evaluator reveals its inputs — `*` marks params the evaluator requires, `allowed` takes a comma-separated list, `expected` accepts a JSON value, and a malformed value blocks the run before POST (an omitted param instead comes back as an `evaluator_error` row).
+The trace detail **evidence** tab ends with an **eval** panel that auto-loads `GET /v1/traces/:id/eval` and can run any of the built-in evaluators via `POST /v1/eval/run` (`score: null` renders as `n/a` with the evaluator's reason). Checking a param-taking evaluator reveals its inputs — `*` marks params the evaluator requires, `allowed` takes a comma-separated list, `expected` accepts a JSON value, and a malformed value blocks the run before POST (an omitted param instead comes back as an `evaluator_error` row). A collapsible **replay** panel below it renders `GET /v1/traces/:id/replay` — the recorded span/event timeline in server order (offset, kind, name, event, status), capped at 200 rows behind a show-more button, with honest empty/error states.
 
 ## API connection
 

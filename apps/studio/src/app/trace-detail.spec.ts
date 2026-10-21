@@ -30,7 +30,24 @@ const EVAL_GET = {
   ],
 };
 
-describe('TraceDetailComponent eval panel', () => {
+// mirrors GET /v1/traces/{id}/replay — entries pre-ordered server-side
+// by (timestamp, span_id, kind): start < event < end at equal t
+const REPLAY = {
+  trace_id: 't1',
+  span_count: 1,
+  total_ms: 1000,
+  unclosed_spans: 0,
+  entries: [
+    { t: '2026-01-01T00:00:00+00:00', span_id: 's1', name: 'root',
+      kind: 'span_start', offset_ms: 0 },
+    { t: '2026-01-01T00:00:00.500+00:00', span_id: 's1', name: 'root',
+      kind: 'event', event: 'model.call', offset_ms: 500 },
+    { t: '2026-01-01T00:00:01+00:00', span_id: 's1', name: 'root',
+      kind: 'span_end', status: 'ok', offset_ms: 1000 },
+  ],
+};
+
+describe('TraceDetailComponent', () => {
   let http: HttpTestingController;
 
   beforeEach(async () => {
@@ -57,7 +74,7 @@ describe('TraceDetailComponent eval panel', () => {
     return f;
   };
   /** Flush the trace fetch + the lazy extras pulls fired by ngOnInit. */
-  const flushInit = () => {
+  const flushInit = (replay: object = REPLAY) => {
     http.expectOne(r => r.url.endsWith('/traces/t1')
       && r.method === 'GET').flush(TRACE);
     http.expectOne(r => r.url.endsWith('/traces/t1/cost')).flush({});
@@ -66,9 +83,12 @@ describe('TraceDetailComponent eval panel', () => {
       .flush({ findings: [], classification: 'none' });
     http.expectOne(r => r.url.endsWith('/graph/traces/t1/analysis')).flush({});
     http.expectOne(r => r.url.endsWith('/traces/t1/eval')).flush(EVAL_GET);
+    http.expectOne(r => r.url.endsWith('/traces/t1/replay')).flush(replay);
   };
   const evalPanel = (f: { nativeElement: HTMLElement }) =>
     f.nativeElement.querySelector('.panel.eval')!;
+  const replayPanel = (f: { nativeElement: HTMLElement }) =>
+    f.nativeElement.querySelector('details.replay')!;
 
   it('renders the GET eval battery; a null score shows n/a + reason', () => {
     const f = make();
@@ -163,6 +183,7 @@ describe('TraceDetailComponent eval panel', () => {
     http.expectOne(r => r.url.endsWith('/graph/traces/t1/analysis')).flush({});
     http.expectOne(r => r.url.endsWith('/traces/t1/eval'))
       .flush('down', { status: 500, statusText: 'Server Error' });
+    http.expectOne(r => r.url.endsWith('/traces/t1/replay')).flush(REPLAY);
     f.componentInstance.tab.set('evidence');
     f.detectChanges();
     const panel = evalPanel(f);
@@ -264,5 +285,77 @@ describe('TraceDetailComponent eval panel', () => {
     f.detectChanges();
     expect((evalPanel(f).querySelector('.eval-params input') as HTMLInputElement)
       .value).toBe('foo.*');
+  });
+
+  it('renders the replay timeline in the server order', () => {
+    const f = make();
+    flushInit();
+    f.componentInstance.tab.set('evidence');
+    f.detectChanges();
+    const panel = replayPanel(f);
+    const rows = panel.querySelectorAll('.replay-table tbody tr');
+    expect(rows.length).toBe(3);
+    // ordered span_start → event → span_end, offsets ascending
+    expect(rows[0].textContent).toContain('span_start');
+    expect(rows[0].textContent).toContain('root');
+    expect(rows[1].textContent).toContain('event');
+    expect(rows[1].textContent).toContain('model.call');
+    expect(rows[1].textContent).toContain('500');
+    expect(rows[2].textContent).toContain('span_end');
+    expect(rows[2].textContent).toContain('ok');
+    expect(rows[2].textContent).toContain('s1');
+    // collapsed summary still carries the totals
+    expect(panel.querySelector('summary')!.textContent)
+      .toContain('3 events · 1000ms');
+    // the panel issues no writes
+    http.expectNone(r => r.method === 'POST');
+  });
+
+  it('an empty replay renders an honest empty state', () => {
+    const f = make();
+    flushInit({ trace_id: 't1', entries: [], span_count: 0,
+                total_ms: 0, unclosed_spans: 0 });
+    f.componentInstance.tab.set('evidence');
+    f.detectChanges();
+    const panel = replayPanel(f);
+    expect(panel.querySelector('.replay-table')).toBeNull();
+    expect(panel.textContent).toContain('no recorded timeline');
+  });
+
+  it('a failed replay fetch surfaces the error banner', () => {
+    const f = TestBed.createComponent(TraceDetailComponent);
+    f.detectChanges();
+    http.expectOne(r => r.url.endsWith('/traces/t1')
+      && r.method === 'GET').flush(TRACE);
+    http.expectOne(r => r.url.endsWith('/traces/t1/cost')).flush({});
+    http.expectOne(r => r.url.endsWith('/traces/t1/failure')).flush({});
+    http.expectOne(r => r.url.endsWith('/traces/t1/loops'))
+      .flush({ findings: [], classification: 'none' });
+    http.expectOne(r => r.url.endsWith('/graph/traces/t1/analysis')).flush({});
+    http.expectOne(r => r.url.endsWith('/traces/t1/eval')).flush(EVAL_GET);
+    http.expectOne(r => r.url.endsWith('/traces/t1/replay'))
+      .flush('down', { status: 500, statusText: 'Server Error' });
+    f.componentInstance.tab.set('evidence');
+    f.detectChanges();
+    const banner = replayPanel(f).querySelector('.err-banner')!.textContent!;
+    expect(banner).toContain('replay unavailable');
+    expect(banner).toContain('500');
+    expect(replayPanel(f).querySelector('.replay-table')).toBeNull();
+  });
+
+  it('caps the timeline behind a show-more button', () => {
+    const f = make();
+    flushInit();
+    f.componentInstance.tab.set('evidence');
+    f.componentInstance.replayShown.set(2);
+    f.detectChanges();
+    const panel = replayPanel(f);
+    expect(panel.querySelectorAll('.replay-table tbody tr').length).toBe(2);
+    const btn = panel.querySelector('button')!;
+    expect(btn.textContent).toContain('show more (1 hidden)');
+    btn.click();
+    f.detectChanges();
+    expect(panel.querySelectorAll('.replay-table tbody tr').length).toBe(3);
+    expect(panel.querySelector('button')).toBeNull();
   });
 });

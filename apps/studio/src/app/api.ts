@@ -135,6 +135,31 @@ export interface MetricDelta {
   significance: string;
   p_value: number | null;
 }
+/** One timeline entry from GET /v1/traces/{id}/replay. The server
+ *  interleaves span starts, span events, and span ends, ordered by
+ *  (timestamp, span_id, kind) — a span's start precedes its events,
+ *  which precede its end. `event` is only present on kind 'event' and
+ *  `status` only on kind 'span_end'; `offset_ms` is relative to the
+ *  earliest observed timestamp (t0 → 0). */
+export interface ReplayEntry {
+  t: string;
+  span_id: string;
+  name: string;
+  kind: 'span_start' | 'span_end' | 'event';
+  event?: string;
+  status?: string;
+  offset_ms: number;
+}
+/** GET /v1/traces/{id}/replay — the recorded timeline (a re-walk of
+ *  stored evidence, never a re-execution). `total_ms` spans the whole
+ *  timeline; `unclosed_spans` counts spans with no end_time. */
+export interface ReplayTimeline {
+  trace_id: string;
+  entries: ReplayEntry[];
+  span_count: number;
+  total_ms: number;
+  unclosed_spans: number;
+}
 /** `gate` is only present when the request carried one. */
 export interface CompareGateResult {
   gate_passed: boolean;
@@ -211,6 +236,11 @@ export class Api {
   }
   getFailure(id: string): Observable<Record<string, unknown>> {
     return this.get(`/traces/${id}/failure`);
+  }
+  /** GET /v1/traces/{id}/replay — ordered timeline entries; not the
+   *  SSE `/stream` route. */
+  getReplay(id: string): Observable<ReplayTimeline> {
+    return this.get(`/traces/${id}/replay`);
   }
   getLoops(id: string): Observable<Loops> { return this.get(`/traces/${id}/loops`); }
   getTraceEval(id: string): Observable<TraceEval> {
