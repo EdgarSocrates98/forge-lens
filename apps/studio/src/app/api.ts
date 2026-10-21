@@ -39,6 +39,30 @@ export interface SessionRow {
   session_id: string; traces: number; spans: number;
   first_started_at: string; last_activity_at: string | null;
 }
+/** One EvaluationResult — `score: null` means no verdict; `details.reason`
+ *  carries the evidence for why (unobserved field, missing params, …). */
+export interface EvalResult {
+  evaluator: string;
+  evaluator_version?: string | null;
+  metric: string;
+  score: number | null;
+  trace_reference?: string | null;
+  evaluated_at?: string | null;
+  details?: Record<string, string>;
+}
+/** GET /v1/traces/{id}/eval — the server's default no-param battery. */
+export interface TraceEval {
+  trace_id: string; results: EvalResult[];
+}
+/** POST /v1/eval/run response — results keyed by trace_id. */
+export interface EvalReport {
+  dataset: string | null; trace_ids: string[];
+  results: Record<string, EvalResult[]>;
+  summary: Record<string, {
+    n: number; nulls: number; sum: number;
+    mean_score: number | null; pass_rate: number | null;
+  }>;
+}
 
 const BASE_KEY = 'lens-api-base';
 const KEY_KEY = 'lens-api-key';
@@ -86,6 +110,10 @@ export class Api {
   private get<T>(path: string): Observable<T> {
     return this.http.get<T>(`${this.base()}${path}`, { headers: this.headers() });
   }
+  private post<T>(path: string, body: unknown): Observable<T> {
+    return this.http.post<T>(`${this.base()}${path}`, body,
+      { headers: this.headers() });
+  }
   getTrace(id: string): Observable<Trace> { return this.get(`/traces/${id}`); }
   getGraphAnalysis(id: string): Observable<Record<string, unknown>> {
     return this.get(`/graph/traces/${id}/analysis`);
@@ -97,6 +125,17 @@ export class Api {
     return this.get(`/traces/${id}/failure`);
   }
   getLoops(id: string): Observable<Loops> { return this.get(`/traces/${id}/loops`); }
+  getTraceEval(id: string): Observable<TraceEval> {
+    return this.get(`/traces/${id}/eval`);
+  }
+  /** `evaluators` are bare registry names — posted as `{name}` specs; the
+   *  wire field is `trace_ids` (a list), per POST /v1/eval/run. */
+  runEval(traceId: string, evaluators: string[]): Observable<EvalReport> {
+    return this.post('/eval/run', {
+      trace_ids: [traceId],
+      evaluators: evaluators.map(name => ({ name })),
+    });
+  }
   getOps(): Observable<OpsSummary> { return this.get(`/ops/summary`); }
   getCapabilities(): Observable<Capabilities> { return this.get(`/capabilities`); }
 }

@@ -45,6 +45,13 @@ class TraceStore(Protocol):
         offset: int = 0,
     ) -> list[dict[str, Any]]: ...
 
+    def list_tools(
+        self,
+        project_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]: ...
+
     def list_sessions(
         self,
         project_id: str | None = None,

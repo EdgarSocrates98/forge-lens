@@ -1,8 +1,8 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { JsonPipe, KeyValuePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Api, Span, Trace } from './api';
+import { Api, EvalResult, Span, Trace, TraceEval } from './api';
 
 interface Row { span: Span; depth: number; }
 
@@ -47,6 +47,41 @@ interface Row { span: Span; depth: number; }
       @for (sec of sections; track sec[0]) {
         <h3>{{ sec[0] }}</h3><pre>{{ sec[1]() | json }}</pre>
       }
+      <h3>eval</h3>
+      <section class="panel eval">
+        <div style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:center">
+          @for (n of evaluatorNames; track n) {
+            <label><input type="checkbox" [checked]="evalSel().has(n)"
+                          (change)="toggleEval(n)"> {{ n }}</label>
+          }
+          <button (click)="runEval()"
+                  [disabled]="evalRunning() || evalSel().size === 0">
+            {{ evalRunning() ? 'running…' : 'run selected' }}</button>
+        </div>
+        @if (evalErr()) { <p class="err-banner">{{ evalErr() }}</p> }
+        @switch (evalState()) {
+          @case ('loading') { <p class="muted">loading…</p> }
+          @case ('unavailable') { <p class="muted">eval unavailable</p> }
+          @case ('empty') { <p class="muted">no eval results</p> }
+          @case ('results') {
+            <table class="eval-table">
+              <thead><tr>
+                <th>evaluator</th><th>metric</th><th>score</th><th>reason</th>
+              </tr></thead>
+              <tbody>
+                @for (r of evalResults(); track $index) {
+                  <tr>
+                    <td>{{ r.evaluator }}</td>
+                    <td>{{ r.metric }}</td>
+                    <td>{{ r.score === null ? 'n/a' : r.score }}</td>
+                    <td>{{ evalReason(r) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          }
+        }
+      </section>
     }
   } @else { <p class="muted">loading…</p> }`,
 })
@@ -68,6 +103,32 @@ export class TraceDetailComponent implements OnInit {
     ['loops', () => this.extras()['loops']],
     ['graph analysis', () => this.extras()['graph']],
   ];
+  /** Mirrors forge_lens.eval.evaluators.EVALUATORS — specs run without
+   *  params; param-required ones come back `score: null` + a reason. */
+  readonly evaluatorNames = [
+    'error_free', 'latency_budget', 'token_budget', 'tool_success',
+    'has_span', 'exact_match', 'token_f1', 'allowed_tools',
+    'task_completion', 'contains', 'regex', 'tool_call_count',
+  ];
+  evalSel = signal<Set<string>>(new Set(['error_free', 'tool_success']));
+  evalRunResults = signal<EvalResult[] | null>(null);
+  evalRunning = signal(false);
+  evalErr = signal<string | null>(null);
+  /** Table rows — a POST run overrides the auto-pulled GET battery. */
+  evalResults = computed<EvalResult[]>(() => {
+    const run = this.evalRunResults();
+    if (run) return run;
+    const v = this.extras()['eval'] as TraceEval | { error: string } | undefined;
+    return v && 'results' in v ? v.results : [];
+  });
+  evalState = computed<'loading' | 'unavailable' | 'empty' | 'results'>(() => {
+    const run = this.evalRunResults();
+    if (run) return run.length ? 'results' : 'empty';
+    const v = this.extras()['eval'] as TraceEval | { error: string } | undefined;
+    if (v === undefined) return 'loading';
+    if (!('results' in v)) return 'unavailable';
+    return v.results.length ? 'results' : 'empty';
+  });
 
   ngOnInit(): void {
     this.id = this.route.snapshot.paramMap.get('id') ?? '';
@@ -85,7 +146,34 @@ export class TraceDetailComponent implements OnInit {
     pull('failure', this.api.getFailure(this.id));
     pull('loops', this.api.getLoops(this.id));
     pull('graph', this.api.getGraphAnalysis(this.id));
+    pull('eval', this.api.getTraceEval(this.id));
   }
+
+  toggleEval(name: string): void {
+    this.evalSel.update(sel => {
+      const next = new Set(sel);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  }
+  runEval(): void {
+    if (this.evalRunning() || this.evalSel().size === 0) return;
+    this.evalRunning.set(true);
+    this.evalErr.set(null);
+    this.api.runEval(this.id, [...this.evalSel()].sort()).subscribe({
+      next: r => {
+        this.evalRunning.set(false);
+        this.evalRunResults.set(r.results[this.id] ?? []);
+      },
+      error: (e: HttpErrorResponse) => {
+        this.evalRunning.set(false);
+        this.evalErr.set(`eval run failed (${e.status || e.message})`);
+      },
+    });
+  }
+  /** `details.reason` is the evaluator's own evidence — never a verdict
+   *  we invent when `score` is null. */
+  evalReason(r: EvalResult): string { return r.details?.['reason'] ?? ''; }
 
   private buildRows(t: Trace): void {
     this.trace.set(t);

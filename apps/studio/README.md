@@ -74,6 +74,8 @@ from `GET /v1/sessions` in pages of 50 with offset-based "load more"
 pagination. The search box filters fetched rows by session-id prefix, and
 each session links to `/traces?session_id=<id>`.
 
+The trace detail **evidence** tab ends with an **eval** panel that auto-loads `GET /v1/traces/:id/eval` and can run any of the built-in evaluators via `POST /v1/eval/run` (`score: null` renders as `n/a` with the evaluator's reason).
+
 ## API connection
 
 The Studio talks to `forge-lens serve` (default `http://localhost:7777`).

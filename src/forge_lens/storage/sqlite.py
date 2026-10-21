@@ -947,6 +947,50 @@ class SQLiteTraceStore:
             for r in rows
         ]
 
+    def list_tools(
+        self,
+        project_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Fleet-wide roll-up over ``kind='tool'`` spans — one row per
+        ``tool.name`` attribute value. A TOOL span without the attribute
+        rolls into ``(unnamed)`` rather than vanishing, so counts always
+        reconcile with the span table. ``project_id=None`` is the
+        all-projects wildcard. Deterministic order: busiest first,
+        ties on name ASC."""
+        clauses = ["kind = 'tool'"]
+        params: list[Any] = []
+        if project_id is not None:
+            clauses.append("project_id = ?")
+            params.append(project_id)
+        with self._lock:
+            rows = self._conn.execute(
+                f"""SELECT json_extract(attributes_json, '$."tool.name"')
+                           AS tool_name,
+                           COUNT(*) AS calls,
+                           SUM(CASE WHEN status_code = 'error'
+                                    THEN 1 ELSE 0 END) AS errors,
+                           AVG(duration_ms) AS avg_ms,
+                           COUNT(DISTINCT trace_id) AS trace_count
+                    FROM spans WHERE {' AND '.join(clauses)}
+                    GROUP BY tool_name
+                    ORDER BY calls DESC, tool_name ASC
+                    LIMIT ? OFFSET ?""",
+                (*params, max(0, limit), max(0, offset)),
+            ).fetchall()
+        return [
+            {
+                "tool": r["tool_name"] if r["tool_name"] is not None
+                else "(unnamed)",
+                "calls": r["calls"],
+                "traces": r["trace_count"],
+                "errors": r["errors"],
+                "avg_duration_ms": r["avg_ms"],
+            }
+            for r in rows
+        ]
+
     def stats(self, project_id: str | None = None) -> dict[str, Any]:
         with self._lock:
             where = " WHERE project_id = ?" if project_id is not None else ""

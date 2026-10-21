@@ -587,3 +587,45 @@ def test_cli_traces_list_session_filter(tmp_path: Path) -> None:
         "a" * 32,
         "b" * 32,
     }
+
+
+# -- store + API: list_tools ---------------------------------------------------
+
+
+def test_list_tools_rollup(store: SQLiteTraceStore) -> None:
+    """Per-name calls/errors/traces; unnamed tool spans are bucketed."""
+    tools = store.list_tools("default")
+    by_name = {t["tool"]: t for t in tools}
+    # seeded 'default' traces: web_search (1 err), calc% (1 ok),
+    # calculator (1 ok), plus two TOOL spans with no tool.name attr
+    assert by_name["web_search"]["errors"] == 1
+    assert by_name["web_search"]["calls"] == 1
+    assert by_name["calc%"]["calls"] == 1
+    assert by_name["calculator"]["calls"] == 1
+    assert by_name["(unnamed)"]["calls"] == 2
+    for row in tools:
+        assert row["calls"] >= 1
+        assert row["errors"] <= row["calls"]
+        assert row["traces"] >= 1
+        assert row["avg_duration_ms"] is None or row["avg_duration_ms"] >= 0
+
+
+def test_list_tools_project_isolation_and_wildcard(
+    store: SQLiteTraceStore,
+) -> None:
+    default = {t["tool"] for t in store.list_tools("default")}
+    p2 = {t["tool"] for t in store.list_tools("p2")}
+    all_tools = {t["tool"] for t in store.list_tools(None)}
+    assert p2 == {"(unnamed)"}
+    assert all_tools == default | p2
+
+
+def test_tools_endpoint_shape(client) -> None:
+    r = client.get("/v1/tools")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {"items", "limit", "offset"}
+    for row in body["items"]:
+        assert set(row) == {
+            "tool", "calls", "traces", "errors", "avg_duration_ms",
+        }

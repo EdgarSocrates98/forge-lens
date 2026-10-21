@@ -1067,6 +1067,8 @@ def test_keys_mode_tenancy_all_new_routes(tmp_path, synthetic_trace: Trace) -> N
                 f"/v1/graph/traces/{tid}/analysis?project_id=p2",
                 "/v1/graph/sessions/s1?project_id=p2",
                 "/v1/ops/summary?project_id=p2",
+                "/v1/sessions?project_id=p2",
+                "/v1/tools?project_id=p2",
             ]
             for url in gets:
                 r = c.get(url, headers=scoped)

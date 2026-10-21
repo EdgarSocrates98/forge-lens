@@ -66,6 +66,14 @@ por `session_id` ASC. Escopo resolvido como nas outras rotas: sem
 `project_id`, usa `cfg.project_id`; chaves com escopo recebem `403`
 fora dele.
 
+### `GET /v1/tools?project_id&limit≤500&offset`
+Roll-up de ferramentas sobre spans `kind=tool` —
+`{items:[{tool, calls, traces, errors, avg_duration_ms}], limit,
+offset}`. Uma linha por valor do atributo `tool.name`; spans tool sem o
+atributo caem em `(unnamed)` — nunca desaparecem da contagem.
+Ordenação: `calls` DESC, desempate por nome ASC. Mesmo escopo das
+demais rotas.
+
 ### `GET /v1/traces/{trace_id}?project_id`
 Contrato `Trace` completo ou `404`. Sem `project_id`, usa o
 `cfg.project_id` configurado — a leitura cruzada entre projetos existe

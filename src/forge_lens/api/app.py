@@ -489,6 +489,22 @@ def create_app(
             items = get_store().list_sessions(pid, limit=limit, offset=offset)
         return {"items": items, "limit": limit, "offset": offset}
 
+    @app.get(f"/{API_VERSION}/tools", dependencies=read_deps)
+    async def list_tools(
+        request: Request,
+        project_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Fleet-wide tool roll-up — calls/traces/errors/avg duration
+        per ``tool.name`` (see ``SQLiteTraceStore.list_tools``)."""
+        limit = max(1, min(limit, 500))
+        offset = max(0, offset)
+        pid = _resolve_pid(request, project_id)
+        with METRICS.timer(M_QUERY_LATENCY):
+            items = get_store().list_tools(pid, limit=limit, offset=offset)
+        return {"items": items, "limit": limit, "offset": offset}
+
     @app.get(f"/{API_VERSION}/traces/{{trace_id}}", dependencies=read_deps)
     async def get_trace(
         request: Request, trace_id: str, project_id: str | None = None
