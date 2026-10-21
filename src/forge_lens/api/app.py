@@ -299,6 +299,9 @@ def create_app(
             # when the trace itself did not identify a producer
             if body.source is not None and trace.source.system == "unknown":
                 trace.source = body.source
+            # a trace's own project_id is authoritative — a scoped key
+            # must not write into a tenant it doesn't cover
+            _require_scope(request, trace.project_id)
         try:
             result = get_pipeline().ingest(body.traces, payload_bytes=len(raw))
         except (PayloadTooLargeError, RateLimitedError, ValidationError) as exc:
@@ -351,6 +354,8 @@ def create_app(
         except (ValidationError, PydanticValidationError) as exc:
             raise _reject_ingest(422, str(exc)) from exc
         _require_scope(request, cfg.project_id)
+        for _t in traces:
+            _require_scope(request, _t.project_id)
         try:
             result = get_pipeline().ingest(traces, payload_bytes=len(body))
         except (PayloadTooLargeError, RateLimitedError, ValidationError) as exc:
@@ -659,10 +664,9 @@ def create_app(
         return [_eval_str(t, f"{field}[]") for t in trace_ids]
 
     def _eval_traces(
-        body: dict[str, Any], request: Request
+        body: dict[str, Any], request: Request, pid: str | None
     ) -> list[Any]:
         ids = _eval_trace_ids(body)
-        pid = _eval_project_id(body)
         return [_get_trace_or_404(tid, pid, request) for tid in ids]
 
     async def _eval_body(request: Request) -> dict[str, Any]:
@@ -695,8 +699,10 @@ def create_app(
         # not cost a fan-out of store lookups before the 422 fires
         specs = _eval_specs(body)
         dataset = _eval_dataset(body)
-        _require_scope(request, _eval_project_id(body))
-        report = evaluate_traces(_eval_traces(body, request), specs, dataset=dataset)
+        pid = _resolve_pid(request, _eval_project_id(body))
+        report = evaluate_traces(
+            _eval_traces(body, request, pid), specs, dataset=dataset
+        )
         return report.model_dump(mode="json")
 
     @app.post(f"/{API_VERSION}/eval/compare", dependencies=read_deps)
@@ -730,8 +736,8 @@ def create_app(
 
         a_ids, a_pid, a_dataset = _side_params("a")
         b_ids, b_pid, b_dataset = _side_params("b")
-        _require_scope(request, a_pid)
-        _require_scope(request, b_pid)
+        a_pid = _resolve_pid(request, a_pid)
+        b_pid = _resolve_pid(request, b_pid)
         result = compare_runs(
             evaluate_traces(
                 [_get_trace_or_404(t, a_pid, request) for t in a_ids],
@@ -748,7 +754,10 @@ def create_app(
 
             if not isinstance(gate, dict):
                 raise _reject_request(422, "gate: object required")
-            result["gate"] = apply_gate(result, gate)
+            try:
+                result["gate"] = apply_gate(result, gate)
+            except (ValueError, TypeError) as exc:
+                raise _reject_request(422, f"gate: {exc}") from exc
         return result
 
     @app.get(
@@ -824,8 +833,8 @@ def create_app(
 
         a_ids, a_pid = _side("a")
         b_ids, b_pid = _side("b")
-        _require_scope(request, a_pid)
-        _require_scope(request, b_pid)
+        a_pid = _resolve_pid(request, a_pid)
+        b_pid = _resolve_pid(request, b_pid)
         store = get_store()
 
         def _cohort(ids: list[str], pid: str | None) -> list[Any]:
@@ -884,17 +893,16 @@ def create_app(
         if metadata is not None and not isinstance(metadata, dict):
             raise _reject_request(422, "metadata: object required")
         created_ns = _optional_body_datetime_ns(body, "created_at")
-        pid = body.get("project_id") or cfg.project_id
-        _require_scope(request, str(pid))
+        pid = _resolve_pid(request, _eval_project_id(body))
         get_store().upsert_dataset(
             dataset_id,
-            project_id=str(pid),
+            project_id=pid,
             name=name.strip(),
             task=task,
             metadata=metadata,
             now_ns=created_ns,
         )
-        return {"dataset_id": dataset_id, "project_id": str(pid), "stored": True}
+        return {"dataset_id": dataset_id, "project_id": pid, "stored": True}
 
     @app.get(f"/{API_VERSION}/datasets", dependencies=read_deps)
     async def list_datasets(
@@ -907,8 +915,8 @@ def create_app(
     async def get_dataset(
         request: Request, dataset_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
-        _require_scope(request, project_id or cfg.project_id)
-        ds = get_store().get_dataset(dataset_id, project_id or cfg.project_id)
+        pid = _resolve_pid(request, project_id)
+        ds = get_store().get_dataset(dataset_id, pid)
         if ds is None:
             raise _reject_request(404, f"dataset {dataset_id!r} not found")
         return ds
@@ -921,11 +929,15 @@ def create_app(
         dataset_id: str, version: str, request: Request
     ) -> dict[str, Any]:
         body = await _eval_body(request)
-        pid = str(body.get("project_id") or cfg.project_id)
-        _require_scope(request, pid)
+        pid = _resolve_pid(request, _eval_project_id(body))
         if get_store().get_dataset(dataset_id, pid) is None:
             raise _reject_request(
                 404, f"dataset {dataset_id!r} not found — create it first"
+            )
+        if get_store().get_dataset_version(dataset_id, version, pid) is not None:
+            raise _reject_request(
+                409, f"dataset version {dataset_id!r}@{version!r} exists — "
+                     "versions are append-only, never mutated in place"
             )
         cases = body.get("cases")
         if not isinstance(cases, list) or any(
@@ -959,12 +971,10 @@ def create_app(
     async def list_dataset_versions(
         request: Request, dataset_id: str, project_id: str | None = None
     ) -> list[dict[str, Any]]:
-        _require_scope(request, project_id or cfg.project_id)
-        if get_store().get_dataset(dataset_id, project_id or cfg.project_id) is None:
+        pid = _resolve_pid(request, project_id)
+        if get_store().get_dataset(dataset_id, pid) is None:
             raise _reject_request(404, f"dataset {dataset_id!r} not found")
-        return get_store().list_dataset_versions(
-            dataset_id, project_id or cfg.project_id
-        )
+        return get_store().list_dataset_versions(dataset_id, pid)
 
     @app.get(
         f"/{API_VERSION}/datasets/{{dataset_id}}/versions/{{version}}",
@@ -974,10 +984,8 @@ def create_app(
         request: Request, dataset_id: str, version: str,
         project_id: str | None = None,
     ) -> dict[str, Any]:
-        _require_scope(request, project_id or cfg.project_id)
-        v = get_store().get_dataset_version(
-            dataset_id, version, project_id or cfg.project_id
-        )
+        pid = _resolve_pid(request, project_id)
+        v = get_store().get_dataset_version(dataset_id, version, pid)
         if v is None:
             raise _reject_request(
                 404, f"dataset version {dataset_id!r}@{version!r} not found"
@@ -1054,6 +1062,8 @@ def create_app(
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        if limit > 500 or limit < 0:
+            raise _reject_request(422, "limit: 0..500")
         return get_store().list_audit(
             action=action, actor=actor, limit=limit, offset=offset
         )

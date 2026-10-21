@@ -322,3 +322,55 @@ def test_archive_cli_deletes_only_exported(tmp_path: Path) -> None:
         "--before", (_T0 + timedelta(days=1)).isoformat(),
         "--out", str(arc)])
     assert r2.exit_code == 2
+
+
+def test_archive_cli_cross_project(tmp_path: Path) -> None:
+    """Same trace_id under two projects, --project omitted: each copy
+    must be exported under its own project and both deleted — never
+    export one copy twice then delete both."""
+    import json as _json
+
+    from typer.testing import CliRunner
+
+    from forge_lens.cli.main import app
+
+    db = tmp_path / "x.db"
+    store = SQLiteTraceStore(db)
+    for proj in ("p1", "p2"):
+        tr = _trace([_tool(0)])
+        t2 = Trace(trace_id="cc" * 16, root_span_id=tr.spans[0].span_id,
+                   started_at=_T0, ended_at=_T0, spans=tr.spans,
+                   project_id=proj, status=Status(code=StatusCode.OK))
+        for s in t2.spans:
+            object.__setattr__(s, "trace_id", "cc" * 16)
+        store.upsert_trace(t2)
+    store.close()
+
+    arc = tmp_path / "both.ndjson"
+    r = CliRunner().invoke(app, [
+        "archive", "--db", str(db),
+        "--before", (_T0 + timedelta(days=1)).isoformat(),
+        "--out", str(arc), "--delete", "--yes"])
+    assert r.exit_code == 0, r.output
+    lines = [ln for ln in arc.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 2
+    assert {_json.loads(ln)["project_id"] for ln in lines} == {"p1", "p2"}
+    store = SQLiteTraceStore(db)
+    assert store.get_trace("cc" * 16, project_id="p1") is None
+    assert store.get_trace("cc" * 16, project_id="p2") is None
+    store.close()
+
+
+def test_parse_session_project_id_lands(tmp_path: Path) -> None:
+    """import-claude --project must actually land in that project."""
+    import json as _json
+
+    from forge_lens.adapters.claude_code import parse_session
+
+    f = tmp_path / "s.jsonl"
+    f.write_text(_json.dumps(
+        {"sessionId": "s1", "type": "tool_use", "tool_name": "x",
+         "timestamp": "2026-01-01T10:00:00Z"}) + "\n")
+    t = parse_session(f, project_id="my-proj")
+    assert t is not None
+    assert t.project_id == "my-proj"

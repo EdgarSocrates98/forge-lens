@@ -1197,3 +1197,133 @@ def test_analyze_bad_context_422_and_alert_rules_io(
     assert {f["rule_id"] for f in r.json()["fired"]} == {"persisted"}
     assert client.delete("/v1/alerts/rules/persisted").status_code == 200
     assert client.delete("/v1/alerts/rules/persisted").status_code == 404
+
+
+def test_cross_tenant_write_rejected(tmp_path, synthetic_trace: Trace) -> None:
+    """P0: a writer key scoped to p1 must not persist a trace whose
+    own project_id claims p2 — the per-trace scope check fires."""
+    from forge_lens.security.keys import generate_key
+
+    store = SQLiteTraceStore(tmp_path / "w.db")
+    cfg = LensConfig(
+        data_dir=tmp_path, db_path=tmp_path / "w.db", auth_mode="keys"
+    )
+    app = create_app(store=store, config=cfg)
+    _, secret, h = generate_key()
+    store.create_api_key("root", name="root", key_hash=h, role="admin")
+    try:
+        with TestClient(app) as c:
+            admin = {"X-Forge-Lens-Key": secret}
+            r = c.post("/v1/admin/keys", headers=admin,
+                       json={"name": "w1", "role": "writer",
+                             "projects": ["p1"]})
+            wk = {"X-Forge-Lens-Key": r.json()["secret"]}
+            foreign = synthetic_trace.model_copy(update={"project_id": "p2"})
+            env = {"project_id": "p1",
+                   "traces": [foreign.model_dump(mode="json")]}
+            r = c.post("/v1/traces", json=env, headers=wk)
+            assert r.status_code == 403
+            assert store.get_trace(synthetic_trace.trace_id,
+                                   project_id="p2") is None
+            # control: same trace claiming p1 (envelope names p1) → 200
+            ok = synthetic_trace.model_copy(update={"project_id": "p1"})
+            r = c.post("/v1/traces",
+                       json={"project_id": "p1",
+                             "traces": [ok.model_dump(mode="json")]},
+                       headers=wk)
+            assert r.status_code == 200
+    finally:
+        store.close()
+
+
+def test_gate_malformed_params_422(
+    client: TestClient, synthetic_trace: Trace,
+) -> None:
+    env = {"traces": [synthetic_trace.model_dump(mode="json")]}
+    assert client.post("/v1/traces", json=env).status_code == 200
+    tid = synthetic_trace.trace_id
+    for bad in ({"x": 1}, "abc", [1]):
+        r = client.post("/v1/eval/compare", json={
+            "a": {"trace_ids": [tid]}, "b": {"trace_ids": [tid]},
+            "gate": {"metrics": {
+                "exact_match/score": {"min_pass_rate_b": bad}}}})
+        assert r.status_code == 422, (bad, r.status_code, r.text)
+    # NaN reaches the server — Python json.loads accepts it literally;
+    # the gate must reject it rather than silently disable comparisons
+    r = client.post("/v1/eval/compare", content=(
+        '{"a": {"trace_ids": ["' + tid + '"]},'
+        ' "b": {"trace_ids": ["' + tid + '"]},'
+        ' "gate": {"metrics": {"exact_match/score": '
+        '{"min_pass_rate_b": NaN}}}}'),
+        headers={"content-type": "application/json"})
+    assert r.status_code == 422
+    r = client.post("/v1/eval/compare", json={
+        "a": {"trace_ids": [tid]}, "b": {"trace_ids": [tid]},
+        "gate": {"metrics": {
+            "exact_match/score": {"max_drop": {"x": 1}}}}})
+    assert r.status_code == 422
+    r = client.post("/v1/eval/compare", json={
+        "a": {"trace_ids": [tid]}, "b": {"trace_ids": [tid]},
+        "gate": {"fail_on_significant_regression": {"x": 1}}})
+    assert r.status_code == 422
+
+
+def test_dataset_version_immutable_and_pid_typed(
+    client: TestClient,
+) -> None:
+    r = client.put("/v1/datasets/ds1", json={"name": "d"})
+    assert r.status_code == 200
+    case = {"case_id": "c1", "input": {"x": 1}, "expect": {"y": 2}}
+    r = client.put("/v1/datasets/ds1/versions/v1",
+                   json={"cases": [case]})
+    assert r.status_code == 200
+    # second PUT on the same version → 409, version is immutable
+    r = client.put("/v1/datasets/ds1/versions/v1",
+                   json={"cases": [{**case, "input": {"x": 9}}]})
+    assert r.status_code == 409
+    v = client.get("/v1/datasets/ds1/versions/v1").json()
+    assert v["cases"][0]["input"] == {"x": 1}  # original truth intact
+    # non-string project_id → 422, not silent "5"
+    r = client.put("/v1/datasets/ds2",
+                   json={"name": "d", "project_id": 5})
+    assert r.status_code == 422
+    r = client.put("/v1/datasets/ds1/versions/v2",
+                   json={"cases": [case], "project_id": {"x": 1}})
+    assert r.status_code == 422
+
+
+def test_eval_omitted_pid_resolves_default_for_scoped_key(
+    tmp_path, synthetic_trace: Trace,
+) -> None:
+    """Unified omit semantics: a scoped key covering the default
+    project may omit project_id on eval routes — same convention as
+    GET routes (resolved once, used for check and query)."""
+    from forge_lens.security.keys import generate_key
+
+    store = SQLiteTraceStore(tmp_path / "e.db")
+    store.upsert_trace(synthetic_trace.model_copy(
+        update={"project_id": "default"}))
+    cfg = LensConfig(
+        data_dir=tmp_path, db_path=tmp_path / "e.db", auth_mode="keys"
+    )
+    app = create_app(store=store, config=cfg)
+    _, secret, h = generate_key()
+    store.create_api_key("root", name="root", key_hash=h, role="admin")
+    try:
+        with TestClient(app) as c:
+            admin = {"X-Forge-Lens-Key": secret}
+            r = c.post("/v1/admin/keys", headers=admin,
+                       json={"name": "d", "role": "reader",
+                             "projects": ["default"]})
+            dk = {"X-Forge-Lens-Key": r.json()["secret"]}
+            r = c.post("/v1/eval/run", headers=dk, json={
+                "trace_ids": [synthetic_trace.trace_id],
+                "evaluators": [{"evaluator": "exact_match",
+                                "metric": "score"}]})
+            assert r.status_code == 200
+            r = c.post("/v1/intel/regress", headers=dk, json={
+                "a": {"trace_ids": [synthetic_trace.trace_id]},
+                "b": {"trace_ids": [synthetic_trace.trace_id]}})
+            assert r.status_code == 200
+    finally:
+        store.close()

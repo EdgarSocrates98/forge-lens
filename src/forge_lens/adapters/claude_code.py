@@ -101,4 +101,5 @@ def parse_session(path: Path, *, project_id: str = "claude-code") -> Trace | Non
         )),
         source=TraceSource(system="claude_code", sdk_name="jsonl-adapter"),
         session_id=session_id,
+        project_id=project_id,
     )

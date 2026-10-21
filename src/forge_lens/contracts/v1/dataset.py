@@ -37,7 +37,9 @@ class Dataset(LensModel):
     name: str = Field(min_length=1, max_length=512)
     task: str | None = None
     created_at: datetime | None = None
-    """Stored at write time — server-side, never client-supplied."""
+    """Write-time metadata — supplied by the writer and stored verbatim so
+    dataset exports/imports keep their provenance; NULL means unobserved.
+    For server-issued records the server supplies it."""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

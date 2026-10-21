@@ -147,25 +147,44 @@ def apply_gate(result: dict[str, Any], gate: dict[str, Any]) -> dict[str, Any]:
             continue
         min_b = spec.get("min_pass_rate_b")
         if min_b is not None:
+            try:
+                min_b_f = float(min_b)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"{key}.min_pass_rate_b must be a number"
+                ) from exc
+            if not math.isfinite(min_b_f):
+                raise ValueError(f"{key}.min_pass_rate_b must be finite")
             pr_b = d.get("pass_rate_b")
-            if pr_b is None or pr_b < float(min_b):
+            if pr_b is None or pr_b < min_b_f:
                 failures.append({
                     "metric": key,
                     "reason": "pass_rate_b below minimum",
                     "observed": pr_b,
-                    "required": min_b,
+                    "required": min_b_f,
                 })
         max_drop = spec.get("max_drop")
         if max_drop is not None:
+            try:
+                max_drop_f = float(max_drop)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"{key}.max_drop must be a number"
+                ) from exc
+            if not math.isfinite(max_drop_f):
+                raise ValueError(f"{key}.max_drop must be finite")
             pa, pb = d.get("pass_rate_a"), d.get("pass_rate_b")
-            if pa is not None and pb is not None and (pa - pb) > float(max_drop):
+            if pa is not None and pb is not None and (pa - pb) > max_drop_f:
                 failures.append({
                     "metric": key,
                     "reason": "pass_rate dropped more than allowed",
                     "observed_drop": round(pa - pb, 6),
-                    "max_drop": max_drop,
+                    "max_drop": max_drop_f,
                 })
-    if gate.get("fail_on_significant_regression"):
+    fosr = gate.get("fail_on_significant_regression")
+    if fosr is not None and not isinstance(fosr, bool):
+        raise ValueError("fail_on_significant_regression must be a boolean")
+    if fosr:
         for d in result.get("deltas", []):
             if (
                 d.get("significance") == "significant"

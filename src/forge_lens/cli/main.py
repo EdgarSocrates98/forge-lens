@@ -749,7 +749,7 @@ def archive(
     cfg = _config(db)
     store = _store(cfg)
     try:
-        written_ids: list[str] = []
+        written_ids: list[tuple[str, str]] = []
         offset = 0
         page = 1000
         with out.open("a" if append else "w", encoding="utf-8") as fh:
@@ -767,12 +767,16 @@ def archive(
                         datetime.fromisoformat(end_iso)
                     )) >= cutoff:
                         continue
-                    tr = store.get_trace(row["trace_id"], project_id=project)
+                    tr = store.get_trace(
+                        row["trace_id"], project_id=row["project_id"]
+                    )
                     if tr is None:
                         continue
                     fh.write(_json.dumps(tr.model_dump(mode="json"),
                                          default=str) + "\n")
-                    written_ids.append(tr.trace_id)
+                    written_ids.append(
+                        (str(row["project_id"]), tr.trace_id)
+                    )
                 offset += len(rows)
                 if len(rows) < page:
                     break
@@ -784,9 +788,13 @@ def archive(
                     "from the hot store?",
                     abort=True,
                 )
-            deleted = store.delete_trace_ids(
-                written_ids, project_id=project
-            )
+            by_proj: dict[str, list[str]] = {}
+            for _pid, _tid in written_ids:
+                by_proj.setdefault(_pid, []).append(_tid)
+            deleted = {"traces": sum(
+                store.delete_trace_ids(ids, project_id=_pid)["traces"]
+                for _pid, ids in sorted(by_proj.items())
+            )}
             store.record_audit(
                 actor="cli", action="traces.archive_prune",
                 resource=str(out), outcome="ok",
