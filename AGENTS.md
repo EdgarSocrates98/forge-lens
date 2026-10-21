@@ -25,6 +25,11 @@ forge-lens doctor               # install health check
   imports inside `core/`, `contracts/`, `otlp/`, `sanitize/`, `storage/`,
   `ingest/` — network I/O lives only in `api/` (boundary) and `sdk/exporter`.
   Sort all emitted collections.
+  - *Documented exception*: `time.perf_counter`/`time.monotonic` appear in
+    `core/metrics.py` (self-observability durations — never part of stored
+    evidence) and as the *injectable default* clock for `RateLimiter`/
+    `IngestPipeline` (production passes the default; tests inject fakes).
+    Neither reads civil time nor influences persisted data.
 - **Contracts are versioned**: changes to `contracts/v1` require bumping
   `schema_version` and regenerating `schemas/v1/`; never break readers of
   older payloads (unknown fields are preserved, not dropped).

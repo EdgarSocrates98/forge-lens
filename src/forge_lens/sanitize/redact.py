@@ -34,7 +34,15 @@ SENSITIVE_KEY_RE = re.compile(
     r"(?i)(api[-_.]?key|secret|password|passwd|pwd|authorization|"
     r"auth[-_.]?header|credential|private[-_.]?key|client[-_.]?secret|"
     r"access[-_.]?key|token$|bearer$|x-api-key|private-key|"
-    r"cookie|set-cookie|ssn|credit[-_.]?card)"
+    r"cookie|set-cookie|ssn|credit[-_.]?card|"
+    # anchored credential names — separators required so `monkey`,
+    # `spinner`, `shipping`, `keepin` are never collateral
+    r"pass[-_.]?phrase|[-_.]key$|(^|[-_.])pin([-_.]|$)|"
+    r"(^|[-_.])otp([-_.]|$)|(^|[-_.])cv[vc]2?([-_.0-9]|$)|"
+    r"card[-_.]?number|security[-_.]?code|"
+    # plural token pairs — bare `tokens$` must NOT match: `input_tokens`
+    # et al. are metric counters, not secrets (see comment above)
+    r"(access|refresh|id)[-_.]tokens$)"
 )
 
 VALUE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -74,6 +82,10 @@ class SanitizeReport:
     dropped_content: int = 0
     truncated_values: int = 0
     emails_masked: int = 0
+    normalized_keys: int = 0
+    """Non-str dict keys coerced with ``str()`` — JSON object keys are
+    strings; a tuple/int key would otherwise raise in the serializer
+    (and collide deterministically: ``1`` and ``"1"`` both → ``"1"``)."""
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -126,9 +138,12 @@ def _sanitize_value(
             value = value[: max_chars] + TRUNCATION_MARKER
         return value
     if isinstance(value, dict):
-        out: dict[Any, Any] = {}
+        out: dict[str, Any] = {}
         for k, v in value.items():
-            if _is_sensitive_key(str(k)):
+            if not isinstance(k, str):
+                k = str(k)
+                report.normalized_keys += 1
+            if _is_sensitive_key(k):
                 report.redacted_keys += 1
                 out[k] = "[REDACTED:key]"
             else:
@@ -153,7 +168,10 @@ def _sanitize_value(
 
 
 def sanitize_attributes(
-    attributes: dict[str, Any],
+    # declared str keys — producers can still hand us int/tuple keys
+    # (contract models don't constrain dict keys), so the guard below
+    # is load-bearing, not dead code
+    attributes: dict[Any, Any],
     report: SanitizeReport,
     *,
     capture: CaptureLevel,
@@ -161,6 +179,9 @@ def sanitize_attributes(
 ) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, value in attributes.items():
+        if not isinstance(key, str):
+            key = str(key)
+            report.normalized_keys += 1
         if _is_sensitive_key(key):
             report.redacted_keys += 1
             out[key] = "[REDACTED:key]"

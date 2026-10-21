@@ -18,7 +18,10 @@ def _children(graph: ExecutionGraph) -> dict[str, list[str]]:
             kids.setdefault(e.source, []).append(e.target)
     node_order = {n.id: n.start_time for n in graph.nodes}
     for group in kids.values():
-        group.sort(key=lambda i: (node_order.get(i) or i, i))
+        # uniform str key — a dangling target (or None start_time) falls
+        # back to the id itself, and str() keeps datetime and str from
+        # ever meeting in a comparison on hand-built graphs
+        group.sort(key=lambda i: (str(node_order.get(i) or i), i))
     return kids
 
 

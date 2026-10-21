@@ -24,8 +24,13 @@ export interface Exporter {
 
 export class InMemoryExporter implements Exporter {
   readonly traces: Trace[] = [];
+  /** Overflow past `maxTraces` — counted, never silently dropped. */
+  tracesDropped = 0;
+  constructor(readonly maxTraces = 1000) {}
   export(traces: Trace[]): { accepted_spans: number; traces: string[] } {
-    this.traces.push(...traces);
+    const room = Math.max(0, this.maxTraces - this.traces.length);
+    this.traces.push(...traces.slice(0, room));
+    this.tracesDropped += traces.length - room;
     return {
       accepted_spans: traces.reduce((n, t) => n + t.spans.length, 0),
       traces: traces.map((t) => t.trace_id),

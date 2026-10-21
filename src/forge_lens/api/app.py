@@ -470,7 +470,8 @@ def create_app(
             return None
         return _eval_str(ds, "dataset")
 
-    def _eval_traces(body: dict[str, Any]) -> list[Any]:
+    def _eval_trace_ids(body: dict[str, Any]) -> list[str]:
+        """Shape validation only — no store access."""
         trace_ids = body.get("trace_ids")
         if (
             not isinstance(trace_ids, list)
@@ -480,7 +481,10 @@ def create_app(
             raise _reject_request(
                 422, f"trace_ids: 1..{_MAX_EVAL_TRACES} strings required"
             )
-        ids = [_eval_str(t, "trace_ids[]") for t in trace_ids]
+        return [_eval_str(t, "trace_ids[]") for t in trace_ids]
+
+    def _eval_traces(body: dict[str, Any]) -> list[Any]:
+        ids = _eval_trace_ids(body)
         pid = _eval_project_id(body)
         return [_get_trace_or_404(tid, pid) for tid in ids]
 
@@ -523,19 +527,33 @@ def create_app(
         body = await _eval_body(request)
         specs = _eval_specs(body)
 
-        def _side(key: str) -> Any:
+        def _side_params(key: str) -> Any:
+            """Shape validation only — runs for BOTH sides before any
+            store fan-out, so a malformed `b` is a 422 about `b`, never
+            masked by a's lookups."""
             side = body.get(key)
             if not isinstance(side, dict):
                 raise _reject_request(422, f"{key}: object required")
             side_ids = dict(side)
             side_ids.setdefault("project_id", _eval_project_id(body))
-            return evaluate_traces(
-                _eval_traces(side_ids),
-                specs,
-                dataset=_eval_dataset(side),
+            return (
+                _eval_trace_ids(side_ids),
+                _eval_project_id(side_ids),
+                _eval_dataset(side),
             )
 
-        return compare_runs(_side("a"), _side("b"))
+        a_ids, a_pid, a_dataset = _side_params("a")
+        b_ids, b_pid, b_dataset = _side_params("b")
+        return compare_runs(
+            evaluate_traces(
+                [_get_trace_or_404(t, a_pid) for t in a_ids],
+                specs, dataset=a_dataset,
+            ),
+            evaluate_traces(
+                [_get_trace_or_404(t, b_pid) for t in b_ids],
+                specs, dataset=b_dataset,
+            ),
+        )
 
     # -- ops ------------------------------------------------------------
 

@@ -366,3 +366,16 @@ describe("flush serialization", () => {
     await bodyDone;
   });
 });
+
+describe("InMemoryExporter bound", () => {
+  it("caps retained traces and counts overflow", () => {
+    const exp = new InMemoryExporter(2);
+    const mk = (i: number) => ({
+      trace_id: `${i}`.repeat(32), spans: [] as never[],
+    });
+    exp.export([mk(1), mk(2)] as never[]);
+    exp.export([mk(3), mk(4), mk(5)] as never[]);
+    assert.equal(exp.traces.length, 2);
+    assert.equal(exp.tracesDropped, 3);
+  });
+});

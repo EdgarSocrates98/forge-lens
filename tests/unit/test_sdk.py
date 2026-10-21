@@ -554,3 +554,35 @@ def test_tool_call_exotic_arg_keys_never_crash_host() -> None:
     assert _json.loads(spans[1].attributes["tool.parameters"])[
         "_forge_lens.unserializable"
     ] is True
+
+
+def test_finalize_empty_trace_stays_unset_not_ok() -> None:
+    """`all([])` is True — an empty trace observed nothing, so the SDK
+    must not upgrade it to ok (the TS SDK yields unset for codes∅)."""
+    from datetime import UTC, datetime
+
+    from forge_lens.contracts.v1.trace import Trace
+    from forge_lens.sdk.tracer import _finalize
+
+    t = Trace(
+        trace_id="e" * 32,
+        started_at=datetime(2026, 1, 1, tzinfo=UTC),
+        spans=[],
+    )
+    _finalize(t)
+    assert t.status.code == StatusCode.UNSET
+
+
+def test_in_memory_exporter_is_bounded() -> None:
+    """The default exporter must not accumulate telemetry forever —
+    overflow is counted, never silent."""
+    from datetime import UTC, datetime
+
+    from forge_lens.contracts.v1.trace import Trace
+
+    exp = InMemoryExporter(max_traces=2)
+    t = lambda i: Trace(trace_id=str(i) * 32, started_at=datetime(2026, 1, 1, tzinfo=UTC))  # noqa: E731
+    exp.export([t(1), t(2)])
+    exp.export([t(3), t(4), t(5)])
+    assert len(exp.traces) == 2
+    assert exp.traces_dropped == 3

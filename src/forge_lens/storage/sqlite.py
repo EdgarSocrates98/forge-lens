@@ -703,7 +703,8 @@ class SQLiteTraceStore:
             if trow is None:
                 return None
             srows = self._conn.execute(
-                "SELECT * FROM spans WHERE project_id=? AND trace_id=? ORDER BY started_ns",
+                "SELECT * FROM spans WHERE project_id=? AND trace_id=? "
+                "ORDER BY started_ns, span_id",
                 (trow["project_id"], trace_id),
             ).fetchall()
         spans = [self._span_from_row(r) for r in srows]

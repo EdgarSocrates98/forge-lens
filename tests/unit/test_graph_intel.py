@@ -627,6 +627,26 @@ def test_eval_token_budget_rejects_bool_and_string() -> None:
         assert "number" in res[0].details["reason"]
 
 
+def test_eval_token_budget_counts_total_tokens_only_usage() -> None:
+    """Regression: a producer reporting ONLY `total_tokens` still counts —
+    the budget verdict must match trace_cost's convention, not emit a
+    fabricated pass for unaccounted tokens."""
+    from forge_lens.eval import run_evaluators
+
+    total_only = {
+        "forge_lens.token_usage": {
+            "model": "gpt-test",
+            "total_tokens": 50000,
+        }
+    }
+    t = _trace([_span("a1", "llm", kind=SpanKind.LLM, attrs=total_only)])
+    res = run_evaluators(
+        t, [{"name": "token_budget", "params": {"max_total_tokens": 1000}}]
+    )
+    assert res[0].score == 0.0  # 50000 > 1000 — never a silent pass
+    assert res[0].details["total_tokens"] == "50000"
+
+
 def test_eval_unknown_evaluator_and_missing_params() -> None:
     from forge_lens.eval import run_evaluators
 

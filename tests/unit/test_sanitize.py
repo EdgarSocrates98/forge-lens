@@ -7,6 +7,7 @@ from forge_lens.core.config import CaptureLevel
 from forge_lens.sanitize.redact import (
     TRUNCATION_MARKER,
     SanitizeReport,
+    _is_sensitive_key,
     sanitize_attributes,
     sanitize_trace,
 )
@@ -18,7 +19,7 @@ def _attrs() -> dict:
         "prompt": "call me at john.doe@example.com please",
         "auth": {"access_token": "bearer abcdefghijklmnopqrstuvwxyz0123456789"},
         "input.value": "the user prompt body",
-        "safe.key": "harmless",
+        "safe.setting": "harmless",
     }
 
 
@@ -32,7 +33,7 @@ def test_sensitive_keys_redacted() -> None:
     assert report.redacted_keys == 2
     # value-level patterns fire even on non-sensitive keys at full capture
     assert "[MASKED:email]" not in out["prompt"]  # email only masked at metadata level
-    assert out["safe.key"] == "harmless"
+    assert out["safe.setting"] == "harmless"
 
 
 def test_metric_token_keys_are_not_redacted() -> None:
@@ -268,3 +269,47 @@ def test_depth_limit_drop_is_counted() -> None:
     )
     assert "[DROPPED:depth-limit]" in repr(out)
     assert report.dropped_content > 0
+
+
+def test_sensitive_key_denylist_covers_credential_families() -> None:
+    """Credential attribute names must redact at the default metadata
+    capture — anchored so lookalike words are never collateral."""
+    sensitive = [
+        "signing_key", "ssh_key", "session_key", "hmac_key",
+        "encryption_key", "master_key", "db.signing.key",
+        "passphrase", "my_passphrase", "wallet.pass-phrase",
+        "pin", "user_pin", "card.pin", "pin_code",
+        "otp", "login_otp", "otp.code",
+        "cvv", "cvv2", "card_cvc", "payment.cvc",
+        "card_number", "cardNumber", "security_code", "security.code",
+        "access_tokens", "refresh.tokens", "id_tokens",
+    ]
+    for key in sensitive:
+        assert _is_sensitive_key(key), f"{key!r} must redact"
+
+
+def test_sensitive_key_denylist_false_positives_stay_clear() -> None:
+    harmless = [
+        "monkey", "donkey", "turkey", "keyboard",
+        "spinner", "shipping", "spin", "pinned.version", "keepin",
+        "stop", "topic", "worktop",
+        "service", "device", "invoice",
+        "input_tokens", "output_tokens", "total_tokens",
+        "llm.usage.prompt_tokens", "cardinality", "standard",
+    ]
+    for key in harmless:
+        assert not _is_sensitive_key(key), f"{key!r} must stay clear"
+
+
+def test_non_str_attribute_keys_are_normalized_counted() -> None:
+    """Programmatic SDK misuse (int/tuple keys) must not reach the
+    serializer — str() coercion is counted as evidence."""
+    report = SanitizeReport()
+    out = sanitize_attributes(
+        {1: "a", ("t", 1): "b", "nested": {9: "deep"}},
+        report,
+        capture=CaptureLevel.FULL,
+        max_chars=4096,
+    )
+    assert out == {"1": "a", "('t', 1)": "b", "nested": {"9": "deep"}}
+    assert report.normalized_keys == 3

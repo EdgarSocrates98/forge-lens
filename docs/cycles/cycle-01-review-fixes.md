@@ -813,3 +813,36 @@ Cleanups de código (não-bloqueantes do review):
 
 Testes: +2 (`_token_budget` rejeita bool/str → `score=None`;
 agregação sanitize cobre todos os fields do dataclass).
+
+## Round 19 — veredito falso no evaluator + cobertura de credenciais
+
+- **`token_budget` ignorava `total_tokens`-only usage**: um span
+  reportando só o contador agregado somava 0 no budget — trace com
+  `total_tokens=50000` passava `max_total_tokens=1000`. Corrigido para a
+  convenção de `trace_cost` (`total_tokens or input+output`); o veredito
+  falso de "improvement proven" não é mais emitível.
+- **Denylist de credenciais alargada**: `passphrase`, `cvv`/`cvc`
+  (+variantes), `pin`, `otp`, `card_number`, `security_code`, a família
+  `*[-_.]key` (signing/ssh/session/hmac/encryption/master) e pares
+  `(access|refresh|id)[-_.]tokens` — tudo ancorado em separadores, então
+  `monkey`/`spinner`/`shipping`/`keepin` e contadores `*_tokens` (métricas,
+  não segredos) seguem intactos.
+- **`_finalize` marcava traces vazias `ok`**: `all([])` é True — uma
+  trace sem spans não observou nada; fica `unset` (paridade com o SDK TS).
+- **`InMemoryExporter` bounded em ambos SDKs**: default do tracer não
+  pode crescer para sempre — `max_traces`/`maxTraces=1000` + contador
+  `traces_dropped`/`tracesDropped` (mesma convenção dos dead-letters).
+- **`eval/compare` valida as duas sides antes de fan-out**: `b` malformada
+  → 422 sobre `b`, nunca mascarada pelo lookup 404 de `a` (split
+  `_eval_trace_ids` shape-only vs resolução).
+- Defensivos: sort key de `_children` agora uniforme `str()` (datetime
+  nunca encontra str numa comparação em grafos hand-built); `ORDER BY
+  started_ns, span_id` (tiebreak determinístico); `AGENTS.md` documenta a
+  exceção de clock (perf_counter em self-metrics + clock injetável do
+  RateLimiter); chaves não-str de atributos normalizadas via `str()` em
+  `sanitize_attributes`/`_sanitize_value` com contador `normalized_keys`
+  (evidência, nunca silêncio — e flui pela agregação field-driven do r18).
+
+Testes: +8 (total-only budget verdict, denylist sensível, falsos
+positivos limpos, normalized_keys, empty-trace unset, InMemory bound Py,
+compare ordering 422, InMemory bound TS).

@@ -74,7 +74,8 @@ new HTTPExporter({ endpoint?: string; apiKey?: string; projectId?: string;
 
 ## `InMemoryExporter`
 
-`traces: Trace[]` acumulado — testes/captura offline.
+`traces: Trace[]` acumulado — testes/captura offline. Bounded:
+`maxTraces=1000` por default com contador `tracesDropped`.
 
 ## Tipos
 

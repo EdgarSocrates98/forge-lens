@@ -465,7 +465,11 @@ def _finalize(trace: Trace) -> None:
         trace.ended_at = max(ended) if ended else None
     if any(s.status.code == StatusCode.ERROR for s in trace.spans):
         trace.status = Status(code=StatusCode.ERROR)
-    elif all(s.status.code == StatusCode.OK for s in trace.spans):
+    elif trace.spans and all(
+        s.status.code == StatusCode.OK for s in trace.spans
+    ):
+        # all([]) is True — an empty trace observed nothing, so it must
+        # stay unset rather than flush as ok (matches the TS SDK)
         trace.status = Status(code=StatusCode.OK)
 
 

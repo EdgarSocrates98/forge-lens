@@ -117,4 +117,6 @@ rede adicionais). `ExportError` em falha HTTP/transporte.
 
 ## `InMemoryExporter`
 
-Acumula `traces` — testes, captura offline, export para arquivo.
+Acumula `traces` — testes, captura offline, export para arquivo. Bounded:
+`max_traces=1000` por default com contador `traces_dropped` — é o exporter
+default, então um host não-configurado nunca acumula telemetria para sempre.

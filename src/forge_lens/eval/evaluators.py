@@ -115,7 +115,12 @@ def _token_budget(
         u = extract_usage(s)
         if u is not None:
             known += 1
-            total += (u.input_tokens or 0) + (u.output_tokens or 0)
+            # same convention as trace_cost: a producer that only reports
+            # the aggregate counter still counts — total_tokens alone is
+            # a complete measurement, not "no tokens observed"
+            total += u.total_tokens if u.total_tokens is not None else (
+                (u.input_tokens or 0) + (u.output_tokens or 0)
+            )
     unknown = len(trace.spans) - known
     details = {
         "total_tokens": str(total),

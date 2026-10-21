@@ -672,6 +672,24 @@ def test_eval_run_and_compare_endpoints(
     ).status_code == 422
 
 
+def test_eval_compare_validates_both_sides_before_fanout(
+    client: TestClient,
+) -> None:
+    """A malformed `b` must 422 — never be masked by `a`'s store lookups
+    (here `a` names a missing trace, which would previously 404 first)."""
+    missing = "f" * 32
+    r = client.post(
+        "/v1/eval/compare",
+        json={
+            "a": {"trace_ids": [missing]},
+            "b": "not-an-object",
+            "evaluators": [{"name": "error_free"}],
+        },
+    )
+    assert r.status_code == 422
+    assert "b" in r.json()["detail"]
+
+
 def test_eval_malformed_bodies_are_4xx_not_500(
     client: TestClient, synthetic_trace: Trace
 ) -> None:

@@ -20,15 +20,25 @@ class ExportError(Exception):
 
 
 class InMemoryExporter:
-    """Collects flushed traces — for tests, offline runs, file export."""
+    """Collects flushed traces — for tests, offline runs, file export.
 
-    def __init__(self) -> None:
+    Bounded: this is the default exporter, so an unconfigured host must
+    not accumulate telemetry forever. ``max_traces`` caps retention;
+    overflow is counted in ``traces_dropped`` (same convention as the
+    dead-letter queue), never silent.
+    """
+
+    def __init__(self, max_traces: int = 1000) -> None:
         self.traces: list[Trace] = []
+        self.max_traces = max_traces
+        self.traces_dropped = 0
 
     def export(
         self, traces: list[Trace], source: TraceSource | None = None
     ) -> dict[str, Any]:
-        self.traces.extend(traces)
+        room = max(0, self.max_traces - len(self.traces))
+        self.traces.extend(traces[:room])
+        self.traces_dropped += len(traces) - room
         return {
             "accepted_spans": sum(len(t.spans) for t in traces),
             "traces": [t.trace_id for t in traces],
