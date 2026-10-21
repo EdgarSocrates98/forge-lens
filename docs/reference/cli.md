@@ -61,6 +61,25 @@ Bateria de avaliadores determinísticos (Cycle 06): `error_free` +
 Score `n/a` + motivo quando a evidência é insuficiente — nunca inventa
 veredito.
 
+## `forge-lens failure|loops|efficiency|recommendations|security|replay <trace_id> [--db] [--project] [--json]`
+
+Análises por trace — paridade com os GETs `/v1/traces/{id}/…`:
+
+- `failure`: classificação determinística da falha (categoria +
+  evidência de spans).
+- `loops`: findings heurísticos de loop/sem-progresso; `--repeat-threshold N`
+  (1..50, padrão 3) espelha o `repeat_threshold` da API.
+- `efficiency`: roll-up de eficiência (tools/llm/errors/retries/tokens).
+- `recommendations`: recomendações `candidate` com evidência — ganhos
+  nunca são reivindicados sem validação experimental.
+- `security`: observações de segurança MCP/tool-call (modo observer —
+  só evidência, nunca bloqueio).
+- `replay`: timeline da execução gravada (span_start/event/span_end com
+  offset em ms).
+
+Trace inexistente → mensagem limpa + exit 2. `--json` emite o mesmo
+contrato da rota correspondente.
+
 ## `forge-lens doctor [path] [--db]`
 
 Verifica Python ≥3.11, diretório de dados, store legível (schema_version,
@@ -76,6 +95,25 @@ traces, spans e última atividade — ordenado por atividade recente.
 Roll-up de ferramentas (espelha `GET /v1/tools`): uma linha por
 `tool.name` com calls, traces, errors e duração média — spans tool sem
 o atributo caem em `(unnamed)`.
+
+## `forge-lens capabilities [--json]`
+
+Matriz honesta de capacidades por host (espelha `GET /v1/capabilities`
+e `lens.capabilities` no MCP): mecanismo, adapter, cobertura e limites
+— `unsupported` é resposta válida. Local, não abre o store.
+
+## `forge-lens stats [--db] [--project] [--json]`
+
+Resumo operacional (espelha `GET /v1/ops/summary`): stats do store
+(traces/spans/error_spans/schema/db_size) + falhas recentes — janela
+limitada de 200 traces, não um total da frota.
+
+## `forge-lens datasets list [--db] [--project] [--json]` · `forge-lens datasets show <id> [--db] [--project] [--json]`
+
+Leitura de datasets de eval (espelha `GET /v1/datasets` +
+`/v1/datasets/{id}` + `/versions`): `list` resume id/nome/task/created;
+`show` traz metadata + versões append-only com contagem de casos.
+Dataset inexistente → exit 2.
 
 ## `forge-lens keys create --name <n> [--role reader|writer|admin] [--project P]... [--db]`
 ## `forge-lens keys list [--db]` · `forge-lens keys revoke <key_id> [--db]`
@@ -101,6 +139,17 @@ sobrescrever um arquivo existente.
 Importa uma sessão Claude Code (JSONL `assistant`/`user` com
 `tool_use`/`tool_result` aninhados) como trace derivada de log. Arquivo
 limitado a 256 MiB; eventos inválidos → exit 2, zero linhas persistidas.
+
+## `forge-lens import-otel <file> [--db] [--project P]`
+
+Importa um dump OTLP/HTTP-JSON — paridade com `POST /v1/otlp/traces`:
+aceita **somente** `ExportTraceServiceRequest` como objeto JSON
+(protobuf não é decodificável aqui). Arquivo limitado por
+`max_payload_bytes`; JSON malformado / não-objeto / arquivo ausente →
+exit 2. Spans malformados são colocados em quarentena e reportados como
+warnings sem rejeitar o lote; import de arquivo marca
+`provenance=imported`. O fluxo passa pelo `IngestPipeline` (validação,
+sanitize, dedupe) como `ingest`.
 
 ## `forge-lens mcp-serve [--db]`
 

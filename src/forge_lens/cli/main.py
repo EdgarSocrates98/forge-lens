@@ -9,12 +9,12 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
 from forge_lens import __version__
-from forge_lens.contracts.v1.trace import Span
+from forge_lens.contracts.v1.trace import Span, Trace
 from forge_lens.core.config import LensConfig, init_project, load_config
 from forge_lens.storage.sqlite import SQLiteTraceStore
 
@@ -27,6 +27,8 @@ traces_app = typer.Typer(help="Inspect stored traces.", no_args_is_help=True)
 app.add_typer(traces_app, name="traces")
 keys_app = typer.Typer(help="Manage API keys (Cycle 08).", no_args_is_help=True)
 app.add_typer(keys_app, name="keys")
+datasets_app = typer.Typer(help="Inspect eval datasets.", no_args_is_help=True)
+app.add_typer(datasets_app, name="datasets")
 
 
 def _config(db: Path | None = None) -> LensConfig:
@@ -38,6 +40,22 @@ def _config(db: Path | None = None) -> LensConfig:
 
 def _store(cfg: LensConfig) -> SQLiteTraceStore:
     return SQLiteTraceStore(cfg.resolved_db_path)
+
+
+def _get_trace_or_exit(
+    trace_id: str, cfg: LensConfig, project: str | None
+) -> Trace:
+    """Store lookup shared by the per-trace analysis commands — a
+    missing trace is a clean 'not found', never a traceback."""
+    store = _store(cfg)
+    try:
+        trace = store.get_trace(trace_id, project_id=project or cfg.project_id)
+    finally:
+        store.close()
+    if trace is None:
+        typer.echo(f"trace {trace_id} not found", err=True)
+        raise typer.Exit(2)
+    return trace
 
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
@@ -505,6 +523,74 @@ def tools(
 
 
 @app.command()
+def capabilities(
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Host adapter capability matrix — the same payload as
+    ``GET /v1/capabilities`` / ``lens.capabilities`` (local, no store)."""
+    from forge_lens.adapters.capabilities import capability_matrix
+
+    matrix = capability_matrix()
+    if json_out:
+        typer.echo(json.dumps(matrix, indent=2))
+        return
+    for host, caps in matrix["hosts"].items():
+        native = "native tracing" if caps["native_tracing"] else "no native tracing"
+        typer.echo(f"{host}  {native}")
+        typer.echo(f"  mechanism: {caps['mechanism']}")
+        if caps.get("adapter"):
+            typer.echo(f"  adapter:   {caps['adapter']}")
+        typer.echo(f"  coverage:  {caps['coverage']}")
+        typer.echo(f"  limits:    {caps['limits']}")
+    typer.echo(f"note: {matrix['note']}")
+
+
+@app.command()
+def stats(
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Ops summary: store stats + recent failures — the same payload as
+    ``GET /v1/ops/summary`` (bounded 200-trace window)."""
+    cfg = _config(db)
+    store = _store(cfg)
+    try:
+        pid = project or cfg.project_id
+        rows = store.list_traces(project_id=pid, limit=200)
+        out: dict[str, Any] = {
+            "project_id": pid,
+            "stats": store.stats(project_id=pid),
+            "recent_traces": len(rows),
+            "recent_failures": sorted(
+                (t["trace_id"] for t in rows if t.get("status") == "error"),
+                reverse=True,
+            )[:50],
+            "note": "bounded window (200 traces) — not a fleet-wide total",
+        }
+    finally:
+        store.close()
+    if json_out:
+        typer.echo(json.dumps(out, indent=2))
+        return
+    s = out["stats"]
+    typer.echo(
+        f"project {out['project_id']}  schema={s['schema_version']}  "
+        f"db={s['db_size_bytes']}B"
+    )
+    typer.echo(
+        f"  traces={s['traces']} spans={s['spans']} "
+        f"error_spans={s['error_spans']}"
+    )
+    typer.echo(f"  recent window: {out['recent_traces']} trace(s)")
+    failures = out["recent_failures"]
+    if failures:
+        typer.echo(f"  recent failures ({len(failures)}):")
+        for tid in failures:
+            typer.echo(f"    {tid}")
+
+
+@app.command()
 def cost(
     trace_id: Annotated[str, typer.Argument()],
     db: Annotated[Path | None, typer.Option("--db")] = None,
@@ -655,6 +741,180 @@ def eval_cmd(
 
 
 @app.command()
+def failure(
+    trace_id: Annotated[str, typer.Argument()],
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Deterministic failure classification for a trace (``/v1/traces/{id}/failure``)."""
+    from forge_lens.investigate import classify_failure
+
+    trace = _get_trace_or_exit(trace_id, _config(db), project)
+    report = classify_failure(trace)
+    if json_out:
+        typer.echo(report.model_dump_json(indent=2))
+        return
+    typer.echo(f"trace {report.trace_id}  failed={report.failed}")
+    if report.failed:
+        typer.echo(f"  category: {report.category.value} ({report.confidence})")
+        typer.echo(f"  detail:   {report.detail}")
+        for sid in report.evidence.get("span_ids", []):
+            typer.echo(f"  evidence: span {sid}")
+
+
+@app.command()
+def loops(
+    trace_id: Annotated[str, typer.Argument()],
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    repeat_threshold: Annotated[
+        int, typer.Option("--repeat-threshold", help="min run length flagged")
+    ] = 3,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Heuristic loop/no-progress findings for a trace (``/v1/traces/{id}/loops``)."""
+    from forge_lens.ops.loops import detect_loops
+
+    trace = _get_trace_or_exit(trace_id, _config(db), project)
+    # same bound as the API route's repeat_threshold query param
+    out = detect_loops(trace, repeat_threshold=max(1, min(50, repeat_threshold)))
+    if json_out:
+        typer.echo(json.dumps(out, indent=2))
+        return
+    findings = out["findings"]
+    if not findings:
+        typer.echo(f"trace {out['trace_id']}: no loop findings")
+        return
+    typer.echo(
+        f"trace {out['trace_id']}: {len(findings)} finding(s)"
+        " (heuristic — repetition is evidence, not a verdict)"
+    )
+    for f in findings:
+        typer.echo(f"  {f['kind']} x{f['count']}: {f['detail']}")
+        for sid in f["span_ids"]:
+            typer.echo(f"    evidence: span {sid}")
+
+
+@app.command()
+def efficiency(
+    trace_id: Annotated[str, typer.Argument()],
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Per-trace efficiency roll-up — tokens/tools/retries
+    (``/v1/traces/{id}/efficiency``)."""
+    from forge_lens.intel.efficiency import trace_efficiency
+
+    trace = _get_trace_or_exit(trace_id, _config(db), project)
+    out = trace_efficiency(trace)
+    if json_out:
+        typer.echo(json.dumps(out, indent=2))
+        return
+    typer.echo(
+        f"trace {out['trace_id']}  outcome={out['outcome']}  "
+        f"succeeded={out['succeeded']}"
+    )
+    typer.echo(
+        f"  tools={out['tool_calls']} llm={out['llm_calls']} "
+        f"errors={out['error_spans']} retries={out['retries_observed']}"
+    )
+    typer.echo(
+        f"  tokens: in={out['input_tokens']} out={out['output_tokens']} "
+        f"({out['usage_coverage']})"
+    )
+
+
+@app.command()
+def recommendations(
+    trace_id: Annotated[str, typer.Argument()],
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Candidate recommendations with evidence — gains unclaimed
+    (``/v1/traces/{id}/recommendations``)."""
+    from forge_lens.intel.recommendations import recommend
+
+    trace = _get_trace_or_exit(trace_id, _config(db), project)
+    out = recommend(trace)
+    if json_out:
+        typer.echo(json.dumps(out, indent=2))
+        return
+    recs = out["recommendations"]
+    if not recs:
+        typer.echo(f"trace {out['trace_id']}: no recommendations")
+        return
+    typer.echo(
+        f"trace {out['trace_id']}: {len(recs)} candidate recommendation(s)"
+        " — gains require experimental validation"
+    )
+    for r in recs:
+        typer.echo(f"  {r['kind']}: {r['detail']}")
+
+
+@app.command()
+def security(
+    trace_id: Annotated[str, typer.Argument()],
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """MCP/tool-call security observations for a trace — observer mode,
+    evidence only (``/v1/traces/{id}/security``)."""
+    from forge_lens.security.mcp_inspect import inspect_trace
+
+    trace = _get_trace_or_exit(trace_id, _config(db), project)
+    out = inspect_trace(trace)
+    if json_out:
+        typer.echo(json.dumps(out, indent=2))
+        return
+    observations = out["observations"]
+    if not observations:
+        typer.echo(f"trace {out['trace_id']}: no security observations")
+        return
+    typer.echo(
+        f"trace {out['trace_id']}: {len(observations)} observation(s)"
+        " (observer mode — evidence only)"
+    )
+    for o in observations:
+        typer.echo(
+            f"  [{o['severity']}] {o['kind']} span {o['span_id']}: {o['detail']}"
+        )
+
+
+@app.command()
+def replay(
+    trace_id: Annotated[str, typer.Argument()],
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Recorded-execution timeline for a trace (``/v1/traces/{id}/replay``)."""
+    from forge_lens.investigate import replay_timeline
+
+    trace = _get_trace_or_exit(trace_id, _config(db), project)
+    out = replay_timeline(trace)
+    if json_out:
+        typer.echo(json.dumps(out, indent=2))
+        return
+    typer.echo(
+        f"trace {out['trace_id']}: {out['span_count']} span(s), "
+        f"{len(out['entries'])} timeline entries, {out['total_ms']}ms"
+    )
+    if out["unclosed_spans"]:
+        typer.echo(f"  ~ {out['unclosed_spans']} unclosed span(s)")
+    for e in out["entries"]:
+        detail = ""
+        if e["kind"] == "event":
+            detail = f" event={e['event']}"
+        elif e["kind"] == "span_end":
+            detail = f" status={e['status']}"
+        typer.echo(f"  +{e['offset_ms']:>9.3f}ms {e['kind']:<10} {e['name']}{detail}")
+
+
+@app.command()
 def doctor(
     path: Annotated[Path, typer.Argument(help="Project directory.")] = Path(),
     db: Annotated[Path | None, typer.Option("--db")] = None,
@@ -769,6 +1029,75 @@ def keys_revoke(
     finally:
         store.close()
     typer.echo(f"revoked {key_id}")
+
+
+@datasets_app.command("list")
+def datasets_list(
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """List eval datasets in the store (``GET /v1/datasets``)."""
+    cfg = _config(db)
+    store = _store(cfg)
+    try:
+        items = store.list_datasets(project or cfg.project_id)
+    finally:
+        store.close()
+    if json_out:
+        typer.echo(json.dumps(items, indent=2))
+        return
+    if not items:
+        typer.echo("no datasets recorded")
+        return
+    for d in items:
+        created = (d["created_at"] or "?")[:19]
+        typer.echo(
+            f"{d['dataset_id']:<24} {d['name']:<24} "
+            f"task={d['task'] or '-'}  created={created}"
+        )
+
+
+@datasets_app.command("show")
+def datasets_show(
+    dataset_id: Annotated[str, typer.Argument()],
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Dataset metadata + its append-only versions
+    (``GET /v1/datasets/{id}`` + ``/versions``)."""
+    cfg = _config(db)
+    store = _store(cfg)
+    try:
+        pid = project or cfg.project_id
+        ds = store.get_dataset(dataset_id, pid)
+        if ds is None:
+            typer.echo(f"dataset {dataset_id!r} not found", err=True)
+            raise typer.Exit(2)
+        versions = store.list_dataset_versions(dataset_id, pid)
+    finally:
+        store.close()
+    if json_out:
+        typer.echo(json.dumps({**ds, "versions": versions}, indent=2))
+        return
+    typer.echo(f"dataset {ds['dataset_id']}  project={ds['project_id']}")
+    typer.echo(f"  name:    {ds['name']}")
+    if ds["task"]:
+        typer.echo(f"  task:    {ds['task']}")
+    if ds["created_at"]:
+        typer.echo(f"  created: {ds['created_at']}")
+    if ds["metadata"]:
+        typer.echo(f"  metadata: {json.dumps(ds['metadata'], sort_keys=True)}")
+    if not versions:
+        typer.echo("  no versions")
+    for v in versions:
+        line = f"  version {v['version']}: {v['case_count']} case(s)"
+        if v["description"]:
+            line += f" — {v['description']}"
+        if v["created_at"]:
+            line += f"  created={v['created_at'][:19]}"
+        typer.echo(line)
 
 
 @app.command()
@@ -974,6 +1303,110 @@ def import_claude(
     finally:
         store.close()
     typer.echo(f"imported {len(trace.spans)} span(s) → {trace.trace_id}")
+
+
+@app.command(name="import-otel")
+def import_otel(
+    file: Annotated[
+        Path,
+        typer.Argument(help="OTLP/HTTP JSON ExportTraceServiceRequest dump."),
+    ],
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+) -> None:
+    """Import an OTLP/HTTP-JSON trace dump into the local store.
+
+    Accepts an ``ExportTraceServiceRequest`` as a JSON object only —
+    protobuf payloads are not decodable here (same contract as
+    ``POST /v1/otlp/traces``). Malformed spans are quarantined and
+    surfaced as warnings instead of rejecting the batch.
+    """
+    from pydantic import ValidationError as PydanticValidationError
+
+    from forge_lens.contracts.provenance import Provenance
+    from forge_lens.core.errors import (
+        PayloadTooLargeError,
+        RateLimitedError,
+        ValidationError,
+    )
+    from forge_lens.ingest.pipeline import IngestPipeline
+    from forge_lens.otlp.normalize import normalize_otlp_request
+
+    cfg = _config(db)
+    if project:
+        cfg = LensConfig(**{**cfg.__dict__, "project_id": project})
+    # same bound as the API's _read_capped_body — stat first (fast
+    # reject), then read at most max+1 bytes: read_bytes() on a giant
+    # file would OOM before payload_bytes is ever checked
+    max_bytes = cfg.max_payload_bytes
+    try:
+        size = file.stat().st_size
+        if size > max_bytes:
+            typer.echo(
+                f"import-otel failed: file {file} ({size}B) exceeds "
+                f"max_payload_bytes ({max_bytes}B)",
+                err=True,
+            )
+            raise typer.Exit(2)
+        with file.open("rb") as fh:
+            raw = fh.read(max_bytes + 1)
+        if len(raw) > max_bytes:
+            typer.echo(
+                f"import-otel failed: file {file} exceeds "
+                f"max_payload_bytes ({max_bytes}B)",
+                err=True,
+            )
+            raise typer.Exit(2)
+    except FileNotFoundError:
+        typer.echo(f"file not found: {file}", err=True)
+        raise typer.Exit(2) from None
+    except OSError as exc:
+        typer.echo(f"cannot read {file}: {exc}", err=True)
+        raise typer.Exit(2) from None
+    try:
+        payload = json.loads(raw)
+    except Exception as exc:
+        typer.echo(f"invalid JSON in {file}: {exc}", err=True)
+        raise typer.Exit(2) from None
+    if not isinstance(payload, dict):
+        typer.echo(
+            "import-otel failed: OTLP file must be a JSON object "
+            "(ExportTraceServiceRequest)",
+            err=True,
+        )
+        raise typer.Exit(2)
+    quarantine: list[str] = []
+    try:
+        # file import — weaker provenance than a live OTLP push
+        traces = normalize_otlp_request(
+            payload,
+            project_id=cfg.project_id,
+            provenance=Provenance.IMPORTED,
+            errors=quarantine,
+        )
+    except (ValidationError, PydanticValidationError) as exc:
+        typer.echo(f"import-otel failed: {exc}", err=True)
+        raise typer.Exit(2) from None
+    store = _store(cfg)
+    try:
+        # go through the pipeline, not a bare upsert — _ensure_storable
+        # validates encodability/ranges so a hostile dump can't reach a
+        # SQLite bind (same guarantee ingest has)
+        result = IngestPipeline(store, cfg).ingest(
+            traces, payload_bytes=len(raw)
+        )
+    except (PayloadTooLargeError, RateLimitedError, ValidationError) as exc:
+        typer.echo(f"import-otel failed: {exc}", err=True)
+        raise typer.Exit(1) from None
+    finally:
+        store.close()
+    typer.echo(
+        f"imported {len(result.traces)} trace(s), "
+        f"{result.accepted_spans} span(s) "
+        f"({result.updated_spans} updated, {result.duplicate_spans} duplicates)"
+    )
+    for warning in [*result.warnings, *quarantine]:
+        typer.echo(f"  warning: {warning}")
 
 
 @app.command(name="install-status")
