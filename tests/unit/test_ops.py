@@ -592,3 +592,66 @@ def test_signature_mixed_key_types() -> None:
     # programmatically-built attrs can carry non-str/mixed keys
     assert _signature("t", {"tool.args": {1: "a", "b": 2}})
     assert _signature("t", {"tool.args": {"a": 1}})
+
+
+def test_parse_session_real_claude_code_format(tmp_path: Path) -> None:
+    """Real session files nest tool calls in assistant message.content
+    and report outcomes in user tool_result entries — including
+    is_error and end timestamps. Turn usage lands on the first tool
+    span so cost/efficiency see it."""
+    import json as _json
+
+    from forge_lens.adapters.claude_code import parse_session
+
+    f = tmp_path / "sess.jsonl"
+    f.write_text("\n".join([
+        _json.dumps({"type": "assistant", "sessionId": "sess-9",
+                     "timestamp": "2026-01-01T10:00:00Z",
+                     "message": {
+                         "model": "claude-opus-4",
+                         "usage": {"input_tokens": 1200,
+                                   "output_tokens": 300,
+                                   "cache_read_input_tokens": 50},
+                         "content": [
+                             {"type": "text", "text": "checking"},
+                             {"type": "tool_use", "id": "tu_1",
+                              "name": "Read", "input": {"f": "a.py"}},
+                             {"type": "tool_use", "id": "tu_2",
+                              "name": "Bash", "input": {"cmd": "ls"}}]}}),
+        _json.dumps({"type": "user", "sessionId": "sess-9",
+                     "timestamp": "2026-01-01T10:00:02Z",
+                     "message": {"content": [
+                         {"type": "tool_result", "tool_use_id": "tu_1",
+                          "is_error": False},
+                         {"type": "tool_result", "tool_use_id": "tu_2",
+                          "is_error": True}]}}),
+    ]))
+    t = parse_session(f)
+    assert t is not None
+    assert t.session_id == "sess-9"
+    assert len(t.spans) == 2
+    by_name = {s.attributes["tool.name"]: s for s in t.spans}
+    read, bash = by_name["Read"], by_name["Bash"]
+    assert bash.status.code is StatusCode.ERROR
+    assert read.status.code is StatusCode.OK
+    # tool_result ts is the real span end, not the call ts
+    assert read.end_time != read.start_time
+    # usage + model land on the first tool span only (no double-count)
+    assert read.attributes["forge_lens.token_usage"]["input_tokens"] == 1200
+    assert read.attributes["gen_ai.request.model"] == "claude-opus-4"
+    assert "forge_lens.token_usage" not in bash.attributes
+    # args preserved for loop-detection signatures
+    assert read.attributes["tool.args"] == {"f": "a.py"}
+
+
+def test_admin_prune_all_projects_opt_in(client) -> None:
+    """all_projects:true is the explicit global prune — unscoped admin
+    only; omitting project_id prunes just the default project."""
+    r = client.post("/v1/admin/prune",
+                    json={"before": "2030-01-01T00:00:00Z",
+                          "all_projects": "yes"})
+    assert r.status_code == 422
+    r = client.post("/v1/admin/prune",
+                    json={"before": "2030-01-01T00:00:00Z",
+                          "all_projects": True})
+    assert r.status_code == 200

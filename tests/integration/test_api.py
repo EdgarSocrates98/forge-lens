@@ -1502,3 +1502,15 @@ def test_empty_project_id_rejected(
     assert r.status_code == 422, (r.status_code, r.text)
     assert client.get(
         f"/v1/traces/{synthetic_trace.trace_id}").status_code == 404
+
+
+def test_regress_surfaces_missing_trace_ids(
+    client: TestClient, synthetic_trace: Trace,
+) -> None:
+    env = {"traces": [synthetic_trace.model_dump(mode="json")]}
+    assert client.post("/v1/traces", json=env).status_code == 200
+    r = client.post("/v1/intel/regress", json={
+        "a": {"trace_ids": [synthetic_trace.trace_id, "ff" * 16]},
+        "b": {"trace_ids": [synthetic_trace.trace_id]}})
+    assert r.status_code == 200
+    assert r.json()["missing_trace_ids"]["a"] == ["ff" * 16]

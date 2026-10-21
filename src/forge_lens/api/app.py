@@ -25,6 +25,7 @@ from forge_lens.api.clock import wall_clock_ns
 from forge_lens.contracts.v1.trace import TraceIngest
 from forge_lens.core.config import LensConfig
 from forge_lens.core.errors import (
+    ConflictError,
     PayloadTooLargeError,
     RateLimitedError,
     ValidationError,
@@ -866,13 +867,27 @@ def create_app(
         b_pid = _resolve_pid(request, b_pid)
         store = get_store()
 
-        def _cohort(ids: list[str], pid: str | None) -> list[Any]:
-            return [t for i in ids if
-                    (t := store.get_trace(i, project_id=pid)) is not None]
+        def _cohort(
+            ids: list[str], pid: str | None
+        ) -> tuple[list[Any], list[str]]:
+            traces: list[Any] = []
+            missing: list[str] = []
+            for i in ids:
+                t = store.get_trace(i, project_id=pid)
+                if t is None:
+                    missing.append(i)
+                else:
+                    traces.append(t)
+            return traces, missing
 
-        return compare_cohorts(
-            _cohort(a_ids, a_pid), _cohort(b_ids, b_pid), label="cohort"
+        a_traces, a_missing = _cohort(a_ids, a_pid)
+        b_traces, b_missing = _cohort(b_ids, b_pid)
+        out = compare_cohorts(
+            a_traces, b_traces, label="cohort"
         )
+        if a_missing or b_missing:
+            out["missing_trace_ids"] = {"a": a_missing, "b": b_missing}
+        return out
 
     @app.get(
         f"/{API_VERSION}/graph/traces/{{trace_id}}/analysis",
@@ -968,6 +983,8 @@ def create_app(
                 409, f"dataset version {dataset_id!r}@{version!r} exists — "
                      "versions are append-only, never mutated in place"
             )
+        # the fast-path check above is cosmetic — the store's atomic
+        # INSERT DO NOTHING is the real guarantee against races
         cases = body.get("cases")
         if not isinstance(cases, list) or any(
             not isinstance(c, dict) or not str(c.get("case_id") or "").strip()
@@ -984,15 +1001,18 @@ def create_app(
         metadata = body.get("metadata")
         if metadata is not None and not isinstance(metadata, dict):
             raise _reject_request(422, "metadata: object required")
-        n = get_store().upsert_dataset_version(
-            dataset_id,
-            version,
-            project_id=pid,
+        try:
+            n = get_store().upsert_dataset_version(
+                dataset_id,
+                version,
+                project_id=pid,
             description=description,
             cases=cases,
-            metadata=metadata,
-            now_ns=_optional_body_datetime_ns(body, "created_at"),
-        )
+                metadata=metadata,
+                now_ns=_optional_body_datetime_ns(body, "created_at"),
+            )
+        except ConflictError as exc:
+            raise _reject_request(409, str(exc)) from exc
         return {"dataset_id": dataset_id, "version": version, "cases": n}
 
     @app.get(
@@ -1144,11 +1164,23 @@ def create_app(
         """Retention enforcement — delete traces older than a cutoff.
 
         ``before`` (ISO) or ``older_than_days`` selects the cutoff;
-        ``project_id`` bounds the prune to one tenant."""
+        ``project_id`` bounds the prune to one tenant (omitted → the
+        configured default project); ``all_projects: true`` is an
+        explicit global prune, unscoped admins only."""
         body = await _eval_body(request)
         before = body.get("before")
         older_days = body.get("older_than_days")
-        pid = _resolve_pid(request, _eval_project_id(body))
+        all_projects = body.get("all_projects")
+        if all_projects is not None and not isinstance(all_projects, bool):
+            raise _reject_request(422, "all_projects must be a boolean")
+        if all_projects:
+            # global prune is an explicit opt-in — only an unscoped
+            # admin passes _require_scope(None); omission still prunes
+            # the resolved project, never silently the world
+            _require_scope(request, None)
+            pid = None
+        else:
+            pid = _resolve_pid(request, _eval_project_id(body))
         if before is not None and older_days is not None:
             raise _reject_request(422, "before and older_than_days are exclusive")
         if before is not None:
@@ -1315,7 +1347,7 @@ def create_app(
 
         Saved rules are merged into every ``/alerts/evaluate`` call that
         passes ``"use_saved": true``."""
-        from forge_lens.ops.alerts import save_rule
+        from forge_lens.ops.alerts import load_rules, save_rule
 
         ident = getattr(request.state, "lens_identity", None)
         if ident is not None and ident.projects:
@@ -1330,6 +1362,13 @@ def create_app(
             raise _reject_request(
                 422, "rule: object with a string rule_id required")
         path = cfg.data_dir / "alert-rules.json"
+        # a saved file >100 rules would 422 every use_saved evaluation
+        # forever — enforce the eval cap on writes too (replace ≠ grow)
+        existing = load_rules(path)
+        if (not any(r["rule_id"] == rule["rule_id"] for r in existing)
+                and len(existing) >= 100):
+            raise _reject_request(
+                422, "saved rules cap is 100 — delete one first")
         rules = save_rule(path, rule)
         ident = getattr(request.state, "lens_identity", None)
         _audit(ident.actor if ident else "anon",

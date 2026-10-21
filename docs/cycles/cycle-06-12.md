@@ -78,4 +78,9 @@ Status: IMPLEMENTED (this delivery). Reports for cycles 00–05 live in
   duration/cost/token/model/host/agent/time-range filtering requires
   store-level query params (follow-up, not faked client-side).
 - Studio virtualization is bounded rendering (200-row window +
+- Deliberate decisions (auth surface): `/docs` + `/openapi.json` stay
+  unauthenticated in `keys` mode — schema-only disclosure, required
+  for tooling; `/v1/health` requires a reader key in `keys` mode —
+  load-balancer probes must carry one (documented trade-off, not an
+  oversight).
   load-more), not a CDK virtual-scroll viewport.

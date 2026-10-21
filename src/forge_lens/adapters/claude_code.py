@@ -78,30 +78,47 @@ def parse_session(path: Path, *, project_id: str = "claude-code") -> Trace | Non
                 if isinstance(cand, str) and cand:
                     session_id = cand
     tid = _hex32(session_id or path.stem)  # resolved ONCE — every span shares it
+    calls, results = _extract_tool_calls(events)
     spans: list[Span] = []
-    for n, ev in enumerate(events, 1):
-        if ev.get("type") == "tool_use" or ev.get("tool_name"):
-            name = str(ev.get("tool_name") or ev.get("name") or "tool")
-            ts = _ts(ev.get("timestamp"))
-            spans.append(Span(
-                trace_id=tid,
-                span_id=f"{n:016x}",
-                name=f"tool {name}",
-                kind=SpanKind.TOOL,
-                # unparseable ts falls back to epoch AND is flagged —
-                # the marker distinguishes it from a real 1970 event
-                start_time=ts or _EPOCH, end_time=ts or _EPOCH,
-                status=Status(code=(
-                    StatusCode.ERROR if ev.get("is_error") else StatusCode.OK
-                )),
-                attributes={
-                    "adapter": "claude_code",
-                    "tool.name": name,
-                    "evidence.kind": "log_derived",
-                    **({"integrity.timestamp_fallback": True}
-                       if ts is None else {}),
-                },
-            ))
+    for n, call in enumerate(calls, 1):
+        name = str(call.get("name") or "tool")
+        ts = call.get("ts")
+        is_error, end_ts = (False, None)
+        cid = call.get("id")
+        if cid is not None and cid in results:
+            is_error, end_ts = results[cid]
+        elif call.get("is_error"):
+            is_error = True
+        attrs: dict[str, Any] = {
+            "adapter": "claude_code",
+            "tool.name": name,
+            "evidence.kind": "log_derived",
+        }
+        if ts is None:
+            attrs["integrity.timestamp_fallback"] = True
+        if call.get("input") is not None:
+            attrs["tool.args"] = call["input"]
+        if call.get("usage"):
+            # turn-level token counters land on the FIRST tool span of
+            # that assistant message — attaching to every one would
+            # double-count in cost/efficiency roll-ups
+            attrs["forge_lens.token_usage"] = call["usage"]
+            attrs["claude.usage_scope"] = "assistant_turn"
+        if call.get("model"):
+            attrs["gen_ai.request.model"] = call["model"]
+        spans.append(Span(
+            trace_id=tid,
+            span_id=f"{n:016x}",
+            name=f"tool {name}",
+            kind=SpanKind.TOOL,
+            # unparseable ts falls back to epoch AND is flagged —
+            # the marker distinguishes it from a real 1970 event
+            start_time=ts or _EPOCH, end_time=end_ts or ts or _EPOCH,
+            status=Status(code=(
+                StatusCode.ERROR if is_error else StatusCode.OK
+            )),
+            attributes=attrs,
+        ))
     if not spans:
         return None
     return Trace(
@@ -119,3 +136,75 @@ def parse_session(path: Path, *, project_id: str = "claude-code") -> Trace | Non
         session_id=session_id,
         project_id=project_id,
     )
+
+
+def _extract_tool_calls(
+    events: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, tuple[bool, Any]]]:
+    """Normalize tool calls from BOTH on-disk schemas.
+
+    Real session files (``~/.claude/projects/*/*.jsonl``) emit
+    ``{"type":"assistant", "message":{"content":[{"type":"tool_use",
+    "id","name","input"}], "usage": {...}, "model": "..."}}`` entries and
+    report outcomes in separate ``{"type":"user"}`` entries as
+    ``{"type":"tool_result","tool_use_id","is_error"}`` blocks — that's
+    where ``is_error`` and the real end timestamp actually live.
+
+    A flat shape (top-level ``tool_use``/``tool_name`` — what hook
+    exports produce) is also accepted.
+
+    Returns ``(calls, results)``: calls in file order carrying
+    name/id/input/ts/usage/model, results mapping
+    ``tool_use_id → (is_error, result_ts)`` for correlation.
+    """
+    calls: list[dict[str, Any]] = []
+    results: dict[str, tuple[bool, Any]] = {}
+    for ev in events:
+        ts = _ts(ev.get("timestamp"))
+        t = ev.get("type")
+        if t == "assistant":
+            msg = ev.get("message")
+            content = msg.get("content") if isinstance(msg, dict) else None
+            usage = msg.get("usage") if isinstance(msg, dict) else None
+            model = msg.get("model") if isinstance(msg, dict) else None
+            if isinstance(content, list):
+                first = True
+                for c in content:
+                    if (isinstance(c, dict)
+                            and c.get("type") == "tool_use"):
+                        calls.append({
+                            "id": c.get("id")
+                            if isinstance(c.get("id"), str) else None,
+                            "name": c.get("name")
+                            if isinstance(c.get("name"), str) else None,
+                            "input": c.get("input"),
+                            "ts": ts,
+                            "usage": usage if first and isinstance(
+                                usage, dict) else None,
+                            "model": model if first and isinstance(
+                                model, str) else None,
+                        })
+                        first = False
+        elif t == "user":
+            msg = ev.get("message")
+            content = msg.get("content") if isinstance(msg, dict) else None
+            if isinstance(content, list):
+                for c in content:
+                    if (isinstance(c, dict)
+                            and c.get("type") == "tool_result"
+                            and isinstance(c.get("tool_use_id"), str)):
+                        results[c["tool_use_id"]] = (
+                            bool(c.get("is_error")), ts)
+        # flat shape: top-level tool_use / tool_name (hook exports)
+        if t == "tool_use" or isinstance(ev.get("tool_name"), str):
+            calls.append({
+                "id": ev.get("id") if isinstance(ev.get("id"), str)
+                else None,
+                "name": ev.get("tool_name") or ev.get("name"),
+                "input": ev.get("input"),
+                "ts": ts,
+                "usage": None,
+                "model": None,
+                "is_error": bool(ev.get("is_error")),
+            })
+    return calls, results

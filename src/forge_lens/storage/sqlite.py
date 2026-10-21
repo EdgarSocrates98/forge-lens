@@ -37,7 +37,7 @@ from forge_lens.contracts.v1.trace import (
     Trace,
     TraceSource,
 )
-from forge_lens.core.errors import ValidationError
+from forge_lens.core.errors import ConflictError, ValidationError
 from forge_lens.core.time import ensure_aware, from_unix_nano, to_unix_nano
 
 SCHEMA_VERSION = "1.0.0"
@@ -957,17 +957,17 @@ class SQLiteTraceStore:
     ) -> int:
         """Store a dataset version and its cases atomically.
 
-        Re-writing the same ``(dataset_id, version)`` replaces its case
-        set wholesale — versions are immutable once referenced by eval
-        runs, so the API only calls this on create."""
+        Versions are append-only: the insert is ``ON CONFLICT DO
+        NOTHING`` and a pre-existing ``(project, dataset, version)``
+        raises :class:`ConflictError` inside the same transaction — a
+        racing PUT can never slip past a check-then-act gap to mutate
+        an already-referenced version."""
         with self._lock, self._conn:
-            self._conn.execute(
+            cur = self._conn.execute(
                 """INSERT INTO dataset_versions(dataset_id, project_id, version,
                                                 description, created_ns, metadata_json)
                    VALUES (?,?,?,?,?,?)
-                   ON CONFLICT(project_id, dataset_id, version) DO UPDATE SET
-                       description=excluded.description,
-                       metadata_json=excluded.metadata_json""",
+                   ON CONFLICT(project_id, dataset_id, version) DO NOTHING""",
                 (
                     dataset_id,
                     project_id,
@@ -978,10 +978,11 @@ class SQLiteTraceStore:
                                sort_keys=True, default=str),
                 ),
             )
-            self._conn.execute(
-                "DELETE FROM dataset_cases WHERE project_id=? AND dataset_id=? AND version=?",
-                (project_id, dataset_id, version),
-            )
+            if cur.rowcount == 0:
+                raise ConflictError(
+                    f"dataset version {dataset_id!r}@{version!r} already "
+                    f"exists in project {project_id!r}"
+                )
             for c in cases:
                 self._conn.execute(
                     """INSERT INTO dataset_cases(dataset_id, project_id, version,
@@ -997,9 +998,12 @@ class SQLiteTraceStore:
                                    sort_keys=True, default=str),
                         json.dumps(_json_finite(c.get("expected") or {}),
                                    sort_keys=True, default=str),
-                        json.dumps(c.get("allowed_tools") or [], default=str),
-                        json.dumps(c.get("constraints") or {}, sort_keys=True, default=str),
-                        json.dumps(c.get("rubric") or {}, sort_keys=True, default=str),
+                        json.dumps(_json_finite(c.get("allowed_tools") or []),
+                                   default=str),
+                        json.dumps(_json_finite(c.get("constraints") or {}),
+                                   sort_keys=True, default=str),
+                        json.dumps(_json_finite(c.get("rubric") or {}),
+                                   sort_keys=True, default=str),
                     ),
                 )
         return len(cases)

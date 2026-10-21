@@ -23,6 +23,10 @@ class RateLimitedError(LensError):
     """Request rejected by the ingestion rate limiter."""
 
 
+class ConflictError(LensError):
+    """Write collided with existing immutable state."""
+
+
 class StoreError(LensError):
     """Persistence-layer failure."""
 

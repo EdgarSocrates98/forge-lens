@@ -4,7 +4,7 @@ description: Classify a failed trace and build an incident bundle. Use for "why 
 ---
 # Failure Investigation
 
-1. `curl :7777/traces list --status error` → candidate traces.
+1. `curl ':7777/v1/traces?status=error'` → candidate traces.
 2. `curl :7777/v1/traces/<id>/failure` → classified root-cause hypothesis
    with the error spans as evidence.
 3. `curl :7777/v1/traces/<id>/incident` → exportable incident bundle.
