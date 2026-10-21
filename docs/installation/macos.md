@@ -1,5 +1,14 @@
 # Instalação — macOS
 
+Rota portátil (recomendada — igual ao Linux):
+
+```bash
+./install.sh              # ~/.forge + ~/.local/bin + env.sh
+./install.sh --dry-run
+```
+
+Rota dev (venv do projeto):
+
 ```bash
 brew install uv                     # ou curl install script
 uv sync --extra server

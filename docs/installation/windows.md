@@ -1,5 +1,19 @@
 # Instalação — Windows
 
+Rota portátil (recomendada — instala em `~\.forge`, shim `.cmd`, variáveis
+`FORGE_LENS_*` persistidas em HKCU):
+
+```powershell
+# PowerShell — dot-source para herdar PATH na sessão atual
+. .\install.ps1
+.\install.ps1 -DryRun
+
+# Git Bash — a rota POSIX dentro do Git Bash, nunca spawna PowerShell
+bash install.windows.sh
+```
+
+Rota dev (venv do projeto):
+
 ```powershell
 winget install astral-sh.uv         # ou: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 uv sync --extra server

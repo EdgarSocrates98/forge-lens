@@ -341,3 +341,38 @@ def test_doctor_does_not_create_or_mutate_db(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0
     assert db.read_bytes() == before
+
+
+def test_install_lifecycle_verbs(tmp_path: Path) -> None:
+    """`install` writes a receipt; status/doctor read it; uninstall removes it."""
+    d = tmp_path / ".forge-lens"
+
+    dry = runner.invoke(app, ["install", "--data-dir", str(d), "--dry-run"])
+    assert dry.exit_code == 0
+    assert json.loads(dry.output)["dry_run"] is True
+    assert not d.exists()  # dry-run writes nothing
+
+    applied = runner.invoke(
+        app,
+        ["install", "--data-dir", str(d), "--file", "artifacts/x.db"],
+    )
+    assert applied.exit_code == 0
+    receipt = json.loads(applied.output)["receipt"]
+    assert receipt["files"] == ["artifacts/x.db"]
+
+    bad = runner.invoke(app, ["install", "--data-dir", str(d), "--profile", "bogus"])
+    assert bad.exit_code == 1
+    assert "profile must be one of" in bad.output
+
+    st = runner.invoke(app, ["install", "status", "--data-dir", str(d)])
+    assert st.exit_code == 0
+    assert json.loads(st.output)["installed"] is True
+
+    doc = runner.invoke(app, ["install", "doctor", "--data-dir", str(d)])
+    assert doc.exit_code == 0
+    assert json.loads(doc.output)["ok"] is True
+
+    un = runner.invoke(app, ["install", "uninstall", "--data-dir", str(d)])
+    assert un.exit_code == 0
+    st2 = runner.invoke(app, ["install", "status", "--data-dir", str(d)])
+    assert json.loads(st2.output)["receipt"]["action"] == "uninstall"

@@ -1,0 +1,21 @@
+{
+  "forge_id": "forge-lens",
+  "package": "forge_lens",
+  "distribution": "forge-lens",
+  "cli": "forge-lens",
+  "python": ">=3.11",
+  "extras": [
+    "server"
+  ],
+  "mcp_server_name": "forge-lens",
+  "mcp_command": [
+    "forge-lens",
+    "mcp-serve"
+  ],
+  "install_command": [
+    "{python}",
+    "-m",
+    "forge_lens",
+    "install"
+  ]
+}

@@ -22,12 +22,18 @@ Cycle 12: efficiency intelligence (`/v1/intel/efficiency`, `/v1/traces/{id}/effi
 
 ## Quickstart
 
+Portable install (same model as the other Forge projects — venv under
+`~/.forge/installs/forge-lens`, launcher on PATH, no project-venv
+touch):
+
 ```bash
-uv sync --extra server
+./install.sh              # POSIX; . .\install.ps1 on PowerShell
 forge-lens init .
-forge-lens serve            # API on http://127.0.0.1:7777
+forge-lens serve          # API on http://127.0.0.1:7777
 forge-lens doctor
 ```
+
+Dev checkout alternative: `uv sync --extra server && uv run forge-lens ...`.
 
 Instrument an agent:
 

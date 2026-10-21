@@ -171,6 +171,40 @@ se o DB não existir ou `pricing_file` for inválido. Tools em
 Lê o receipt de instalação (`install/receipt.json`) sem criar
 diretórios — operação read-only.
 
+## `forge-lens install`
+
+Ciclo de vida do receipt de instalação (auditável, local-first). O
+instalador portátil real é `install.sh`/`install.ps1` na raiz do repo —
+estes verbos gerenciam o receipt em `<data-dir>/install/`:
+
+```bash
+forge-lens install [--profile minimal|recommended|full]
+                   [--source pypi|wheel|git|zip|local|gitless|offline]
+                   [--file <managed-file>]... [--dry-run]
+                   [--data-dir <path>]
+forge-lens install status    [--data-dir <path>]   # receipt lido
+forge-lens install doctor    [--data-dir <path>]   # health; exit 1 se falha
+forge-lens install uninstall [--data-dir <path>]   # remove arquivos rastreados
+```
+
+`install` sem subcomando grava o receipt (`--dry-run` só imprime);
+`uninstall` remove apenas arquivos dentro do data-dir contidos no
+receipt (containment por path resolvido) e deixa um receipt de
+`uninstall` — a remoção é provável, não silenciosa.
+
+## Instalador portátil (`install.sh` / `install.ps1`)
+
+`./install.sh` (POSIX/Git Bash), `.\install.ps1` (PowerShell),
+`bash install.windows.sh` (Git Bash) e `setup.sh`/`setup.ps1` delegam a
+`scripts/forge_bootstrap.py` — pipeline `discover → resolve-python →
+create-venv → install-runtime → write-launcher → smoke-verify →
+register → report` lendo `forge.json`. Instala em
+`~/.forge/installs/forge-lens`, launcher em `~/.local/bin` (ou shim
+`.cmd`), variáveis `FORGE_LENS_*` em
+`${XDG_CONFIG_HOME:-~/.config}/forjas/env.sh` (POSIX) ou HKCU (Windows).
+Flags: `--dry-run`, `--editable`, `--install-dir`, `--no-launcher`,
+`--python`, `--extras`. Detalhes em `docs/installation/standalone.md`.
+
 ## Configuração
 
 Ordem: argumento > env (`FORGE_LENS_*`) > `.forge-lens/config.toml` > default.

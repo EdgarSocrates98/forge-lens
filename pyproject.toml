@@ -66,6 +66,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# Vendored shared bootstrap — canonical copy in forge-doctor-api is the lint target.
+"scripts/forge_bootstrap.py" = ["ALL"]
 "tests/**" = ["S101", "PT011", "PTH", "S105", "S106"]
 "examples/**" = ["S101", "T201"]
 "src/forge_lens/cli/**" = ["T201"]

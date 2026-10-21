@@ -5,6 +5,43 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 
 ## [Unreleased]
 
+### Added — portable installer (Forge parity)
+
+- **`install.sh` / `install.ps1` / `install.windows.sh` / `setup.sh` /
+  `setup.ps1`** — thin wrappers delegating to the vendored
+  `scripts/forge_bootstrap.py` (canonical copy shared with
+  forge-doctor-api/forge-doctor-data): pipeline `discover →
+  resolve-python → create-venv → install-runtime → write-launcher →
+  smoke-verify → register → report`, driven by the repo-local
+  `forge.json` (`forge_id`, `package`, `distribution`, `cli`, `python`,
+  `extras: [server]`, `mcp_command: forge-lens mcp-serve`,
+  `install_command: python -m forge_lens install`).
+- Instala em `~/.forge/installs/forge-lens` com launcher em
+  `~/.local/bin` (ou shim `.cmd`), variáveis `FORGE_LENS_*` persistidas
+  em `${XDG_CONFIG_HOME:-~/.config}/forjas/env.sh` (POSIX) ou HKCU
+  (Windows); flags `--dry-run`, `--editable`, `--install-dir`,
+  `--no-launcher`, `--python`, `--extras`. Nunca toca o `.venv` do
+  projeto; wheel construído do checkout é o default (instalação
+  independe do clone depois).
+- **`forge-lens install`** — o módulo `install/lifecycle.py` (receipts
+  auditáveis em `<data-dir>/install/receipt.json`) ganha superfície CLI:
+  `install` (grava receipt, `--profile/--source/--file/--dry-run`),
+  `install status`, `install doctor` (exit 1 em falha), `install
+  uninstall` (remove só arquivos rastreados dentro do data-dir).
+  `install-status` continua como atalho status+doctor. `__main__.py`
+  adicionado para `python -m forge_lens`.
+- Docs: `installation/standalone.md` (rotas completas + ciclo de vida),
+  `linux.md`/`macos.md`/`windows.md` (rota portátil primeiro),
+  `reference/cli.md` (verbos + flags), README quickstart.
+- `tests/unit/test_forge_bootstrap.py` (109 testes, stdlib/offline):
+  redaction de credenciais em URLs, normalização PEP 503, specs de
+  distribuição + extras, refusals de nome/path traversal, dry-run,
+  conflito editable, aceitação de URLs, falha pip com redaction,
+  build wheel/fallback, provenance, managed files, resolução de Python,
+  venv reuse, launcher, manifest/receipt, variáveis `FORGE_LENS_*`,
+  persistência POSIX idempotente, smoke (exit≠0 e stdout vazio),
+  validação de config.
+
 ### Fixed — review hardening (round on `542c0a3`)
 
 - **Overflow int64 → 500 eliminado**: `min_total_tokens`/`offset`/

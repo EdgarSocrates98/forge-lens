@@ -29,6 +29,17 @@ keys_app = typer.Typer(help="Manage API keys (Cycle 08).", no_args_is_help=True)
 app.add_typer(keys_app, name="keys")
 datasets_app = typer.Typer(help="Inspect eval datasets.", no_args_is_help=True)
 app.add_typer(datasets_app, name="datasets")
+install_app = typer.Typer(
+    help=(
+        "Install lifecycle — record an install receipt, inspect status, "
+        "health-check, or uninstall tracked files. The portable bootstrap "
+        "(install.sh/install.ps1) performs the real install; these verbs "
+        "manage the receipt it leaves under <data-dir>/install/."
+    ),
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
+app.add_typer(install_app, name="install")
 
 
 def _config(db: Path | None = None) -> LensConfig:
@@ -1489,6 +1500,75 @@ def install_status(
     d = data_dir or Path("./.forge-lens")
     typer.echo(_json.dumps(
         {"status": status(d), "doctor": doctor(d)}, indent=2))
+
+
+def _install_data_dir(data_dir: Path | None) -> Path:
+    return data_dir or Path("./.forge-lens")
+
+
+@install_app.callback()
+def install_apply(
+    ctx: typer.Context,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    profile: Annotated[str, typer.Option(
+        "--profile", help="minimal|recommended|full.")] = "recommended",
+    source: Annotated[str, typer.Option(
+        "--source", help="pypi|wheel|git|zip|local|gitless|offline.")] = "local",
+    file: Annotated[list[str] | None, typer.Option(
+        "--file", help="Managed file (relative to data-dir); repeatable.")] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+) -> None:
+    """Record an install receipt (no subcommand = apply)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    import time
+
+    from forge_lens.install.lifecycle import install
+
+    out = install(
+        _install_data_dir(data_dir),
+        profile=profile, source=source, files=list(file or []),
+        ts_ns=time.time_ns(), dry_run=dry_run,
+    )
+    typer.echo(json.dumps(out, indent=2))
+    if not out.get("ok"):
+        raise typer.Exit(1)
+
+
+@install_app.command("status")
+def install_status_cmd(
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+) -> None:
+    """Show the install receipt, if any."""
+    from forge_lens.install.lifecycle import status
+
+    typer.echo(json.dumps(status(_install_data_dir(data_dir)), indent=2))
+
+
+@install_app.command("doctor")
+def install_doctor_cmd(
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+) -> None:
+    """Health-check the install receipt and data dir."""
+    from forge_lens.install.lifecycle import doctor
+
+    out = doctor(_install_data_dir(data_dir))
+    typer.echo(json.dumps(out, indent=2))
+    if not out.get("ok"):
+        raise typer.Exit(1)
+
+
+@install_app.command("uninstall")
+def install_uninstall_cmd(
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+) -> None:
+    """Remove tracked files and write an uninstall receipt."""
+    import time
+
+    from forge_lens.install.lifecycle import uninstall
+
+    typer.echo(json.dumps(
+        uninstall(_install_data_dir(data_dir), ts_ns=time.time_ns()), indent=2))
 
 
 if __name__ == "__main__":

@@ -1,5 +1,17 @@
 # Instalação — Linux
 
+Rota portátil (recomendada — instala em `~/.forge`, launcher em
+`~/.local/bin`, variáveis `FORGE_LENS_*` em
+`${XDG_CONFIG_HOME:-~/.config}/forjas/env.sh`):
+
+```bash
+./install.sh              # ou: source ./install.sh p/ herdar PATH na sessão
+./install.sh --dry-run    # plano sem escrever nada
+./install.sh --editable   # dev: instala o checkout em vez do wheel
+```
+
+Rota dev (venv do projeto):
+
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh   # uv
 uv sync --extra server
