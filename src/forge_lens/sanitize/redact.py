@@ -43,21 +43,29 @@ SENSITIVE_KEY_RE = re.compile(
     r"(^|[-_.])(signing|ssh|session|hmac|encryption|decryption|master|"
     r"license|auth|client|pgp|gpg|tls|ssl|aws|kms|"
     r"service[-_.]?account)[-_.]?keys?$|"
-    # pin/otp: bare name or with an explicit credential suffix — `pin_count`,
-    # `otp_attempts`, `login.pin_retries` are counters, not secrets
-    r"(^|[-_.])pin([-_.](code|number|value|hash|secret))?$|"
-    r"(^|[-_.])otp([-_.](code|number|value|hash|secret))?$|"
-    r"(^|[-_.])(cvv|cvc)[0-9]*$|"
+    # pin/otp: bare or with an explicit credential suffix, separator
+    # optional — `pinCode`/`otpCode`/`cardPin` are camelCase credentials.
+    # `pin_count`/`otp_attempts`/`login.pin_retries` are counters (their
+    # suffix isn't in the credential list). Accepted collision:
+    # `pincode` (postal code) redacts — the credential-safe direction.
+    r"(^|[-_.])(card|user|login|bank|account)?[-_.]?pin"
+    r"([-_.]?(code|number|value|hash|secret))?$|"
+    r"(^|[-_.])otp([-_.]?(code|number|value|hash|secret))?$|"
+    # cvv/cvc: bare, digit-suffixed, or named — `cvv_count` is a counter
+    r"(^|[-_.])(cvv|cvc)([0-9]*|[-_.](code|number|num|no)s?)$|"
     # both sides anchored — `discard_number`, `wildcard.number`,
     # `card_number_count`, `security_code_review` stay clear
     r"(^|[-_.])card[-_.]?(number|num|no)s?$|"
     r"(^|[-_.])security[-_.]?code$|"
     r"(^|[-_.])social[-_.]?security([-_.](number|num|no)s?)?$|"
-    # plural token pairs — every alternative left-anchored so `valid_tokens`,
-    # `invalid_tokens`, `paid_tokens`, `xaccess_tokens` (metric counters)
-    # stay clear; `[-_.]?` covers camelCase accessTokens/idTokens too;
-    # bare `tokens$` must NOT match (see comment above)
-    r"(^|[-_.])(access|refresh|id)[-_.]?tokens$)"
+    # plural token sets — every alternative left-anchored so
+    # `valid_tokens`, `invalid_tokens`, `paid_tokens`, `xaccess_tokens`,
+    # `rapidTokens`, `capitalTokens`, `xauthTokens` (metric counters /
+    # substring lookalikes) stay clear; `[-_.]?` covers camelCase
+    # accessTokens/sessionTokens too; bare `tokens$` must NOT match
+    # (see comment above)
+    r"(^|[-_.])(access|refresh|id|session|auth|api|bearer|csrf|jwt|oauth)"
+    r"[-_.]?tokens$)"
 )
 
 VALUE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (

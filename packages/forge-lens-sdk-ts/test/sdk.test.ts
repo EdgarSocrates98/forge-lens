@@ -405,3 +405,22 @@ describe("InMemoryExporter bound", () => {
     assert.equal(res.traces_dropped, 0);
   });
 });
+
+describe("InMemoryExporter bound validation", () => {
+  it("rejects non-finite capacity instead of silently zeroing it", () => {
+    assert.throws(() => new InMemoryExporter(NaN), TypeError);
+    assert.throws(() => new InMemoryExporter(Infinity), TypeError);
+    assert.throws(
+      () => new InMemoryExporter("garbage" as unknown as number),
+      TypeError,
+    );
+  });
+
+  it("coerces numeric input like Python int()", () => {
+    assert.equal(new InMemoryExporter(1.9).maxTraces, 1);
+    assert.equal(
+      new InMemoryExporter("5" as unknown as number).maxTraces,
+      5,
+    );
+  });
+});

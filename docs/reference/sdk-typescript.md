@@ -75,7 +75,14 @@ new HTTPExporter({ endpoint?: string; apiKey?: string; projectId?: string;
 ## `InMemoryExporter`
 
 `traces: Trace[]` acumulado — testes/captura offline. Bounded:
-`maxTraces=1000` por default com contador `tracesDropped`.
+`maxTraces=1000` por default com contador `tracesDropped` (não-finito →
+`TypeError`, como o `int()` do SDK Python).
+
+Retorno de `export()`: `accepted_spans`/`traces` cobrem apenas a telemetria
+**retida**; `submitted_traces`/`traces_dropped` relatam o que foi enviado
+mas não retido. `HTTPExporter.export()` devolve a resposta do servidor —
+aceite do servidor, não retenção local; os shapes são intencionalmente
+diferentes.
 
 ## Tipos
 

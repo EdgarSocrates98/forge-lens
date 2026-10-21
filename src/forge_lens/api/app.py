@@ -496,9 +496,12 @@ def create_app(
                     request, cfg.max_payload_bytes, _reject_request
                 )
             )
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            # json.loads(bytes) raises UnicodeDecodeError on invalid
-            # UTF-8 — same 400 class as malformed JSON, never a 500
+        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
+            # json.loads(bytes): UnicodeDecodeError on invalid UTF-8,
+            # RecursionError on deeply-nested valid JSON — same 400
+            # class as malformed JSON, never a 500. NOT `except
+            # Exception`: _read_capped_body's 413 HTTPException lives
+            # inside this try and must propagate untouched.
             raise _reject_request(400, f"invalid JSON: {exc}") from exc
         if not isinstance(body, dict):
             raise _reject_request(422, "body must be a JSON object")
@@ -510,12 +513,11 @@ def create_app(
         from forge_lens.eval import evaluate_traces
 
         body = await _eval_body(request)
-        # cheap validation first — a bad spec list must not cost a
-        # fan-out of store lookups before the 422 fires
+        # cheap validation first — a bad spec list or dataset field must
+        # not cost a fan-out of store lookups before the 422 fires
         specs = _eval_specs(body)
-        report = evaluate_traces(
-            _eval_traces(body), specs, dataset=_eval_dataset(body)
-        )
+        dataset = _eval_dataset(body)
+        report = evaluate_traces(_eval_traces(body), specs, dataset=dataset)
         return report.model_dump(mode="json")
 
     @app.post(f"/{API_VERSION}/eval/compare", dependencies=read_deps)

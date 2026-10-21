@@ -280,10 +280,11 @@ def test_sensitive_key_denylist_covers_credential_families() -> None:
         "auth_key", "client_key", "service_account_key", "pgp.key",
         "passphrase", "my_passphrase", "wallet.pass-phrase",
         "pin", "user_pin", "card.pin", "pin_code", "pin.code",
+        "pinCode", "pinNumber", "pinHash", "cardPin", "user.pinCode",
         "otp", "login_otp", "otp.code", "otp_code", "otp.secret",
-        "otp_number", "otp.number",
+        "otp_number", "otp.number", "otpCode", "otpValue",
         "cvv", "cvv2", "card_cvc", "payment.cvc", "cvc3",
-        "cvv22", "cvc123",
+        "cvv22", "cvc123", "cvv_code", "cvc_number",
         "card_number", "cardNumber", "card.num", "card_numbers",
         "card_no",
         "security_code", "security.code",
@@ -291,6 +292,9 @@ def test_sensitive_key_denylist_covers_credential_families() -> None:
         "aws_key", "aws_keys", "kms_key", "signing_keys",
         "access_tokens", "refresh.tokens", "id_tokens",
         "accessTokens", "refreshTokens", "idTokens",
+        "session_tokens", "sessionTokens", "auth_tokens", "authTokens",
+        "api_tokens", "apiTokens", "bearer_tokens", "bearerTokens",
+        "csrf_tokens", "jwt.tokens", "oauth_tokens", "oauthTokens",
     ]
     for key in sensitive:
         assert _is_sensitive_key(key), f"{key!r} must redact"
@@ -309,6 +313,9 @@ def test_sensitive_key_denylist_false_positives_stay_clear() -> None:
         "xaccess_tokens", "reaccess.tokens",
         # camelCase lookalikes — the left anchor still applies
         "validTokens", "paidTokens", "xaccessTokens",
+        "rapidTokens", "capitalTokens", "xauthTokens",
+        "invalidSessionTokens", "validSessionTokens",
+        "authenticTokens", "xjwt_tokens", "oauth_tokens_count",
         # legitimate telemetry `*key` names — OTel semconv included
         "messaging.kafka.message.key",
         "messaging.rabbitmq.message.routing_key",

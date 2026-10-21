@@ -823,3 +823,32 @@ def test_eval_boundary_invalid_utf8_is_400_not_500(client: TestClient) -> None:
                 headers={"Content-Type": "application/json"},
             )
             assert r.status_code == 400, (url, body, r.status_code, r.text)
+
+
+def test_eval_boundary_deep_nesting_is_400_not_500(client: TestClient) -> None:
+    """Deeply-nested *valid* JSON raises RecursionError in json.loads —
+    a distinct failure class from malformed JSON, same 400 class."""
+    body = b"[" * 80_000 + b"]" * 80_000  # ~160KB, under the byte cap
+    for url in ("/v1/eval/run", "/v1/eval/compare"):
+        r = client.post(
+            url, content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert r.status_code == 400, (url, r.status_code, r.text)
+
+
+def test_eval_run_validates_dataset_before_trace_lookup(
+    client: TestClient,
+) -> None:
+    """Cheap-validation-first applies to /eval/run too: a malformed
+    `dataset` must 422 before any trace fetch can 404."""
+    r = client.post(
+        "/v1/eval/run",
+        json={
+            "trace_ids": ["f" * 32],  # missing — would 404 if reached
+            "evaluators": [{"name": "error_free"}],
+            "dataset": 123,
+        },
+    )
+    assert r.status_code == 422
+    assert "dataset" in r.json()["detail"]

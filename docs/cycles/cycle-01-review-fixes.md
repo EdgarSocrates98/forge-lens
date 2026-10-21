@@ -938,3 +938,35 @@ lookalikes camelCase/cardano/awaken/monkeys; `_children` instant-order;
 - **README status**: "remaining cycles DOCUMENTED_ONLY" era generoso
   demais — 07–12 não têm docs. Agora: ciclo 02 `NOT_STARTED`, 07–12
   roadmap.
+
+## Round 23 — RecursionError no boundary; denylist simétrico (revisão 999a9da)
+
+- **`_eval_body` RecursionError → 400**: JSON válido com 80k níveis de
+  aninhamento levantava `RecursionError` → 500 nas duas rotas `/v1/eval/*`
+  (a OTLP já devolvia 400). Adicionado à tupla explícita — NÃO `except
+  Exception`: o `HTTPException` 413 de `_read_capped_body` vive dentro do
+  mesmo `try` e precisa propagar intacto.
+- **`eval_run` valida `dataset` antes do fan-out**: `_eval_dataset` era
+  avaliado depois de `_eval_traces` (ordem de argumentos) — `dataset:123`
+  + trace inexistente devolvia 404 em vez de 422. Mesmo princípio do
+  round-19 agora aplicado nos dois endpoints.
+- **Denylist sem assimetrias internas**:
+  - pin/otp com separador opcional antes do sufixo credential +
+    prefixos (`card|user|login|bank|account`): `pinCode`, `otpValue`,
+    `cardPin`, `user.pinCode` redigem; `pincode` (CEP) é colisão aceita
+    — direção credential-safe documentada no regex.
+  - plural tokens: `session|auth|api|bearer|csrf|jwt|oauth` adicionados
+    — `sessionTokens`/`api_tokens`/`jwt.tokens`/`oauthTokens` redigem;
+    âncora esquerda mantém `rapidTokens`, `capitalTokens`, `xauthTokens`,
+    `invalidSessionTokens`, `authenticTokens`, `oauth_tokens_count` limpos.
+  - cvv/cvc com sufixo nomeado: `cvv_code`, `cvc_number`, `cvc_no`
+    redigem; `cvv_count` segue limpo.
+- **TS `maxTraces` fail-fast**: `Math.trunc(NaN)` zerava a capacidade
+  silenciosamente — agora `Number(maxTraces)` (coage `"5"`→5 como o
+  `int()` do Python) e `TypeError` em não-finito.
+- **Docs sdk-{python,typescript}**: shape de retorno do `export()`
+  documentado — accepted = retido (local) vs aceite do servidor (HTTP).
+
+Testes: deep-nesting → `== 400` nos dois endpoints; dataset inválido →
+422 antes do lookup; denylist com os novos padrões + lookalikes; TS com
+NaN/Infinity/"garbage" → throw e coerção `"5"`/`1.9`.

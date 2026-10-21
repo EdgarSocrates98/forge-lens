@@ -27,7 +27,13 @@ export class InMemoryExporter implements Exporter {
   /** Overflow past `maxTraces` — counted, never silently dropped. */
   tracesDropped = 0;
   constructor(readonly maxTraces = 1000) {
-    this.maxTraces = Math.max(0, Math.trunc(maxTraces));
+    // coerce like Python int() ("5" → 5), then fail fast on garbage:
+    // a non-finite bound must not silently zero the capacity
+    const n = Number(maxTraces);
+    if (!Number.isFinite(n)) {
+      throw new TypeError(`maxTraces must be finite, got ${maxTraces}`);
+    }
+    this.maxTraces = Math.max(0, Math.trunc(n));
   }
   export(
     traces: Trace[],

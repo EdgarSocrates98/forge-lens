@@ -120,3 +120,9 @@ rede adicionais). `ExportError` em falha HTTP/transporte.
 Acumula `traces` — testes, captura offline, export para arquivo. Bounded:
 `max_traces=1000` por default com contador `traces_dropped` — é o exporter
 default, então um host não-configurado nunca acumula telemetria para sempre.
+
+Retorno de `export()`: `accepted_spans`/`traces` cobrem apenas a telemetria
+**retida** (aceite = armazenado, mesma convenção de `IngestResult`);
+`submitted_traces`/`traces_dropped` relatam o que foi enviado mas não
+retido. `HTTPExporter.export()` devolve a resposta do servidor — aceite do
+servidor, não retenção local; os shapes são intencionalmente diferentes.
