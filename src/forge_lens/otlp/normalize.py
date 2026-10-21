@@ -6,10 +6,11 @@ cannot be interpreted is never dropped silently — unrecoverable spans go
 to quarantine (``errors`` list or strict ``ValidationError``), and data
 that can't be stored leaves evidence: events without ``timeUnixNano``
 count in ``attributes["_otlp.events_dropped"]``, kvlist entries with a
-non-string key count in ``"_otlp.dropped_kv_pairs"``, non-dict links
-count in ``"_otlp.links_dropped"``, and list fields holding a scalar
-are named in ``"_otlp.malformed_fields"``. Explicit ``null`` reads as
-absent — same convention as ``resourceSpans or []``.
+non-string key count in ``"_otlp.dropped_kv_pairs"``, malformed
+top-level attribute items count in ``"_otlp.dropped_attributes"``,
+non-dict links count in ``"_otlp.links_dropped"``, and list fields
+holding a scalar are named in ``"_otlp.malformed_fields"``. Explicit
+``null`` reads as absent — same convention as ``resourceSpans or []``.
 """
 
 from __future__ import annotations
@@ -100,9 +101,16 @@ def _attrs(raw_list: Any) -> dict[str, Any]:
     out: dict[str, Any] = {}
     if not isinstance(raw_list, list):
         return out
+    dropped = 0
     for item in raw_list:
         if isinstance(item, dict) and isinstance(item.get("key"), str):
             out[item["key"]] = _attr_value(item.get("value"))
+        else:
+            dropped += 1
+    if dropped:
+        # same contract as _otlp.dropped_kv_pairs / events_dropped —
+        # a malformed attribute item is counted, never silently skipped
+        out["_otlp.dropped_attributes"] = dropped
     return out
 
 

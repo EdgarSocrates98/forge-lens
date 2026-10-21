@@ -9,10 +9,11 @@ Run from the repo root:
 
     uv run python examples/quickstart.py
 
-The database lands in ./.forge-lens/lens.db — inspect it afterwards:
+The database lands in $TMPDIR/forge-lens-quickstart/lens.db (printed at
+the end) — inspect it afterwards:
 
-    uv run forge-lens traces list
-    uv run forge-lens traces show <trace_id>
+    uv run forge-lens traces list --db $TMPDIR/forge-lens-quickstart/lens.db
+    uv run forge-lens traces show <trace_id> --db $TMPDIR/forge-lens-quickstart/lens.db
 """
 
 from __future__ import annotations

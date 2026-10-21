@@ -918,3 +918,23 @@ dropped, `submitted=2`); re-finalize `ok → unset`; `dropped == 0` sob
 capacidade preservado; denylist com todos os novos padrões +
 lookalikes camelCase/cardano/awaken/monkeys; `_children` instant-order;
 `list_traces` com mesmo `started_ns`.
+
+## Round 22 — eval boundary UnicodeDecodeError; dropped_attributes (revisão 7539f0b)
+
+- **`/v1/eval/run|compare` 500 → 400**: `json.loads(bytes)` levanta
+  `UnicodeDecodeError` em UTF-8 inválido — classe distinta de
+  `JSONDecodeError`. `_eval_body` agora captura ambos (a ingestão OTLP
+  já usava `except Exception` → 400). 4 payloads × 2 endpoints pinados
+  com `== 400` explícito.
+- **`_attrs` não descarta mais silenciosamente**: itens top-level que
+  não são `{"key": str, ...}` contam em `_otlp.dropped_attributes` —
+  mesmo contrato de evidência de `dropped_kv_pairs`/`events_dropped`/
+  `links_dropped`; docstring do módulo atualizada.
+- **`serve --port 0`**: `port or ep_port or 7777` comia o zero
+  (ephemeral bind) — comparações `is not None` nos dois níveis.
+- **quickstart.py**: docstring apontava `./.forge-lens/lens.db`; o
+  código escreve em `$TMPDIR/forge-lens-quickstart/` — corrigido com
+  o `--db` explícito nos comandos de inspeção.
+- **README status**: "remaining cycles DOCUMENTED_ONLY" era generoso
+  demais — 07–12 não têm docs. Agora: ciclo 02 `NOT_STARTED`, 07–12
+  roadmap.

@@ -418,3 +418,21 @@ def test_otlp_runtime_uses_process_runtime_attrs() -> None:
     payload["resourceSpans"][0]["resource"]["attributes"].pop()
     trace = normalize_otlp_request(payload)[0]
     assert trace.source.runtime == "cpython"
+
+
+def test_otlp_malformed_attribute_items_leave_evidence() -> None:
+    """Attribute list entries that aren't {"key": str, ...} must be
+    counted — the same evidence contract as dropped_kv_pairs, never a
+    silent skip."""
+    payload = _span_payload(
+        attributes=[
+            {"key": "good", "value": {"stringValue": "v"}},
+            "not-a-dict",
+            {"key": 42, "value": {"stringValue": "non-str key"}},
+            {"value": {"stringValue": "no key"}},
+        ]
+    )
+    trace = normalize_otlp_request(payload)[0]
+    attrs = trace.spans[0].attributes
+    assert attrs["good"] == "v"
+    assert attrs["_otlp.dropped_attributes"] == 3

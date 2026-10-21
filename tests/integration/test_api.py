@@ -810,3 +810,16 @@ def test_eval_non_finite_params_score_none_not_verdict(
                         headers={"Content-Type": "application/json"})
         assert r.status_code == 200, (budget, r.text)
         assert r.json()["results"][tid][0]["score"] is None
+
+
+def test_eval_boundary_invalid_utf8_is_400_not_500(client: TestClient) -> None:
+    """json.loads(bytes) raises UnicodeDecodeError on invalid UTF-8 —
+    a distinct exception class from JSONDecodeError, and the same 400
+    reject class at every body-parsing boundary."""
+    for url in ("/v1/eval/run", "/v1/eval/compare"):
+        for body in (b'{"x": "\xff"}', b'{"x": "\xc3\x28"}'):
+            r = client.post(
+                url, content=body,
+                headers={"Content-Type": "application/json"},
+            )
+            assert r.status_code == 400, (url, body, r.status_code, r.text)

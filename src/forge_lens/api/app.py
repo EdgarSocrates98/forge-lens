@@ -496,7 +496,9 @@ def create_app(
                     request, cfg.max_payload_bytes, _reject_request
                 )
             )
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            # json.loads(bytes) raises UnicodeDecodeError on invalid
+            # UTF-8 — same 400 class as malformed JSON, never a 500
             raise _reject_request(400, f"invalid JSON: {exc}") from exc
         if not isinstance(body, dict):
             raise _reject_request(422, "body must be a JSON object")

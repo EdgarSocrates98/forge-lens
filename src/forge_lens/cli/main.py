@@ -129,7 +129,9 @@ def serve(
         )
         raise typer.Exit(2) from None
     host = host or ep.hostname or "127.0.0.1"
-    port = port or ep_port or 7777
+    # `or` would eat an explicit --port 0 (ephemeral bind) — None-checks
+    # keep 0 meaningful at both levels
+    port = port if port is not None else (ep_port if ep_port is not None else 7777)
     application = create_app(config=cfg)
     _warn_if_exposed(host, cfg)
     typer.echo(f"Forge Lens v{__version__} listening on http://{host}:{port}")
