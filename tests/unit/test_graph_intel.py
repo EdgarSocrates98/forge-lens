@@ -837,7 +837,7 @@ def test_children_order_by_instant_not_offset_string() -> None:
         duration_ms=10.0,
     )
     g = ExecutionGraph(
-        graph_id="g", subject_id=TRACE_ID, project_id="p1",
+        subject_id=TRACE_ID, project_id="p1",
         nodes=[parent, later_z, early_instant],
         edges=[
             GraphEdge(source="pp", target="zz", kind=EdgeKind.PARENT),
@@ -847,3 +847,31 @@ def test_children_order_by_instant_not_offset_string() -> None:
     # instant order: 'nz' (00:00Z) before 'zz' (01:00Z) — lexical str
     # ordering would put "01:00:00+00:00" first
     assert _children(g)["pp"] == ["nz", "zz"]
+
+
+def test_critical_path_survives_dangling_parent_target() -> None:
+    """Hand-built graphs may carry a PARENT edge to a non-node —
+    the child is skipped (no node, no descendants, contributes 0),
+    never KeyErrors."""
+    from forge_lens.graph.algorithms import _children
+    from forge_lens.graph.models import (
+        EdgeKind,
+        ExecutionGraph,
+        GraphEdge,
+        GraphNode,
+    )
+
+    parent = GraphNode(
+        id="pp", name="pp", kind="span",
+        start_time=datetime(2025, 12, 31, 23, 0, 0, tzinfo=UTC),
+        duration_ms=10.0,
+    )
+    g = ExecutionGraph(
+        subject_id=TRACE_ID, project_id="p1",
+        nodes=[parent],
+        edges=[GraphEdge(source="pp", target="ghost", kind=EdgeKind.PARENT)],
+    )
+    assert "ghost" in _children(g)["pp"]  # edge kept as evidence
+    cp = critical_path(g)
+    assert cp["path"] == ["pp"]
+    assert cp["total_ms"] == 10.0

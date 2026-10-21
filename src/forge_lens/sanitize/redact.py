@@ -78,6 +78,13 @@ SENSITIVE_KEY_RE = re.compile(
     r"(^|[-_.])(access|refresh|id|session|auth|api|bearer|csrf|jwt|oauth|"
     r"client|master|signing|ssh|hmac|encryption|private|secret)"
     r"[-_.]?tokens$)"
+    # residual best-effort gaps (documented, accepted): keys whose
+    # credential prefix has no separator-adjacent boundary stay clear —
+    # e.g. `authentication_tokens`, `fooOtp`, `my_tokens`,
+    # `giftcard_number`. Widening those requires unanchored matching,
+    # which is exactly what the metric-counter false positives proved
+    # we can't afford. VALUE_PATTERNS below still catches known token
+    # shapes in the *values* under such keys.
 )
 
 VALUE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (

@@ -134,7 +134,8 @@ def serve(
     port = port if port is not None else (ep_port if ep_port is not None else 7777)
     application = create_app(config=cfg)
     _warn_if_exposed(host, cfg)
-    typer.echo(f"Forge Lens v{__version__} listening on http://{host}:{port}")
+    shown = port if port != 0 else "ephemeral"  # uvicorn logs the real bound port
+    typer.echo(f"Forge Lens v{__version__} listening on http://{host}:{shown}")
     typer.echo("  OTLP endpoint:   POST /v1/otlp/traces")
     typer.echo("  Native endpoint: POST /v1/traces")
     typer.echo(f"  DB: {cfg.resolved_db_path}")

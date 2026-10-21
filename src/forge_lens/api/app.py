@@ -496,12 +496,13 @@ def create_app(
                     request, cfg.max_payload_bytes, _reject_request
                 )
             )
-        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
-            # json.loads(bytes): UnicodeDecodeError on invalid UTF-8,
-            # RecursionError on deeply-nested valid JSON — same 400
-            # class as malformed JSON, never a 500. NOT `except
-            # Exception`: _read_capped_body's 413 HTTPException lives
-            # inside this try and must propagate untouched.
+        except (ValueError, RecursionError) as exc:
+            # json.loads(bytes) failure classes: JSONDecodeError and
+            # UnicodeDecodeError are ValueError subclasses; a plain
+            # ValueError fires on ints over set_int_max_str_digits;
+            # RecursionError on deeply-nested JSON — all 400, never 500.
+            # NOT `except Exception`: _read_capped_body's 413
+            # HTTPException lives inside this try and must propagate.
             raise _reject_request(400, f"invalid JSON: {exc}") from exc
         if not isinstance(body, dict):
             raise _reject_request(422, "body must be a JSON object")
@@ -539,7 +540,10 @@ def create_app(
             if not isinstance(side, dict):
                 raise _reject_request(422, f"{key}: object required")
             side_ids = dict(side)
-            side_ids.setdefault("project_id", _eval_project_id(body))
+            if "project_id" not in side_ids:
+                # lazy fill — an invalid top-level project_id must not
+                # 422 when the side overrides it (setdefault is eager)
+                side_ids["project_id"] = _eval_project_id(body)
             return (
                 _eval_trace_ids(side_ids, f"{key}.trace_ids"),
                 _eval_project_id(side_ids, f"{key}.project_id"),

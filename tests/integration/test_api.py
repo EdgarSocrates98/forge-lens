@@ -864,3 +864,18 @@ def test_eval_run_validates_dataset_before_trace_lookup(
     )
     assert r.status_code == 422
     assert "b.dataset" in r.json()["detail"]
+
+
+def test_eval_boundary_oversized_int_is_400_not_500(client: TestClient) -> None:
+    """json.loads raises a plain ValueError on int literals over
+    set_int_max_str_digits — same 400 class as every other parse
+    failure, never a 500."""
+    import sys
+
+    body = b'{"n": ' + b"9" * (sys.get_int_max_str_digits() + 100) + b"}"
+    for url in ("/v1/eval/run", "/v1/eval/compare"):
+        r = client.post(
+            url, content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert r.status_code == 400, (url, r.status_code, r.text)

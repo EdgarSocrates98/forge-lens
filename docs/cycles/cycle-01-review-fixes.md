@@ -1010,3 +1010,36 @@ NaN/Infinity/"garbage" → throw e coerção `"5"`/`1.9`.
 - **`_children`**: `ensure_aware` removido — `to_unix_nano` já coage
   naive-as-UTC.
 - **nit round-22**: "4 payloads" → 2 payloads × 2 endpoints.
+
+## Round 25 — `ValueError` at the eval boundary; dangling graph targets
+
+- **`except (ValueError, RecursionError)`** replaces the explicit
+  `(JSONDecodeError, UnicodeDecodeError, RecursionError)` tuple in
+  `_eval_body`: `json.loads` raises a plain `ValueError` on int literals
+  exceeding `sys.set_int_max_str_digits` (both eval routes → 500;
+  verified live). `JSONDecodeError`/`UnicodeDecodeError` are
+  `ValueError` subclasses — the wider class closes the whole family
+  while the 413 `HTTPException` from `_read_capped_body` still
+  propagates untouched. Pinned with `== 400` on a >4300-digit body.
+- **`critical_path` dangling target**: `color[child]` raised `KeyError`
+  on a hand-built graph with a PARENT edge to a non-node. Such children
+  are now skipped (no node, no descendants, contributes 0, cannot
+  cycle) — consistent with `_children` already tolerating them and the
+  model's `dangling=True` support. The resolve loop was already safe
+  via `memo.get`.
+- **`_side_params` lazy fill**: `setdefault("project_id", _eval_project_id(body))`
+  evaluated eagerly — an invalid top-level `project_id` 422'd even when
+  the side overrode it. Now guarded by `if "project_id" not in side_ids`.
+- **`serve --port 0` echo** says `ephemeral` instead of `0` (uvicorn
+  logs the real bound port).
+- **Test hygiene**: removed a phantom `graph_id=` field that
+  `extra="allow"` silently absorbed — a pattern that could mask typos.
+- **Denylist residual gaps documented in the regex itself**:
+  `authentication_tokens`, `fooOtp`, `my_tokens`, `giftcard_number`
+  stay clear by design — closing them requires unanchored matching,
+  which the metric-counter false positives proved unaffordable;
+  `VALUE_PATTERNS` still catches known token shapes in values.
+
+## Round 24 — denylist symmetry completion; total ORDER BY
+
+(prior section)

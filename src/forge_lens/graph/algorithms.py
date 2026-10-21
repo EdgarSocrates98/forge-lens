@@ -68,6 +68,11 @@ def critical_path(graph: ExecutionGraph) -> dict[str, object]:
                 color[node] = GRAY
                 stack.append((node, True))
                 for child in sorted(kids.get(node, []), reverse=True):
+                    if child not in color:
+                        # dangling parent target (hand-built graphs allow
+                        # it — the builder never emits one): no node, no
+                        # descendants, contributes 0 — never pushed
+                        continue
                     if color[child] == GRAY:
                         # edge closes a cycle — cut it for path purposes,
                         # keep it as evidence in `cycles`
