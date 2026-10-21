@@ -3,6 +3,15 @@
 Status: IMPLEMENTED (this delivery). Reports for cycles 00–05 live in
 `cycle-0X-*.md`. Honest residuals are listed at the end.
 
+> **Note (post-review wave):** the mandated per-cycle reports now exist
+> as individual files — `cycle-07-final-report.md`,
+> `cycle-08-final-report.md`, `cycle-09-final-report.md`,
+> `cycle-10-final-report.md`, `cycle-11-final-report.md` and
+> `cycle-12-final-report.md` — expanded from this consolidated summary
+> with per-cycle scope, residuals and verification evidence. This file
+> remains as the consolidated index/timeline. All deferrals listed in
+> "Residuals" below are now formally descoped in `docs/roadmap.md`.
+
 ## 06 — versioned eval & datasets
 - `contracts/v1/dataset.py` + `datasets`/`dataset_versions`/`dataset_cases`
   tables; CRUD under `/v1/datasets*` with project isolation.

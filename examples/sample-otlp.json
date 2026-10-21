@@ -1,0 +1,95 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": { "stringValue": "sample-research-agent" }
+          },
+          {
+            "key": "telemetry.sdk.language",
+            "value": { "stringValue": "python" }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "forge-lens-example",
+            "version": "0.1.0"
+          },
+          "spans": [
+            {
+              "traceId": "aaaabbbbccccddddeeeeffff00001111",
+              "spanId": "1111222233334444",
+              "name": "agent-run",
+              "kind": 1,
+              "startTimeUnixNano": "1767264000000000000",
+              "endTimeUnixNano": "1767264000900000000",
+              "attributes": [
+                {
+                  "key": "openinference.span.kind",
+                  "value": { "stringValue": "AGENT" }
+                },
+                {
+                  "key": "session.id",
+                  "value": { "stringValue": "sample-session-001" }
+                }
+              ],
+              "status": { "code": 1 }
+            },
+            {
+              "traceId": "aaaabbbbccccddddeeeeffff00001111",
+              "spanId": "5555666677778888",
+              "parentSpanId": "1111222233334444",
+              "name": "search-tool",
+              "kind": 1,
+              "startTimeUnixNano": "1767264000010000000",
+              "endTimeUnixNano": "1767264000300000000",
+              "attributes": [
+                {
+                  "key": "openinference.span.kind",
+                  "value": { "stringValue": "TOOL" }
+                },
+                {
+                  "key": "tool.name",
+                  "value": { "stringValue": "web_search" }
+                }
+              ],
+              "status": { "code": 1 }
+            },
+            {
+              "traceId": "aaaabbbbccccddddeeeeffff00001111",
+              "spanId": "9999aaaabbbbcccc",
+              "parentSpanId": "1111222233334444",
+              "name": "llm-synthesize",
+              "kind": 1,
+              "startTimeUnixNano": "1767264000300000000",
+              "endTimeUnixNano": "1767264000850000000",
+              "attributes": [
+                {
+                  "key": "openinference.span.kind",
+                  "value": { "stringValue": "LLM" }
+                },
+                {
+                  "key": "llm.model_name",
+                  "value": { "stringValue": "claude-sample" }
+                },
+                {
+                  "key": "llm.token_count.prompt",
+                  "value": { "intValue": "420" }
+                },
+                {
+                  "key": "llm.token_count.completion",
+                  "value": { "intValue": "128" }
+                }
+              ],
+              "status": { "code": 1 }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
