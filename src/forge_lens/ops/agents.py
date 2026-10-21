@@ -84,7 +84,19 @@ def _registry() -> dict[str, ToolFn]:
                 "input_token_growth": growth}
 
     def _failure_investigator(trace: Trace, ctx: dict[str, Any]) -> dict[str, Any]:
-        return classify_failure(trace).model_dump(mode="json")
+        from forge_lens.investigate import build_hypotheses, suggest_evaluators
+
+        report = classify_failure(trace)
+        cap = max(0, int(ctx.get("max_hypotheses", 5)))
+        hyps = build_hypotheses(trace, report=report)
+        out = report.model_dump(mode="json")
+        out["hypotheses"] = [
+            h.model_dump(mode="json") for h in hyps[:cap]
+        ]
+        out["hypothesis_count"] = len(hyps)
+        out["hypotheses_truncated"] = len(hyps) > cap
+        out["eval_suggestions"] = suggest_evaluators([report])["suggestions"]
+        return out
 
     def _graph_analyst(trace: Trace, ctx: dict[str, Any]) -> dict[str, Any]:
         return critical_path(build_trace_graph(trace))

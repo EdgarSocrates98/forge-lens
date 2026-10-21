@@ -9,7 +9,7 @@ hipotético multi-hipótese e a UI de investigação dependem de Cycles 02/07.
 
 | Componente | Arquivos | Estado |
 |---|---|---|
-| `classify_failure` — 7 categorias ordenadas por especificidade, com evidência | `src/forge_lens/investigate/classify.py` | VERIFIED |
+| `classify_failure` — taxonomia §05.3 completa (15 categorias) ordenadas por especificidade, com evidência | `src/forge_lens/investigate/classify.py` | VERIFIED |
 | `replay_timeline` — timeline único intercalando span_start/event/span_end | `src/forge_lens/investigate/replay.py` | VERIFIED |
 | `incident_bundle` — composição failure+graph+cost+waste+replay | `src/forge_lens/investigate/bundle.py` | VERIFIED |
 | Endpoints `/failure`, `/replay`, `/incident` | `src/forge_lens/api/app.py` | VERIFIED |
@@ -19,22 +19,39 @@ hipotético multi-hipótese e a UI de investigação dependem de Cycles 02/07.
 ## 2. Regras determinísticas (classificação)
 
 Ordem de especificidade — a primeira regra que casa vence, e toda
-classificação nomeia spans/atributos em `evidence`:
+classificação nomeia spans/atributos/sinais em `evidence`. Taxonomia
+completa §05.3 (wave pós-review — ver
+`docs/guides/failure-investigation.md` para a tabela de sinais):
 
 1. `cycle` — qualquer membro de um ciclo real de parentesco na
    topologia armazenada (self-loop ou multi-nó; mesmo walk O(n) do
    graph builder). `failed=true` — a topologia declarada é impossível.
-2. `rate_limit` — `http.status_code=429` ou "rate limit" em mensagem
-   **de um span que errou** (429 recuperado não é causa).
-3. `timeout` — regex `timeout|timed out|deadline` (sem "exceeded" nu:
+2. `budget_exceeded` — flags `*.budget.exceeded` ou termos quota/budget
+   (429 nomeando quota ganha de `rate_limit`).
+3. `auth_error` — 401 / `*Auth*`/`Unauthorized` exception types /
+   credencial inválida ou expirada.
+4. `missing_permissions` — 403 / `PermissionError` / forbidden /
+   permission denied.
+5. `schema_mismatch` — schema/structured-output/parse evidence (mais
+   específico que um 400 nu).
+6. `invalid_arguments` — 400/422 / `ValidationError` family /
+   invalid-missing-argument text.
+7. `retry_exhaustion` — counters `retry.*`/`attempt*` ≥ max registrado
+   ou ≥3, flags, ≥3 `retry` events, `RetryError`.
+8. `rate_limit` — `http.status_code=429` puro ou "rate limit" em
+   mensagem **de um span que errou** (429 recuperado não é causa).
+9. `timeout` — regex `timeout|timed out|deadline` (sem "exceeded" nu:
    "context length exceeded" não é timeout) em
    status.message/`error.message`/`exception.message`/`exception.type`/
-   `http.status_text`.
-4. `guardrail` → `tool_error` → `llm_error` — erro em span do kind.
-5. `incomplete` — spans com `missing_end` e nenhum span de erro
-   (`confidence: inferred` — host provavelmente morreu no meio do run).
-6. `unknown` — resposta válida e honesta; `failed=false` em traces
-   saudáveis.
+   `http.status_text` e agora também em exception events.
+10. `agent_cancelled` — `CancelledError`/flags `cancelled` (forte, em
+    qualquer span) ou status-message cancel (fraco, só em erro);
+    cancelamento marca `failed=true`.
+11. `guardrail` → `tool_error` → `llm_error` — erro em span do kind.
+12. `incomplete` — spans com `missing_end` e nenhum span de erro
+    (`confidence: inferred` — host provavelmente morreu no meio do run).
+13. `unknown` — resposta válida e honesta; `failed=false` em traces
+    saudáveis.
 
 `confidence: observed` quando há evidência direta de span;
 `inferred` quando a categoria é uma hipótese estrutural.
@@ -56,10 +73,14 @@ iterativo, top-5 self-time) + `cost` (provenance derived) + `waste` +
 `replay`. Projetado para handoff/export — um `curl` produz o pacote
 completo do incidente.
 
-## 5. O que NÃO está neste ciclo (honesto)
+## 5. O que NÃO estava neste ciclo (honesto — status atualizado)
 
-- **Root-cause multi-hipótese ranqueada** — hoje uma categoria por trace;
-  ranking de hipóteses concorrentes é Cycle 07 (specialist agents).
+- **Root-cause multi-hipótese ranqueada** — era uma categoria por trace;
+  o modelo de hipóteses §05.4 (`build_hypotheses` — primária +
+  concorrentes, com supporting/contradictory/missing evidence e status
+  honesto) landed na wave pós-review — ver
+  `docs/cycles/cycle-13-improvement-wave.md` e
+  `docs/guides/failure-investigation.md`.
 - **Replay comparativo** (before/after entre duas execuções) — requer
   pares de traces relacionados; previsto com experimentos (Cycle 06).
 - **Incident timeline UI** — Cycle 02.
