@@ -93,7 +93,10 @@ def uninstall(data_dir: Path, *, ts_ns: int) -> dict[str, Any]:
     removed: list[str] = []
     if r:
         base = data_dir.resolve()
-        for f in r.get("files", []):
+        files = r.get("files")
+        for f in files if isinstance(files, list) else []:
+            if not isinstance(f, str):
+                continue  # corrupt receipt entry — skip, never crash
             fp = (data_dir / f).resolve()
             # lexical containment is bypassable via '..' — compare
             # resolved paths only

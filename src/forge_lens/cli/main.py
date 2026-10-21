@@ -838,10 +838,21 @@ def import_claude(
     if trace is None:
         typer.echo("no usable events in file — nothing imported", err=True)
         raise typer.Exit(1)
+    from forge_lens.core.errors import ValidationError
+    from forge_lens.ingest.pipeline import IngestPipeline
+
     cfg = _config(db)
     store = _store(cfg)
     try:
-        store.upsert_trace(trace)
+        # go through the pipeline, not a bare upsert — _ensure_storable
+        # validates encodability/ranges so a hostile JSONL can't reach a
+        # SQLite bind (same guarantee ingest has)
+        result = IngestPipeline(store, cfg).ingest([trace])
+        for w in result.warnings:
+            typer.echo(f"warning: {w}", err=True)
+    except ValidationError as exc:
+        typer.echo(f"import failed: {exc}", err=True)
+        raise typer.Exit(2) from None
     finally:
         store.close()
     typer.echo(f"imported {len(trace.spans)} span(s) → {trace.trace_id}")

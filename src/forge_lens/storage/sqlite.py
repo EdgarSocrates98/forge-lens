@@ -296,9 +296,12 @@ class SQLiteTraceStore:
         if readonly:
             # probe mode (e.g. doctor): never create dirs, never run
             # init_schema or PRAGMA journal_mode — a health check must
-            # not mutate the database it inspects
+            # not mutate the database it inspects. as_uri() percent-
+            # encodes: a literal '?' or '%' in the path would be parsed
+            # as the URI query and silently open a different file.
+            uri = self.path.absolute().as_uri() + "?mode=ro"
             self._conn = sqlite3.connect(
-                f"file:{self.path}?mode=ro", uri=True, check_same_thread=False
+                uri, uri=True, check_same_thread=False
             )
         else:
             self.path.parent.mkdir(parents=True, exist_ok=True)

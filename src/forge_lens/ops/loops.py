@@ -17,9 +17,14 @@ from forge_lens.contracts.v1.trace import Span, SpanKind, Trace
 def _signature(span_name: str, attrs: dict[str, Any]) -> str:
     """Stable signature of a tool call — name + args, content-hashed."""
     args = attrs.get("tool.args") or attrs.get("gen_ai.tool.call.arguments") or {}
-    digest = hashlib.sha256(
-        json.dumps(args, sort_keys=True, default=str).encode()
-    ).hexdigest()[:12]
+    try:
+        dumped = json.dumps(args, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        # mixed-type keys can't sort (unreachable via ingest — sanitize
+        # normalizes them — but a programmatically-built Trace can carry
+        # any dict); unsorted dump is still a stable per-object hash
+        dumped = json.dumps(args, default=str)
+    digest = hashlib.sha256(dumped.encode()).hexdigest()[:12]
     return f"{span_name}:{digest}"
 
 

@@ -57,3 +57,17 @@ Angular CLI does not come with an end-to-end testing framework by default. You c
 ## Additional Resources
 
 For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+
+## API connection
+
+The Studio talks to `forge-lens serve` (default `http://localhost:7777`).
+Use the ⚙ settings control in the header (or `localStorage` keys
+`lens-api-base` / `lens-api-key`) to point at a different base URL or to
+set the `X-Forge-Lens-Key` header when the server runs `auth_mode` of
+`key`/`keys`. During development, `ng serve --proxy-config proxy.conf.json`
+forwards `/v1` to `:7777` so no CORS setup is needed.
+
+Note: the API key is stored in `localStorage`, which is readable by any
+script running in the page — acceptable for a local-first tool bound to
+loopback, but do not reuse a high-value key here if Studio is ever
+served from a shared origin.

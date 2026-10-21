@@ -133,6 +133,8 @@ def run_specialist(
     *,
     budget: AgentBudget | None = None,
     context: dict[str, Any] | None = None,
+    # injectable monotonic clock — the sanctioned seam for cooperative
+    # deadlines (same pattern as RateLimiter); tests may substitute
     clock: Callable[[], float] = time.monotonic,
     run_id: str = "run",
 ) -> AgentRun:

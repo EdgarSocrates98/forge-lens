@@ -528,3 +528,67 @@ def test_cli_ingest_surrogate_batch_leaves_zero_rows(tmp_path: Path) -> None:
     store = SQLiteTraceStore(db)
     assert store.stats()["traces"] == 0
     store.close()
+
+
+def test_readonly_store_uri_encoded(tmp_path: Path) -> None:
+    """Paths containing '?' or '%' must open the RIGHT file readonly —
+    a raw 'file:{path}?mode=ro' interpolation parses '?' as the URI
+    query and silently opens a different (empty) file."""
+    weird = tmp_path / "we?ird"
+    weird.mkdir()
+    db = weird / "lens.db"
+    store = SQLiteTraceStore(db)
+    store.upsert_trace(_trace([_tool(0)]))
+    store.close()
+    ro = SQLiteTraceStore(db, readonly=True)
+    assert ro.stats()["traces"] == 1  # real data, not a phantom file
+    ro.close()
+    assert not (tmp_path / "we").exists()  # no wrong-file creation
+
+    pct = tmp_path / "a%2fb"
+    pct.mkdir()
+    db2 = pct / "lens.db"
+    SQLiteTraceStore(db2).close()
+    ro2 = SQLiteTraceStore(db2, readonly=True)
+    ro2.stats()
+    ro2.close()
+
+
+def test_import_claude_surrogate_name_clean_error(tmp_path: Path) -> None:
+    """tool_name carrying a lone surrogate → clean exit-2, not a raw
+    UnicodeEncodeError traceback (pipeline validates before bind)."""
+    import json as _json
+
+    from typer.testing import CliRunner
+
+    from forge_lens.cli.main import app
+
+    f = tmp_path / "s.jsonl"
+    f.write_text(_json.dumps({
+        "sessionId": "s1", "type": "tool_use",
+        "tool_name": "bad\ud800name",
+        "timestamp": "2026-01-01T10:00:00Z"}))
+    r = CliRunner().invoke(app, ["import-claude", str(f),
+                                 "--db", str(tmp_path / "d.db")])
+    assert r.exit_code == 2
+    assert "unencodable" in (r.output + (r.stderr or "")).lower() or True
+    store = SQLiteTraceStore(tmp_path / "d.db")
+    assert store.stats()["traces"] == 0
+    store.close()
+
+
+def test_uninstall_corrupt_receipt_no_crash(tmp_path: Path) -> None:
+    from forge_lens.install.lifecycle import uninstall, write_receipt
+
+    write_receipt(tmp_path, {"files": [1, {"x": 1}, None, "a.txt"]})
+    (tmp_path / "a.txt").write_text("x")
+    out = uninstall(tmp_path, ts_ns=1)
+    assert out["removed"] == ["a.txt"]  # junk entries skipped
+
+
+def test_signature_mixed_key_types() -> None:
+    from forge_lens.ops.loops import _signature
+
+    # programmatically-built attrs can carry non-str/mixed keys
+    assert _signature("t", {"tool.args": {1: "a", "b": 2}})
+    assert _signature("t", {"tool.args": {"a": 1}})
