@@ -879,3 +879,90 @@ def test_eval_boundary_oversized_int_is_400_not_500(client: TestClient) -> None:
             headers={"Content-Type": "application/json"},
         )
         assert r.status_code == 400, (url, r.status_code, r.text)
+
+
+def test_datasets_api(client: TestClient) -> None:
+    r = client.put("/v1/datasets/qa", json={"name": "QA set", "task": "qa"})
+    assert r.status_code == 200, r.text
+    r = client.get("/v1/datasets/qa")
+    assert r.status_code == 200 and r.json()["name"] == "QA set"
+
+    r = client.put("/v1/datasets/qa/versions/v1", json={
+        "description": "first",
+        "cases": [
+            {"case_id": "c1", "expected": {"answer": "42"},
+             "allowed_tools": ["web_search"]},
+        ],
+    })
+    assert r.status_code == 200 and r.json()["cases"] == 1
+
+    r = client.get("/v1/datasets/qa/versions")
+    assert r.status_code == 200
+    assert r.json()[0]["version"] == "v1" and r.json()[0]["case_count"] == 1
+
+    r = client.get("/v1/datasets/qa/versions/v1")
+    assert r.status_code == 200
+    assert r.json()["cases"][0]["case_id"] == "c1"
+
+    # boundary shapes
+    assert client.put("/v1/datasets/bad", json={}).status_code == 422
+    assert client.put(
+        "/v1/datasets/missing/versions/v1", json={"cases": []}
+    ).status_code == 404
+    assert client.get("/v1/datasets/qa/versions/v9").status_code == 404
+    assert client.get("/v1/datasets/nope").status_code == 404
+    r = client.get("/v1/datasets")
+    assert r.status_code == 200 and any(d["dataset_id"] == "qa" for d in r.json())
+
+
+def test_eval_new_evaluators_and_gate(client: TestClient, synthetic_trace: Trace) -> None:
+    envelope = TraceIngest(traces=[synthetic_trace]).model_dump(mode="json")
+    assert client.post("/v1/traces", json=envelope).status_code == 200
+
+    r = client.post("/v1/eval/run", json={
+        "trace_ids": [synthetic_trace.trace_id],
+        "evaluators": [
+            {"name": "exact_match",
+             "params": {"field": "llm.model_name", "expected": "gpt-test"}},
+            {"name": "token_f1",
+             "params": {"field": "tool.name", "expected": "web search"}},
+            {"name": "allowed_tools", "params": {"allowed": ["web_search"]}},
+            {"name": "allowed_tools", "params": {"allowed": ["other"]}},
+            {"name": "task_completion", "params": {"require_no_error": True}},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    results = r.json()["results"][synthetic_trace.trace_id]
+    scores = [res["score"] for res in results]
+    assert scores[0] == 1.0                      # exact_match
+    assert scores[1] == 1.0                      # token_f1 (bag-of-tokens)
+    assert scores[2] == 1.0                      # allowed_tools pass
+    assert scores[3] == 0.0                      # allowed_tools violation
+    assert "web_search" in results[3]["details"]["violations"]
+    assert scores[4] == 0.0                      # task_completion: error span
+
+    # gate: pass when floor is met, fail when it isn't — always with evidence
+    body = {
+        "a": {"trace_ids": [synthetic_trace.trace_id]},
+        "b": {"trace_ids": [synthetic_trace.trace_id]},
+        "evaluators": [{"name": "error_free"}],
+    }
+    r = client.post("/v1/eval/compare", json={
+        **body, "gate": {"metrics": {
+            "error_free/no_error_spans": {"min_pass_rate_b": 0.0}}}}
+    )
+    assert r.status_code == 200 and r.json()["gate"]["gate_passed"] is True
+    r = client.post("/v1/eval/compare", json={
+        **body, "gate": {"metrics": {
+            "error_free/no_error_spans": {"min_pass_rate_b": 1.0}}}}
+    )
+    gate = r.json()["gate"]
+    assert gate["gate_passed"] is False
+    assert gate["failures"][0]["observed"] == 0.0
+    # gating on an unevaluated metric is itself a failure
+    r = client.post("/v1/eval/compare", json={
+        **body, "gate": {"metrics": {"nope/metric": {}}}}
+    )
+    assert r.json()["gate"]["gate_passed"] is False
+    assert client.post("/v1/eval/compare", json={
+        **body, "gate": "x"}).status_code == 422

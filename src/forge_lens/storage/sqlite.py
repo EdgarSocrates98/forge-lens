@@ -93,6 +93,39 @@ CREATE TABLE IF NOT EXISTS spans (
 CREATE INDEX IF NOT EXISTS idx_spans_name ON spans(project_id, name);
 CREATE INDEX IF NOT EXISTS idx_spans_kind ON spans(project_id, kind);
 CREATE INDEX IF NOT EXISTS idx_spans_status ON spans(project_id, status_code);
+
+CREATE TABLE IF NOT EXISTS datasets (
+    dataset_id TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT 'default',
+    name TEXT NOT NULL,
+    task TEXT,
+    created_ns INTEGER,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (project_id, dataset_id)
+);
+
+CREATE TABLE IF NOT EXISTS dataset_versions (
+    dataset_id TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT 'default',
+    version TEXT NOT NULL,
+    description TEXT,
+    created_ns INTEGER,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (project_id, dataset_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS dataset_cases (
+    dataset_id TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT 'default',
+    version TEXT NOT NULL,
+    case_id TEXT NOT NULL,
+    input_json TEXT NOT NULL DEFAULT '{}',
+    expected_json TEXT NOT NULL DEFAULT '{}',
+    allowed_tools_json TEXT NOT NULL DEFAULT '[]',
+    constraints_json TEXT NOT NULL DEFAULT '{}',
+    rubric_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (project_id, dataset_id, version, case_id)
+);
 """
 
 
@@ -796,6 +829,210 @@ class SQLiteTraceStore:
             "db_size_bytes": db_size,
             "schema_version": schema["value"] if schema else None,
         }
+
+    # -- datasets (Cycle 06) --------------------------------------------
+
+    def upsert_dataset(
+        self,
+        dataset_id: str,
+        *,
+        project_id: str = "default",
+        name: str,
+        task: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        now_ns: int | None = None,
+    ) -> None:
+        """Insert or update dataset metadata (name/task/metadata).
+
+        Datasets themselves are mutable metadata; their *versions* are
+        append-only (see ``upsert_dataset_version``)."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                """INSERT INTO datasets(dataset_id, project_id, name, task,
+                                        created_ns, metadata_json)
+                   VALUES (?,?,?,?,?,?)
+                   ON CONFLICT(project_id, dataset_id) DO UPDATE SET
+                       name=excluded.name, task=excluded.task,
+                       metadata_json=excluded.metadata_json""",
+                (
+                    dataset_id,
+                    project_id,
+                    name,
+                    task,
+                    now_ns,
+                    json.dumps(metadata or {}, sort_keys=True, default=str),
+                ),
+            )
+
+    def get_dataset(
+        self, dataset_id: str, project_id: str = "default"
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM datasets WHERE project_id=? AND dataset_id=?",
+                (project_id, dataset_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "dataset_id": row["dataset_id"],
+            "project_id": row["project_id"],
+            "name": row["name"],
+            "task": row["task"],
+            "created_at": (d.isoformat() if (d := _dt(row["created_ns"])) else None),
+            "metadata": json.loads(row["metadata_json"] or "{}"),
+        }
+
+    def list_datasets(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        with self._lock:
+            if project_id:
+                rows = self._conn.execute(
+                    "SELECT * FROM datasets WHERE project_id=? "
+                    "ORDER BY dataset_id",
+                    (project_id,),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM datasets ORDER BY project_id, dataset_id"
+                ).fetchall()
+        return [
+            {
+                "dataset_id": r["dataset_id"],
+                "project_id": r["project_id"],
+                "name": r["name"],
+                "task": r["task"],
+                "created_at": (
+                    d.isoformat() if (d := _dt(r["created_ns"])) else None
+                ),
+            }
+            for r in rows
+        ]
+
+    def upsert_dataset_version(
+        self,
+        dataset_id: str,
+        version: str,
+        *,
+        project_id: str = "default",
+        description: str | None = None,
+        cases: list[dict[str, Any]],
+        metadata: dict[str, Any] | None = None,
+        now_ns: int | None = None,
+    ) -> int:
+        """Store a dataset version and its cases atomically.
+
+        Re-writing the same ``(dataset_id, version)`` replaces its case
+        set wholesale — versions are immutable once referenced by eval
+        runs, so the API only calls this on create."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                """INSERT INTO dataset_versions(dataset_id, project_id, version,
+                                                description, created_ns, metadata_json)
+                   VALUES (?,?,?,?,?,?)
+                   ON CONFLICT(project_id, dataset_id, version) DO UPDATE SET
+                       description=excluded.description,
+                       metadata_json=excluded.metadata_json""",
+                (
+                    dataset_id,
+                    project_id,
+                    version,
+                    description,
+                    now_ns,
+                    json.dumps(metadata or {}, sort_keys=True, default=str),
+                ),
+            )
+            self._conn.execute(
+                "DELETE FROM dataset_cases WHERE project_id=? AND dataset_id=? AND version=?",
+                (project_id, dataset_id, version),
+            )
+            for c in cases:
+                self._conn.execute(
+                    """INSERT INTO dataset_cases(dataset_id, project_id, version,
+                       case_id, input_json, expected_json, allowed_tools_json,
+                       constraints_json, rubric_json)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (
+                        dataset_id,
+                        project_id,
+                        version,
+                        str(c.get("case_id", "")),
+                        json.dumps(c.get("input") or {}, sort_keys=True, default=str),
+                        json.dumps(c.get("expected") or {}, sort_keys=True, default=str),
+                        json.dumps(c.get("allowed_tools") or [], default=str),
+                        json.dumps(c.get("constraints") or {}, sort_keys=True, default=str),
+                        json.dumps(c.get("rubric") or {}, sort_keys=True, default=str),
+                    ),
+                )
+        return len(cases)
+
+    def get_dataset_version(
+        self,
+        dataset_id: str,
+        version: str,
+        project_id: str = "default",
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            vrow = self._conn.execute(
+                "SELECT * FROM dataset_versions WHERE project_id=? "
+                "AND dataset_id=? AND version=?",
+                (project_id, dataset_id, version),
+            ).fetchone()
+            if vrow is None:
+                return None
+            crows = self._conn.execute(
+                "SELECT * FROM dataset_cases WHERE project_id=? AND dataset_id=? "
+                "AND version=? ORDER BY case_id",
+                (project_id, dataset_id, version),
+            ).fetchall()
+        return {
+            "dataset_id": vrow["dataset_id"],
+            "project_id": vrow["project_id"],
+            "version": vrow["version"],
+            "description": vrow["description"],
+            "created_at": (
+                d.isoformat() if (d := _dt(vrow["created_ns"])) else None
+            ),
+            "metadata": json.loads(vrow["metadata_json"] or "{}"),
+            "cases": [
+                {
+                    "case_id": c["case_id"],
+                    "input": json.loads(c["input_json"] or "{}"),
+                    "expected": json.loads(c["expected_json"] or "{}"),
+                    "allowed_tools": json.loads(c["allowed_tools_json"] or "[]"),
+                    "constraints": json.loads(c["constraints_json"] or "{}"),
+                    "rubric": json.loads(c["rubric_json"] or "{}"),
+                }
+                for c in crows
+            ],
+        }
+
+    def list_dataset_versions(
+        self, dataset_id: str, project_id: str = "default"
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT v.*, COUNT(c.case_id) AS case_count
+                   FROM dataset_versions v
+                   LEFT JOIN dataset_cases c
+                     ON c.project_id=v.project_id AND c.dataset_id=v.dataset_id
+                    AND c.version=v.version
+                   WHERE v.project_id=? AND v.dataset_id=?
+                   GROUP BY v.version ORDER BY v.version""",
+                (project_id, dataset_id),
+            ).fetchall()
+        return [
+            {
+                "dataset_id": r["dataset_id"],
+                "project_id": r["project_id"],
+                "version": r["version"],
+                "description": r["description"],
+                "case_count": r["case_count"],
+                "created_at": (
+                    d.isoformat() if (d := _dt(r["created_ns"])) else None
+                ),
+            }
+            for r in rows
+        ]
 
     def close(self) -> None:
         with self._lock:

@@ -51,4 +51,43 @@ class TraceStore(Protocol):
         result is deterministic regardless."""
         ...
 
+    # -- datasets (Cycle 06) --------------------------------------------
+
+    def upsert_dataset(
+        self,
+        dataset_id: str,
+        *,
+        project_id: str = "default",
+        name: str,
+        task: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        now_ns: int | None = None,
+    ) -> None: ...
+
+    def get_dataset(
+        self, dataset_id: str, project_id: str = "default"
+    ) -> dict[str, Any] | None: ...
+
+    def list_datasets(self, project_id: str | None = None) -> list[dict[str, Any]]: ...
+
+    def upsert_dataset_version(
+        self,
+        dataset_id: str,
+        version: str,
+        *,
+        project_id: str = "default",
+        description: str | None = None,
+        cases: list[dict[str, Any]],
+        metadata: dict[str, Any] | None = None,
+        now_ns: int | None = None,
+    ) -> int: ...
+
+    def get_dataset_version(
+        self, dataset_id: str, version: str, project_id: str = "default"
+    ) -> dict[str, Any] | None: ...
+
+    def list_dataset_versions(
+        self, dataset_id: str, project_id: str = "default"
+    ) -> list[dict[str, Any]]: ...
+
     def close(self) -> None: ...

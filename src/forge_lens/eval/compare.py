@@ -104,3 +104,83 @@ def compare_runs(a: EvalReport, b: EvalReport) -> dict[str, Any]:
         "b": {"dataset": b.dataset, "trace_ids": b.trace_ids, "n": len(b.trace_ids)},
         "deltas": [d.model_dump(mode="json") for d in deltas],
     }
+
+
+def apply_gate(result: dict[str, Any], gate: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate a regression gate over a compare result.
+
+    Gate spec::
+
+        {
+          "metrics": {
+            "error_free/no_error_spans": {
+              "min_pass_rate_b": 1.0,   # candidate must reach this
+              "max_drop": 0.05          # pass_rate_a - pass_rate_b ≤ this
+            }
+          },
+          "fail_on_significant_regression": true
+        }
+
+    Every failure is reported with its evidence — a gate never fails
+    silently. Unknown metric keys are themselves a failure (a gate on a
+    metric that wasn't evaluated is a misconfigured gate)."""
+    failures: list[dict[str, Any]] = []
+    by_key = {
+        f"{d['evaluator']}/{d['metric']}": d for d in result.get("deltas", [])
+    }
+    metrics_spec = gate.get("metrics") or {}
+    if not isinstance(metrics_spec, dict):
+        return {
+            "gate_passed": False,
+            "failures": [{"reason": "gate.metrics must be an object"}],
+        }
+    for key, spec in sorted(metrics_spec.items()):
+        if not isinstance(spec, dict):
+            failures.append({"metric": key, "reason": "metric gate spec must be an object"})
+            continue
+        d = by_key.get(key)
+        if d is None:
+            failures.append({
+                "metric": key,
+                "reason": "metric not evaluated — cannot gate on unmeasured evidence",
+            })
+            continue
+        min_b = spec.get("min_pass_rate_b")
+        if min_b is not None:
+            pr_b = d.get("pass_rate_b")
+            if pr_b is None or pr_b < float(min_b):
+                failures.append({
+                    "metric": key,
+                    "reason": "pass_rate_b below minimum",
+                    "observed": pr_b,
+                    "required": min_b,
+                })
+        max_drop = spec.get("max_drop")
+        if max_drop is not None:
+            pa, pb = d.get("pass_rate_a"), d.get("pass_rate_b")
+            if pa is not None and pb is not None and (pa - pb) > float(max_drop):
+                failures.append({
+                    "metric": key,
+                    "reason": "pass_rate dropped more than allowed",
+                    "observed_drop": round(pa - pb, 6),
+                    "max_drop": max_drop,
+                })
+    if gate.get("fail_on_significant_regression"):
+        for d in result.get("deltas", []):
+            if (
+                d.get("significance") == "significant"
+                and d.get("delta") is not None
+                and d["delta"] < 0
+            ):
+                failures.append({
+                    "metric": f"{d['evaluator']}/{d['metric']}",
+                    "reason": "statistically significant regression",
+                    "delta": d["delta"],
+                    "p_value": d.get("p_value"),
+                })
+    return {
+        "gate_passed": not failures,
+        "failures": sorted(
+            failures, key=lambda f: (str(f.get("metric", "")), str(f.get("reason", "")))
+        ),
+    }

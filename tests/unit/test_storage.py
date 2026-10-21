@@ -627,3 +627,33 @@ def test_list_traces_deterministic_tiebreak_on_same_instant(
     ids = [i["trace_id"] for i in items]
     assert ids == sorted(ids)  # trace_id ASC within equal started_ns
     assert items == tmp_store.list_traces()  # stable across calls
+
+
+def test_dataset_store(tmp_store: SQLiteTraceStore) -> None:
+    tmp_store.upsert_dataset(
+        "qa", project_id="p1", name="QA set", task="answer questions",
+        metadata={"owner": "evals"}, now_ns=1_000,
+    )
+    ds = tmp_store.get_dataset("qa", "p1")
+    assert ds is not None and ds["name"] == "QA set"
+    assert ds["metadata"]["owner"] == "evals"
+    assert tmp_store.get_dataset("qa", "other") is None
+
+    n = tmp_store.upsert_dataset_version(
+        "qa", "v1", project_id="p1", description="first",
+        cases=[
+            {"case_id": "c1", "expected": {"answer": "42"},
+             "allowed_tools": ["web_search"]},
+            {"case_id": "c2", "input": {"q": "x"}},
+        ],
+        now_ns=2_000,
+    )
+    assert n == 2
+    versions = tmp_store.list_dataset_versions("qa", "p1")
+    assert len(versions) == 1 and versions[0]["case_count"] == 2
+    v = tmp_store.get_dataset_version("qa", "v1", "p1")
+    assert v is not None
+    assert [c["case_id"] for c in v["cases"]] == ["c1", "c2"]
+    assert v["cases"][0]["allowed_tools"] == ["web_search"]
+    assert tmp_store.get_dataset_version("qa", "v9", "p1") is None
+    assert [d["dataset_id"] for d in tmp_store.list_datasets()] == ["qa"]

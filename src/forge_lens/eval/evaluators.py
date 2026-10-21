@@ -9,6 +9,8 @@ marks pass/fail metrics eligible for the proportion test in
 from __future__ import annotations
 
 import math
+import re
+from collections import Counter
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -185,6 +187,166 @@ def _has_span(
     )
 
 
+def _observed_value(trace: Trace, field: str) -> tuple[Any, str | None]:
+    """Resolve ``field`` to the first span attribute carrying it.
+
+    Returns ``(value, span_id)``; ``(None, None)`` when unobserved —
+    an absent field is evidence, never an implicit match."""
+    for s in trace.spans:
+        if field in s.attributes:
+            return s.attributes[field], s.span_id
+    if field in trace.resource_attributes:
+        return trace.resource_attributes[field], None
+    return None, None
+
+
+def _exact_match(
+    trace: Trace, params: dict[str, Any], now: datetime | None
+) -> EvaluationResult:
+    field = str(params["field"])
+    expected = params.get("expected")
+    observed, span_id = _observed_value(trace, field)
+    if span_id is None and observed is None:
+        return _result(
+            "exact_match",
+            "field_exact_match",
+            None,
+            trace,
+            now,
+            {"field": field, "reason": "field not observed in trace"},
+        )
+    matched = observed == expected
+    return _result(
+        "exact_match",
+        "field_exact_match",
+        1.0 if matched else 0.0,
+        trace,
+        now,
+        {
+            "field": field,
+            "expected": repr(expected),
+            "observed": repr(observed),
+            "observed_in": span_id or "resource_attributes",
+        },
+    )
+
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _token_f1(
+    trace: Trace, params: dict[str, Any], now: datetime | None
+) -> EvaluationResult:
+    """Bag-of-tokens F1 between an expected string and an observed field.
+
+    Continuous metric — precision/recall when the expected answer is
+    free text; never a binary verdict on approximate match."""
+    field = str(params["field"])
+    expected = params.get("expected")
+    if not isinstance(expected, str):
+        raise TypeError("token_f1 'expected' must be a string")
+    observed, span_id = _observed_value(trace, field)
+    if not isinstance(observed, str):
+        return _result(
+            "token_f1",
+            "field_token_f1",
+            None,
+            trace,
+            now,
+            {"field": field, "reason": "field not observed as string"},
+        )
+    exp = Counter(_WORD_RE.findall(expected.lower()))
+    obs = Counter(_WORD_RE.findall(observed.lower()))
+    if not exp and not obs:
+        return _result("token_f1", "field_token_f1", 1.0, trace, now,
+                       {"field": field, "reason": "both empty"})
+    common = sum((exp & obs).values())
+    precision = common / sum(obs.values()) if obs else 0.0
+    recall = common / sum(exp.values()) if exp else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if precision + recall
+        else 0.0
+    )
+    return _result(
+        "token_f1",
+        "field_token_f1",
+        round(f1, 6),
+        trace,
+        now,
+        {
+            "field": field,
+            "precision": f"{precision:.6f}",
+            "recall": f"{recall:.6f}",
+            "observed_in": span_id or "resource_attributes",
+        },
+    )
+
+
+def _allowed_tools(
+    trace: Trace, params: dict[str, Any], now: datetime | None
+) -> EvaluationResult:
+    """Tool-use validation — every TOOL span name ⊆ ``allowed``."""
+    allowed = params.get("allowed")
+    if not isinstance(allowed, list) or not all(
+        isinstance(t, str) for t in allowed
+    ):
+        raise TypeError("allowed must be a list of tool names")
+    allowed_set = set(allowed)
+    tools = [s for s in trace.spans if s.kind is SpanKind.TOOL]
+    # semantic tool name: `tool.name` attribute when observed, else the
+    # span name — both are evidence, never guessed
+    violations = sorted(
+        {
+            str(s.attributes.get("tool.name") or s.name)
+            for s in tools
+            if str(s.attributes.get("tool.name") or s.name) not in allowed_set
+        }
+    )
+    return _result(
+        "allowed_tools",
+        "tools_within_allowlist",
+        1.0 if not violations else 0.0,
+        trace,
+        now,
+        {
+            "tool_spans": str(len(tools)),
+            "allowed": ",".join(sorted(allowed_set)),
+            "violations": ",".join(violations),
+        },
+    )
+
+
+def _task_completion(
+    trace: Trace, params: dict[str, Any], now: datetime | None
+) -> EvaluationResult:
+    """Task completion — trace finished and (optionally) without error."""
+    require_no_error = params.get("require_no_error", True)
+    if trace.ended_at is None:
+        return _result(
+            "task_completion",
+            "task_completed",
+            0.0,
+            trace,
+            now,
+            {"reason": "trace has no end time — still in flight"},
+        )
+    errors = [s.span_id for s in trace.spans if s.status.code.value == "error"]
+    failed = bool(errors) and require_no_error
+    return _result(
+        "task_completion",
+        "task_completed",
+        0.0 if failed else 1.0,
+        trace,
+        now,
+        {
+            "ended": "true",
+            "error_spans": ",".join(errors),
+            "require_no_error": str(bool(require_no_error)).lower(),
+        },
+    )
+
+
 # name → (fn, binary?) — binary marks metrics whose trace-level pass
 # fraction (score==1.0 counts) supports the proportion z-test in compare
 EVALUATORS: dict[str, tuple[Evaluator, bool]] = {
@@ -193,6 +355,10 @@ EVALUATORS: dict[str, tuple[Evaluator, bool]] = {
     "token_budget": (_token_budget, True),
     "tool_success": (_tool_success, True),
     "has_span": (_has_span, True),
+    "exact_match": (_exact_match, True),
+    "token_f1": (_token_f1, False),  # continuous — deltas only
+    "allowed_tools": (_allowed_tools, True),
+    "task_completion": (_task_completion, True),
 }
 """Binary flag: ``True`` = the score is a per-trace pass (1.0)/fail —
 the pass fraction across traces is a proportion the z-test can test."""

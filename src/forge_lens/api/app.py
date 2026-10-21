@@ -11,6 +11,7 @@ import json
 import secrets
 import threading
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
@@ -31,7 +32,7 @@ from forge_lens.core.metrics import (
     M_QUERY_LATENCY,
     METRICS,
 )
-from forge_lens.core.time import ensure_aware
+from forge_lens.core.time import ensure_aware, to_unix_nano
 from forge_lens.ingest.pipeline import IngestPipeline
 from forge_lens.otlp.normalize import normalize_otlp_request
 from forge_lens.storage.base import TraceStore
@@ -552,7 +553,7 @@ def create_app(
 
         a_ids, a_pid, a_dataset = _side_params("a")
         b_ids, b_pid, b_dataset = _side_params("b")
-        return compare_runs(
+        result = compare_runs(
             evaluate_traces(
                 [_get_trace_or_404(t, a_pid) for t in a_ids],
                 specs, dataset=a_dataset,
@@ -562,6 +563,139 @@ def create_app(
                 specs, dataset=b_dataset,
             ),
         )
+        gate = body.get("gate")
+        if gate is not None:
+            from forge_lens.eval.compare import apply_gate
+
+            if not isinstance(gate, dict):
+                raise _reject_request(422, "gate: object required")
+            result["gate"] = apply_gate(result, gate)
+        return result
+
+    # -- datasets (Cycle 06) ---------------------------------------------
+
+    def _optional_body_datetime_ns(body: dict[str, Any], field: str) -> int | None:
+        """Optional ISO ``created_at``-style field → unix ns.
+
+        The API never reads a wall clock for stored metadata — a
+        timestamp is *data*: client-supplied, or absent (NULL, honest
+        "unobserved")."""
+        raw = body.get(field)
+        if raw is None:
+            return None
+        if not isinstance(raw, str):
+            raise _reject_request(422, f"{field}: ISO datetime string required")
+        try:
+            return to_unix_nano(ensure_aware(datetime.fromisoformat(raw)))
+        except ValueError as exc:
+            raise _reject_request(422, f"{field}: invalid ISO datetime") from exc
+
+    @app.put(
+        f"/{API_VERSION}/datasets/{{dataset_id}}",
+        dependencies=[Depends(check_auth)],
+    )
+    async def put_dataset(dataset_id: str, request: Request) -> dict[str, Any]:
+        body = await _eval_body(request)
+        name = body.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise _reject_request(422, "name: non-empty string required")
+        task = body.get("task")
+        if task is not None and not isinstance(task, str):
+            raise _reject_request(422, "task: string required")
+        metadata = body.get("metadata")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise _reject_request(422, "metadata: object required")
+        created_ns = _optional_body_datetime_ns(body, "created_at")
+        pid = body.get("project_id") or cfg.project_id
+        get_store().upsert_dataset(
+            dataset_id,
+            project_id=str(pid),
+            name=name.strip(),
+            task=task,
+            metadata=metadata,
+            now_ns=created_ns,
+        )
+        return {"dataset_id": dataset_id, "project_id": str(pid), "stored": True}
+
+    @app.get(f"/{API_VERSION}/datasets", dependencies=read_deps)
+    async def list_datasets(project_id: str | None = None) -> list[dict[str, Any]]:
+        return get_store().list_datasets(project_id)
+
+    @app.get(f"/{API_VERSION}/datasets/{{dataset_id}}", dependencies=read_deps)
+    async def get_dataset(
+        dataset_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        ds = get_store().get_dataset(dataset_id, project_id or cfg.project_id)
+        if ds is None:
+            raise _reject_request(404, f"dataset {dataset_id!r} not found")
+        return ds
+
+    @app.put(
+        f"/{API_VERSION}/datasets/{{dataset_id}}/versions/{{version}}",
+        dependencies=[Depends(check_auth)],
+    )
+    async def put_dataset_version(
+        dataset_id: str, version: str, request: Request
+    ) -> dict[str, Any]:
+        body = await _eval_body(request)
+        pid = str(body.get("project_id") or cfg.project_id)
+        if get_store().get_dataset(dataset_id, pid) is None:
+            raise _reject_request(
+                404, f"dataset {dataset_id!r} not found — create it first"
+            )
+        cases = body.get("cases")
+        if not isinstance(cases, list) or any(
+            not isinstance(c, dict) or not str(c.get("case_id") or "").strip()
+            for c in cases
+        ):
+            raise _reject_request(
+                422, "cases: list of objects each with a non-empty case_id"
+            )
+        description = body.get("description")
+        if description is not None and not isinstance(description, str):
+            raise _reject_request(422, "description: string required")
+        metadata = body.get("metadata")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise _reject_request(422, "metadata: object required")
+        n = get_store().upsert_dataset_version(
+            dataset_id,
+            version,
+            project_id=pid,
+            description=description,
+            cases=cases,
+            metadata=metadata,
+            now_ns=_optional_body_datetime_ns(body, "created_at"),
+        )
+        return {"dataset_id": dataset_id, "version": version, "cases": n}
+
+    @app.get(
+        f"/{API_VERSION}/datasets/{{dataset_id}}/versions",
+        dependencies=read_deps,
+    )
+    async def list_dataset_versions(
+        dataset_id: str, project_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        if get_store().get_dataset(dataset_id, project_id or cfg.project_id) is None:
+            raise _reject_request(404, f"dataset {dataset_id!r} not found")
+        return get_store().list_dataset_versions(
+            dataset_id, project_id or cfg.project_id
+        )
+
+    @app.get(
+        f"/{API_VERSION}/datasets/{{dataset_id}}/versions/{{version}}",
+        dependencies=read_deps,
+    )
+    async def get_dataset_version(
+        dataset_id: str, version: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        v = get_store().get_dataset_version(
+            dataset_id, version, project_id or cfg.project_id
+        )
+        if v is None:
+            raise _reject_request(
+                404, f"dataset version {dataset_id!r}@{version!r} not found"
+            )
+        return v
 
     # -- ops ------------------------------------------------------------
 
