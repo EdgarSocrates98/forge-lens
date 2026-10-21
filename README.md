@@ -11,7 +11,14 @@ Forge Lens receives, persists and explains agent executions — via OTLP/HTTP, O
 ## Status
 
 Cycles 00–01 (foundation, verified): contracts v1, OTLP/HTTP JSON ingestion, sanitization, SQLite WAL store, Python + TypeScript SDKs, CLI.
-Cycles 03–06 backend: temporal execution graph (`/v1/graph/*`), token/cost intelligence (`/v1/traces/{id}/cost`), failure classification + recorded replay + incident bundles (`/v1/traces/{id}/failure|replay|incident`), deterministic evaluation (`/v1/eval/*`) — reports in `docs/cycles/`. Cycle 02 (Studio UI) is `NOT_STARTED`; cycles 07–12 remain on the roadmap.
+Cycles 03–06 backend: temporal execution graph (`/v1/graph/*`), token/cost intelligence (`/v1/traces/{id}/cost`), failure classification + recorded replay + incident bundles (`/v1/traces/{id}/failure|replay|incident`), deterministic evaluation (`/v1/eval/*`), versioned datasets + regression gates — reports in `docs/cycles/`.
+Cycle 02: Angular Studio (`apps/studio`) — Trace Explorer with sortable/filterable list, waterfall with span detail, evidence tabs (cost/failure/loops/graph analysis), ops dashboard, host-capability view, dark/light themes, URL-state sync, lazy routes, typed API client.
+Cycle 07: loop/no-progress detection (`/v1/traces/{id}/loops`), bounded specialist runtime (`/v1/analyze/*`), threshold alerts (`/v1/alerts/evaluate`), ops summary (`/v1/ops/summary`), MCP security observer (`/v1/traces/{id}/security`).
+Cycle 08: auth modes (`none|key|keys`) with API keys + roles + per-project tenancy, audit trail (`/v1/admin/audit`), retention (`forge-lens prune|archive`, `/v1/admin/prune`), TLS passthrough on `serve`.
+Cycle 09: SSE replay (`/v1/traces/{id}/stream`), measured benchmarks at 1k/10k/100k spans (`scripts/benchmark.py` → `docs/benchmarks/`), archive-before-delete lifecycle.
+Cycle 10: honest host-capability matrix (`/v1/capabilities`), Claude Code JSONL importer (`import-claude`), MCP stdio observer (`mcp-serve`), install lifecycle receipts (`install-status`), 7 skills in `skills/`.
+Cycle 11: CycloneDX SBOM generator (`scripts/gen_sbom.py`), release workflow with OIDC trusted publishing + version gate, `CHANGELOG.md`, `docs/versioning.md`, Studio CI job.
+Cycle 12: efficiency intelligence (`/v1/intel/efficiency`, `/v1/traces/{id}/efficiency`), cohort regression (`/v1/intel/regress`), candidate recommendations (`/v1/traces/{id}/recommendations`), graph centrality/concentration analysis (`/v1/graph/traces/{id}/analysis`).
 
 ## Quickstart
 

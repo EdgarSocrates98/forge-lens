@@ -16,6 +16,7 @@ from forge_lens.contracts.v1 import (
     SCHEMA_VERSION_V1,
     AgentExecution,
     CostObservation,
+    Dataset,
     EvaluationResult,
     Evidence,
     Span,
@@ -35,6 +36,7 @@ MODELS_V1: dict[str, type[LensModel]] = {
     "cost-observation": CostObservation,
     "evidence": Evidence,
     "evaluation-result": EvaluationResult,
+    "dataset": Dataset,
 }
 
 

@@ -713,5 +713,113 @@ def prune(
     typer.echo(f"pruned {deleted['traces']} trace(s)")
 
 
+@app.command()
+def archive(
+    before: Annotated[str, typer.Option(
+        "--before", help="ISO cutoff — traces ended before this are exported")],
+    out: Annotated[Path, typer.Option("--out", help="NDJSON archive path")],
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    delete: Annotated[bool, typer.Option(
+        "--delete", help="prune after archiving (needs --yes)")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
+) -> None:
+    """Tiered storage: export traces older than a cutoff to NDJSON.
+
+    Archive-first lifecycle: data leaves the hot store only after it
+    lands in the archive file — never delete-before-export."""
+    import json as _json
+
+    from forge_lens.api.clock import wall_clock_ns
+    from forge_lens.core.time import ensure_aware, to_unix_nano
+
+    try:
+        cutoff = to_unix_nano(ensure_aware(datetime.fromisoformat(before)))
+    except ValueError:
+        typer.echo(f"invalid --before {before!r}", err=True)
+        raise typer.Exit(2) from None
+    cfg = _config(db)
+    store = _store(cfg)
+    try:
+        rows = store.list_traces(project_id=project, limit=100_000)
+        written = 0
+        with out.open("w", encoding="utf-8") as fh:
+            for row in rows:
+                tr = store.get_trace(row["trace_id"], project_id=project)
+                if tr is None:
+                    continue
+                end_ns = (
+                    to_unix_nano(tr.ended_at)
+                    if tr.ended_at is not None else None
+                )
+                if end_ns is None or end_ns >= cutoff:
+                    continue
+                fh.write(_json.dumps(tr.model_dump(mode="json"),
+                                     default=str) + "\n")
+                written += 1
+        typer.echo(f"archived {written} trace(s) → {out}")
+        if delete:
+            if not yes:
+                typer.confirm(
+                    "delete the archived traces from the hot store?",
+                    abort=True,
+                )
+            deleted = store.prune_traces(before_ns=cutoff, project_id=project)
+            store.record_audit(
+                actor="cli", action="traces.archive_prune",
+                resource=str(out), outcome="ok",
+                detail={"archived": written, **deleted},
+                ts_ns=wall_clock_ns(),
+            )
+            typer.echo(f"pruned {deleted['traces']} trace(s)")
+    finally:
+        store.close()
+
+
+@app.command(name="mcp-serve")
+def mcp_serve(db: Annotated[Path | None, typer.Option("--db")] = None) -> None:
+    """Run the MCP stdio observer server (tools/list, tools/call)."""
+    from forge_lens.mcp_server import serve
+
+    cfg = _config(db)
+    raise typer.Exit(serve(str(cfg.db_path)))
+
+
+@app.command(name="import-claude")
+def import_claude(
+    path: Annotated[Path, typer.Argument(help="session .jsonl file")],
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str, typer.Option("--project")] = "claude-code",
+) -> None:
+    """Import a Claude Code session JSONL as a log-derived trace."""
+    from forge_lens.adapters.claude_code import parse_session
+
+    trace = parse_session(path, project_id=project)
+    if trace is None:
+        typer.echo("no usable events in file — nothing imported", err=True)
+        raise typer.Exit(1)
+    cfg = _config(db)
+    store = _store(cfg)
+    try:
+        store.upsert_trace(trace)
+    finally:
+        store.close()
+    typer.echo(f"imported {len(trace.spans)} span(s) → {trace.trace_id}")
+
+
+@app.command(name="install-status")
+def install_status(
+    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+) -> None:
+    """Show install receipt / doctor report."""
+    import json as _json
+
+    from forge_lens.install.lifecycle import doctor, status
+
+    d = data_dir or Path("./.forge-lens")
+    typer.echo(_json.dumps(
+        {"status": status(d), "doctor": doctor(d)}, indent=2))
+
+
 if __name__ == "__main__":
     app()

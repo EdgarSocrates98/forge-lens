@@ -1,0 +1,94 @@
+"""MCP stdio observer server — Cycle 10.
+
+A minimal JSON-RPC 2.0 MCP server over stdin/stdout exposing read-only
+Lens tools. Real MCP surface: `tools/list`, `tools/call`,
+`initialize`, `ping` — enough for a client to observe stored traces
+through the protocol it already speaks.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from typing import Any
+
+from forge_lens.storage.sqlite import SQLiteTraceStore
+
+_METHODS = ("initialize", "ping", "tools/list", "tools/call", "notifications/initialized")
+
+
+def _tools() -> list[dict[str, Any]]:
+    return [
+        {"name": "lens.list_traces",
+         "description": "List recent traces (bounded, sorted).",
+         "inputSchema": {"type": "object", "properties": {
+             "limit": {"type": "integer", "default": 20},
+             "project_id": {"type": "string"}}}},
+        {"name": "lens.get_trace",
+         "description": "Fetch one trace by id.",
+         "inputSchema": {"type": "object", "required": ["trace_id"],
+                         "properties": {"trace_id": {"type": "string"},
+                                        "project_id": {"type": "string"}}}},
+        {"name": "lens.stats",
+         "description": "Store statistics snapshot.",
+         "inputSchema": {"type": "object", "properties": {}}},
+    ]
+
+
+def serve(db_path: str) -> int:
+    """Blocking stdio loop — one JSON-RPC message per line."""
+    store = SQLiteTraceStore(db_path)
+
+    def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
+        if name == "lens.list_traces":
+            return {"traces": store.list_traces(
+                project_id=args.get("project_id"),
+                limit=min(500, int(args.get("limit") or 20)))}
+        if name == "lens.get_trace":
+            t = store.get_trace(str(args["trace_id"]),
+                                project_id=args.get("project_id"))
+            return {"trace": t.model_dump(mode="json") if t else None}
+        if name == "lens.stats":
+            return store.stats()
+        return {"error": f"unknown tool {name!r}"}
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        method = req.get("method")
+        rid = req.get("id")
+        if method in ("notifications/initialized",) or rid is None:
+            continue  # notifications need no reply
+        result: dict[str, Any]
+        if method == "initialize":
+            result = {"protocolVersion": "2024-11-05",
+                      "capabilities": {"tools": {}},
+                      "serverInfo": {"name": "forge-lens", "version": "0.1.0"}}
+        elif method == "ping":
+            result = {}
+        elif method == "tools/list":
+            result = {"tools": _tools()}
+        elif method == "tools/call":
+            p = req.get("params") or {}
+            content: list[dict[str, str]] = [{
+                "type": "text",
+                "text": json.dumps(_call(str(p.get("name")),
+                                         p.get("arguments") or {}))}]
+            result = {"content": content}
+        else:
+            out = {"jsonrpc": "2.0", "id": rid,
+                   "error": {"code": -32601, "message": f"unknown {method!r}"}}
+            print(json.dumps(out), flush=True)
+            continue
+        print(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}),
+              flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(serve(sys.argv[1] if len(sys.argv) > 1 else "./lens.db"))

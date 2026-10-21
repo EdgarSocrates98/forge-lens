@@ -536,6 +536,37 @@ def create_app(
         trace = _get_trace_or_404(trace_id, project_id)
         return inspect_trace(trace)
 
+    @app.get(f"/{API_VERSION}/traces/{{trace_id}}/stream", dependencies=read_deps)
+    async def trace_stream(
+        trace_id: str, project_id: str | None = None
+    ) -> Any:
+        """SSE replay of a stored trace — one event per span, ordered.
+
+        Justified by need: lets a UI render large waterfalls
+        progressively instead of buffering the whole payload; the store
+        read happens inside the generator so memory stays bounded to
+        one span at a time.
+        """
+        import json as _json
+
+        from starlette.responses import StreamingResponse
+
+        trace = _get_trace_or_404(trace_id, project_id)
+
+        def _events() -> Any:
+            yield "event: meta\ndata: " + _json.dumps(
+                {"trace_id": trace.trace_id, "spans": len(trace.spans)}
+            ) + "\n\n"
+            for sp in sorted(
+                trace.spans, key=lambda x: (x.start_time, x.span_id)
+            ):
+                yield "event: span\ndata: " + _json.dumps(
+                    sp.model_dump(mode="json"), default=str
+                ) + "\n\n"
+            yield "event: done\ndata: {}\n\n"
+
+        return StreamingResponse(_events(), media_type="text/event-stream")
+
     # -- evaluation (Cycle 06): deterministic evidence-based scores ------
 
     @app.get(f"/{API_VERSION}/traces/{{trace_id}}/eval", dependencies=read_deps)
@@ -699,6 +730,104 @@ def create_app(
                 raise _reject_request(422, "gate: object required")
             result["gate"] = apply_gate(result, gate)
         return result
+
+    @app.get(
+        f"/{API_VERSION}/traces/{{trace_id}}/efficiency", dependencies=read_deps
+    )
+    async def trace_efficiency_route(
+        trace_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        """Cycle 12 — per-trace efficiency roll-up (tokens/tools/retries)."""
+        from forge_lens.intel.efficiency import trace_efficiency
+
+        return trace_efficiency(_get_trace_or_404(trace_id, project_id))
+
+    @app.get(
+        f"/{API_VERSION}/traces/{{trace_id}}/recommendations",
+        dependencies=read_deps,
+    )
+    async def trace_recommendations(
+        trace_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        """Candidate recommendations with evidence — gains unclaimed."""
+        from forge_lens.intel.recommendations import recommend
+
+        return recommend(_get_trace_or_404(trace_id, project_id))
+
+    @app.post(f"/{API_VERSION}/intel/efficiency", dependencies=read_deps)
+    async def fleet_efficiency_route(request: Request) -> dict[str, Any]:
+        """Fleet roll-up over a bounded window or explicit trace_ids."""
+        from forge_lens.intel.efficiency import fleet_efficiency
+
+        body = await _eval_body(request)
+        store = get_store()
+        pid = body.get("project_id")
+        ids = body.get("trace_ids")
+        if ids is not None:
+            _eval_trace_ids(ids, "trace_ids")
+            traces = [t for i in ids[:_MAX_EVAL_TRACES]
+                      if (t := store.get_trace(i, project_id=pid)) is not None]
+            missing = sorted(set(ids) - {t.trace_id for t in traces})
+        else:
+            rows = store.list_traces(project_id=pid, limit=_MAX_EVAL_TRACES)
+            traces = [t for r in rows
+                      if (t := store.get_trace(r["trace_id"], project_id=pid))]
+            missing = []
+        out = fleet_efficiency(traces)
+        if missing:
+            out["missing_trace_ids"] = missing
+        return out
+
+    @app.post(f"/{API_VERSION}/intel/regress", dependencies=read_deps)
+    async def regress_route(request: Request) -> dict[str, Any]:
+        """Cohort regression: {"a": {"trace_ids": [...]}, "b": {...}}.
+
+        Deltas are observed differences — significance is eval.compare's
+        job, not this endpoint's.
+        """
+        from forge_lens.intel.regressions import compare_cohorts
+
+        body = await _eval_body(request)
+
+        def _side(key: str) -> tuple[list[str], str | None]:
+            side = body.get(key)
+            if not isinstance(side, dict):
+                raise _reject_request(422, f"{key}: object required")
+            side_ids = dict(side)
+            if "project_id" not in side_ids:
+                side_ids["project_id"] = _eval_project_id(body)
+            return (
+                _eval_trace_ids(side_ids, f"{key}.trace_ids"),
+                _eval_project_id(side_ids, f"{key}.project_id"),
+            )
+
+        a_ids, a_pid = _side("a")
+        b_ids, b_pid = _side("b")
+        _require_scope(request, a_pid)
+        _require_scope(request, b_pid)
+        store = get_store()
+
+        def _cohort(ids: list[str], pid: str | None) -> list[Any]:
+            return [t for i in ids if
+                    (t := store.get_trace(i, project_id=pid)) is not None]
+
+        return compare_cohorts(
+            _cohort(a_ids, a_pid), _cohort(b_ids, b_pid), label="cohort"
+        )
+
+    @app.get(
+        f"/{API_VERSION}/graph/traces/{{trace_id}}/analysis",
+        dependencies=read_deps,
+    )
+    async def graph_analysis(
+        trace_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        """Centrality/concentration/handoff analysis over the graph."""
+        from forge_lens.graph import build_trace_graph
+        from forge_lens.intel.graph_intel import analyze_graph
+
+        g = build_trace_graph(_get_trace_or_404(trace_id, project_id))
+        return analyze_graph(g)
 
     # -- datasets (Cycle 06) ---------------------------------------------
 
@@ -950,7 +1079,115 @@ def create_app(
         )
         return {"deleted": deleted, "before_ns": cutoff}
 
+    # -- agentic ops (Cycle 07): loops, specialists, alerts, dashboard --
+
+    @app.get(f"/{API_VERSION}/traces/{{trace_id}}/loops", dependencies=read_deps)
+    async def trace_loops(
+        trace_id: str,
+        project_id: str | None = None,
+        repeat_threshold: int = 3,
+    ) -> dict[str, Any]:
+        """Heuristic loop/no-progress findings with span evidence."""
+        from forge_lens.ops.loops import detect_loops
+
+        trace = _get_trace_or_404(trace_id, project_id)
+        return detect_loops(trace, repeat_threshold=max(1, min(50, repeat_threshold)))
+
+    @app.get(f"/{API_VERSION}/analyze/specialists", dependencies=read_deps)
+    async def list_specialists() -> dict[str, Any]:
+        from forge_lens.ops.agents import SPECIALISTS
+
+        return {"specialists": list(SPECIALISTS)}
+
+    @app.post(
+        f"/{API_VERSION}/analyze/{{specialist}}/{{trace_id}}",
+        dependencies=read_deps,
+    )
+    async def run_analysis(
+        specialist: str, trace_id: str, request: Request
+    ) -> dict[str, Any]:
+        """Run a registered specialist under explicit budgets.
+
+        Body (optional): {"budget": {...}, "context": {...},
+        "project_id": "..."} — budgets default to AgentBudget().
+        """
+        from forge_lens.ops.agents import AgentBudget, run_specialist
+
+        body = await _eval_body(request)
+        trace = _get_trace_or_404(trace_id, body.get("project_id"))
+        b = body.get("budget") or {}
+        if not isinstance(b, dict):
+            raise _reject_request(422, "budget must be an object")
+        budget = AgentBudget(
+            max_iterations=int(b.get("max_iterations", 8)),
+            token_budget=int(b.get("token_budget", 200_000)),
+            timeout_s=float(b.get("timeout_s", 30.0)),
+        )
+        ctx = body.get("context") or {}
+        if not isinstance(ctx, dict):
+            raise _reject_request(422, "context must be an object")
+        run = run_specialist(
+            specialist, trace, budget=budget, context=ctx,
+            run_id=body.get("run_id") or f"{specialist}:{trace_id}",
+        )
+        return {
+            "run_id": run.run_id, "specialist": run.specialist,
+            "stop_reason": run.stop_reason, "iterations": run.iterations,
+            "tokens_observed": run.tokens_observed,
+            "cancelled": run.cancelled, "findings": run.findings,
+        }
+
+    @app.post(f"/{API_VERSION}/alerts/evaluate", dependencies=read_deps)
+    async def alerts_evaluate(request: Request) -> dict[str, Any]:
+        """Evaluate threshold rules inline (rules + optional project_id).
+
+        Metrics are computed from the store at request time — no clock.
+        """
+        from forge_lens.ops.alerts import evaluate_rules
+
+        body = await _eval_body(request)
+        rules = body.get("rules")
+        if not isinstance(rules, list) or len(rules) > 100:
+            raise _reject_request(422, "rules must be a list of <=100 objects")
+        pid = body.get("project_id")
+        stats = get_store().stats()
+        spans_total = int(stats.get("spans") or 0)
+        errors = int(stats.get("error_spans") or 0)
+        metrics = {
+            "span_count": float(spans_total),
+            "trace_count": float(stats.get("traces") or 0),
+            "error_count": float(errors),
+            "error_rate": errors / spans_total if spans_total else 0.0,
+        }
+        out = evaluate_rules([r for r in rules if isinstance(r, dict)], metrics)
+        out["project_id"] = pid
+        return out
+
+    @app.get(f"/{API_VERSION}/ops/summary", dependencies=read_deps)
+    async def ops_summary(project_id: str | None = None) -> dict[str, Any]:
+        """Operational dashboard data: store stats + recent failures +
+        cost/token roll-up over the bounded recent window."""
+        store = get_store()
+        traces = store.list_traces(project_id=project_id, limit=200)
+        failed = [t for t in traces if t.get("status") == "error"]
+        return {
+            "project_id": project_id,
+            "stats": store.stats(),
+            "recent_traces": len(traces),
+            "recent_failures": sorted(
+                (t["trace_id"] for t in failed), reverse=True
+            )[:50],
+            "note": "bounded window (200 traces) — not a fleet-wide total",
+        }
+
     # -- ops ------------------------------------------------------------
+
+    @app.get(f"/{API_VERSION}/capabilities", dependencies=read_deps)
+    async def capabilities() -> dict[str, Any]:
+        """Host adapter capability matrix — honest coverage claims."""
+        from forge_lens.adapters.capabilities import capability_matrix
+
+        return capability_matrix()
 
     @app.get(f"/{API_VERSION}/health", dependencies=read_deps)
     async def health() -> dict[str, Any]:

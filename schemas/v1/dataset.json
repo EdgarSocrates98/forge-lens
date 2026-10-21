@@ -1,0 +1,66 @@
+{
+  "$id": "https://forge-lens.dev/schemas/v1/dataset.json",
+  "additionalProperties": true,
+  "properties": {
+    "created_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At"
+    },
+    "dataset_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "name": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "project_id": {
+      "default": "default",
+      "title": "Project Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "task": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task"
+    }
+  },
+  "required": [
+    "dataset_id",
+    "name"
+  ],
+  "title": "Dataset",
+  "type": "object",
+  "x-schema-version": "1.0.0"
+}

@@ -1,0 +1,45 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type the version to release (must match pyproject)"
+        required: true
+permissions:
+  id-token: write   # OIDC trusted publishing — no stored token
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run mypy src
+      - run: uv run python -m pytest -q
+      - name: version gate — input must match pyproject
+        run: |
+          V=$(grep '^version' pyproject.toml | cut -d'"' -f2)
+          test "$V" = "${{ inputs.confirm }}" || {
+            echo "input '${{ inputs.confirm }}' != pyproject '$V'"; exit 1; }
+      - run: uv build
+      - run: uv run python scripts/gen_sbom.py > dist/sbom.json
+      - uses: actions/upload-artifact@v4
+        with: { name: dist, path: dist/ }
+  # publish job is manual-environment gated (trusted publishing to PyPI
+  # requires the 'pypi' environment to be configured with required
+  # reviewers — explicit human approval before any publish).
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist/ }
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          print-hash: true

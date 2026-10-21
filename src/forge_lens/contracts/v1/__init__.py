@@ -1,6 +1,7 @@
 """Contract schema version 1."""
 
 from forge_lens.contracts.v1.agent import AgentExecution, ToolInvocation
+from forge_lens.contracts.v1.dataset import Dataset, DatasetCase, DatasetVersion
 from forge_lens.contracts.v1.evaluation import EvaluationResult
 from forge_lens.contracts.v1.evidence import (
     DataClassification,
@@ -29,6 +30,9 @@ __all__ = [
     "BlobRef",
     "CostObservation",
     "DataClassification",
+    "Dataset",
+    "DatasetCase",
+    "DatasetVersion",
     "EvaluationResult",
     "Evidence",
     "SanitizationStatus",

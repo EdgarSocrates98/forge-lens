@@ -9,7 +9,7 @@ mutated in place (new truth → new version), so an eval run pinned to
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -19,6 +19,7 @@ from forge_lens.contracts.base import LensModel
 class DatasetCase(LensModel):
     """One ground-truth case inside a dataset version."""
 
+    schema_version: Literal["1.0.0"] = "1.0.0"
     case_id: str = Field(min_length=1, max_length=256)
     input: dict[str, Any] = Field(default_factory=dict)
     """Task inputs (prompt spec, tool config, context refs)."""
@@ -30,6 +31,7 @@ class DatasetCase(LensModel):
 
 
 class Dataset(LensModel):
+    schema_version: Literal["1.0.0"] = "1.0.0"
     dataset_id: str = Field(min_length=1, max_length=256)
     project_id: str = "default"
     name: str = Field(min_length=1, max_length=512)
@@ -40,6 +42,7 @@ class Dataset(LensModel):
 
 
 class DatasetVersion(LensModel):
+    schema_version: Literal["1.0.0"] = "1.0.0"
     dataset_id: str = Field(min_length=1, max_length=256)
     version: str = Field(min_length=1, max_length=64)
     description: str | None = None
