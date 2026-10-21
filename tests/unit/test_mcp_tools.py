@@ -414,6 +414,34 @@ def test_sessions_tool_rolls_up(
     assert by_id[2]["error"]["code"] == -32603
 
 
+def test_sessions_tools_offset_pages(
+    seeded_db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """offset walks both roll-ups without overlap; bad offset → error."""
+    by_id = _serve(
+        seeded_db,
+        [
+            _call_tool(1, "lens.sessions", {"limit": 1, "offset": 0}),
+            _call_tool(2, "lens.sessions", {"limit": 1, "offset": 1}),
+            _call_tool(3, "lens.tools", {"limit": 1, "offset": 0}),
+            _call_tool(4, "lens.tools", {"limit": 1, "offset": 1}),
+            _call_tool(5, "lens.sessions", {"offset": "x"}),
+            _call_tool(6, "lens.tools", {"offset": True}),
+        ],
+        capsys,
+    )
+    s0 = _payload(by_id[1])["sessions"]
+    s1 = _payload(by_id[2])["sessions"]
+    if s1:
+        assert s0[0]["session_id"] != s1[0]["session_id"]
+    t0 = _payload(by_id[3])["tools"]
+    t1 = _payload(by_id[4])["tools"]
+    if t1:
+        assert t0[0]["tool"] != t1[0]["tool"]
+    assert by_id[5]["error"]["code"] == -32603
+    assert by_id[6]["error"]["code"] == -32603
+
+
 def test_tools_tool_rolls_up(
     seeded_db: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -169,4 +169,100 @@ describe('TraceDetailComponent eval panel', () => {
     expect(panel.querySelector('.eval-table')).toBeNull();
     expect(panel.textContent).toContain('eval unavailable');
   });
+
+  it('typed params serialize into the POST body per kind', () => {
+    const f = make();
+    flushInit();
+    const c = f.componentInstance;
+    c.evalSel.set(new Set([
+      'allowed_tools', 'contains', 'exact_match',
+      'latency_budget', 'task_completion',
+    ]));
+    c.setEvalParam('allowed_tools', 'allowed', 'search, read');
+    c.setEvalParam('contains', 'text', 'hello');
+    c.setEvalParam('contains', 'case_sensitive', 'false');
+    c.setEvalParam('exact_match', 'field', 'output.value');
+    c.setEvalParam('exact_match', 'expected', '42');   // json kind → number
+    c.setEvalParam('latency_budget', 'max_duration_ms', '5000');
+    c.setEvalParam('task_completion', 'require_no_error', 'false');
+    c.tab.set('evidence');
+    f.detectChanges();
+    c.runEval();
+    const req = http.expectOne(r => r.url.endsWith('/eval/run'));
+    // sorted evaluator order; every kind parsed to its wire type
+    expect(req.request.body).toEqual({
+      trace_ids: ['t1'],
+      evaluators: [
+        { name: 'allowed_tools', params: { allowed: ['search', 'read'] } },
+        { name: 'contains',
+          params: { text: 'hello', case_sensitive: false } },
+        { name: 'exact_match',
+          params: { field: 'output.value', expected: 42 } },
+        { name: 'latency_budget', params: { max_duration_ms: 5000 } },
+        { name: 'task_completion', params: { require_no_error: false } },
+      ],
+    });
+    req.flush({ dataset: null, trace_ids: ['t1'], summary: {},
+                results: { t1: [] } });
+  });
+
+  it('a malformed param value blocks the run before POST', () => {
+    const f = make();
+    flushInit();
+    const c = f.componentInstance;
+    c.evalSel.set(new Set(['latency_budget']));
+    c.setEvalParam('latency_budget', 'max_duration_ms', 'soon');
+    c.tab.set('evidence');
+    f.detectChanges();
+    c.runEval();
+    http.expectNone(r => r.url.endsWith('/eval/run'));
+    f.detectChanges();
+    const banner = evalPanel(f).querySelector('.err-banner')!.textContent!;
+    expect(banner).toContain('latency_budget');
+    expect(banner).toContain('max_duration_ms');
+    expect(c.evalRunning()).toBe(false);
+  });
+
+  it('a fractional tool_call_count bound is malformed (int ≥ 0)', () => {
+    const f = make();
+    flushInit();
+    const c = f.componentInstance;
+    c.evalSel.set(new Set(['tool_call_count']));
+    c.setEvalParam('tool_call_count', 'min', '1.5');
+    c.tab.set('evidence');
+    f.detectChanges();
+    c.runEval();
+    http.expectNone(r => r.url.endsWith('/eval/run'));
+    expect(c.evalErr()).toContain('min');
+  });
+
+  it('checking a param evaluator renders inputs; typing feeds state', () => {
+    const f = make();
+    flushInit();
+    const c = f.componentInstance;
+    c.tab.set('evidence');
+    f.detectChanges();
+    // default selection (error_free, tool_success) takes no params
+    expect(evalPanel(f).querySelector('.eval-params')).toBeNull();
+    c.evalSel.set(new Set(['regex']));
+    f.detectChanges();
+    const row = evalPanel(f).querySelector('.eval-params')!;
+    expect(row.textContent).toContain('regex');
+    expect(row.textContent).toContain('pattern*');
+    const inputs = row.querySelectorAll('input');
+    expect(inputs.length).toBe(2);            // pattern + field
+    expect(row.querySelectorAll('select').length).toBe(1);  // case_sensitive
+    const inp = inputs[0] as HTMLInputElement;
+    inp.value = 'foo.*';
+    inp.dispatchEvent(new Event('input'));
+    expect(c.evalParams()['regex']!['pattern']).toBe('foo.*');
+    // unchecking hides the row; the typed value survives a re-check
+    c.toggleEval('regex');
+    f.detectChanges();
+    expect(evalPanel(f).querySelector('.eval-params')).toBeNull();
+    c.toggleEval('regex');
+    f.detectChanges();
+    expect((evalPanel(f).querySelector('.eval-params input') as HTMLInputElement)
+      .value).toBe('foo.*');
+  });
 });

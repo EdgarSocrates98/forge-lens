@@ -15,6 +15,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
   first_started_at, last_activity_at) + `lens.sessions` no MCP.
 - `GET /v1/tools`: roll-up de frota por `tool.name` + `forge-lens tools`
   + `forge-lens sessions` (roll-up de sessões) — paridade CLI completa
+  + `lens.sessions`/`lens.tools` MCP: `offset` pagination (walk roll-ups
+    page-by-page; bad args → JSON-RPC error, loop survives)
   + `lens.tools` no MCP (paridade CLI/API/MCP).
 - MCP stdio: `lens.detect_loops`, `lens.trace_efficiency`, `lens.cost`,
   `lens.failure`, `lens.list_datasets`, `lens.sessions`, `lens.tools`,

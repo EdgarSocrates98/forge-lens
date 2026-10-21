@@ -54,6 +54,13 @@ export interface EvalResult {
 export interface TraceEval {
   trace_id: string; results: EvalResult[];
 }
+/** One evaluator spec in a POST /v1/eval/run body — `params` is
+ *  evaluator-specific (see forge_lens.eval.evaluators); omit it when a
+ *  run carries none rather than posting `params: {}`. */
+export interface EvalSpec {
+  name: string;
+  params?: Record<string, unknown>;
+}
 /** POST /v1/eval/run response — results keyed by trace_id. */
 export interface EvalReport {
   dataset: string | null; trace_ids: string[];
@@ -62,6 +69,83 @@ export interface EvalReport {
     n: number; nulls: number; sum: number;
     mean_score: number | null; pass_rate: number | null;
   }>;
+}
+/** Row from GET /v1/datasets — a bare JSON array (no items wrapper). */
+export interface DatasetRow {
+  dataset_id: string; project_id: string;
+  name: string; task: string | null; created_at: string | null;
+}
+/** GET /v1/datasets/{id} — the list fields plus metadata. */
+export interface DatasetDetail extends DatasetRow {
+  metadata: Record<string, unknown>;
+}
+/** Row from GET /v1/datasets/{id}/versions — bare array, case_count
+ *  joined server-side. */
+export interface DatasetVersionRow {
+  dataset_id: string; project_id: string; version: string;
+  description: string | null; case_count: number;
+  created_at: string | null;
+}
+/** PUT /v1/datasets/{id} response. */
+export interface DatasetStored {
+  dataset_id: string; project_id: string; stored: boolean;
+}
+/** PUT /v1/datasets/{id}/versions/{v} response. */
+export interface DatasetVersionStored {
+  dataset_id: string; version: string; cases: number;
+}
+/** One case in a PUT version body — input/expected stay JSON objects
+ *  (arbitrary shape) per the DatasetCase contract. */
+export interface DatasetCaseInput {
+  case_id: string;
+  input?: Record<string, unknown>;
+  expected?: Record<string, unknown>;
+  allowed_tools?: string[];
+  constraints?: Record<string, unknown>;
+  rubric?: Record<string, unknown>;
+}
+/** One side of POST /v1/eval/compare. `trace_ids` is required (1..500
+ *  stored ids — a missing id is a 404, never a silent skip); `dataset`
+ *  is a label recorded on that side's report, NOT resolved to cases. */
+export interface CompareSideSpec {
+  trace_ids: string[];
+  dataset?: string;
+  project_id?: string;
+}
+/** POST /v1/eval/compare request body. */
+export interface CompareRequest {
+  a: CompareSideSpec; b: CompareSideSpec;
+  evaluators: EvalSpec[];
+  gate?: Record<string, unknown>;
+  project_id?: string;
+}
+export interface CompareSideResult {
+  dataset: string | null; trace_ids: string[]; n: number;
+}
+/** One compare_runs delta row — every nullable field means unmeasured
+ *  (`null` is honest absence, never a zero to display). */
+export interface MetricDelta {
+  evaluator: string; metric: string;
+  n_a: number; n_b: number;
+  mean_a: number | null; mean_b: number | null;
+  delta: number | null;
+  pass_rate_a: number | null; pass_rate_b: number | null;
+  /** 'not_tested' | 'significant' | 'not_significant' |
+   *  'insufficient_data' | 'not_computable' */
+  significance: string;
+  p_value: number | null;
+}
+/** `gate` is only present when the request carried one. */
+export interface CompareGateResult {
+  gate_passed: boolean;
+  failures: Record<string, unknown>[];
+}
+/** POST /v1/eval/compare response. */
+export interface CompareReport {
+  a: CompareSideResult; b: CompareSideResult;
+  deltas: MetricDelta[];
+  gate?: CompareGateResult;
+  missing_trace_ids?: unknown;
 }
 
 const BASE_KEY = 'lens-api-base';
@@ -114,6 +198,10 @@ export class Api {
     return this.http.post<T>(`${this.base()}${path}`, body,
       { headers: this.headers() });
   }
+  private put<T>(path: string, body: unknown): Observable<T> {
+    return this.http.put<T>(`${this.base()}${path}`, body,
+      { headers: this.headers() });
+  }
   getTrace(id: string): Observable<Trace> { return this.get(`/traces/${id}`); }
   getGraphAnalysis(id: string): Observable<Record<string, unknown>> {
     return this.get(`/graph/traces/${id}/analysis`);
@@ -128,13 +216,45 @@ export class Api {
   getTraceEval(id: string): Observable<TraceEval> {
     return this.get(`/traces/${id}/eval`);
   }
-  /** `evaluators` are bare registry names — posted as `{name}` specs; the
-   *  wire field is `trace_ids` (a list), per POST /v1/eval/run. */
-  runEval(traceId: string, evaluators: string[]): Observable<EvalReport> {
+  /** `evaluators` are `{name, params?}` spec objects — posted verbatim;
+   *  the wire field is `trace_ids` (a list), per POST /v1/eval/run. */
+  runEval(traceId: string, evaluators: EvalSpec[]): Observable<EvalReport> {
     return this.post('/eval/run', {
       trace_ids: [traceId],
-      evaluators: evaluators.map(name => ({ name })),
+      evaluators,
     });
+  }
+  /** GET /v1/datasets — bare array, project-scoped by the server when
+   *  `project_id` is omitted. */
+  listDatasets(project_id?: string): Observable<DatasetRow[]> {
+    let p = new HttpParams();
+    if (project_id) p = p.set('project_id', project_id);
+    return this.http.get<DatasetRow[]>(`${this.base()}/datasets`,
+      { params: p, headers: this.headers() });
+  }
+  getDataset(id: string): Observable<DatasetDetail> {
+    return this.get(`/datasets/${id}`);
+  }
+  listDatasetVersions(id: string): Observable<DatasetVersionRow[]> {
+    return this.get(`/datasets/${id}/versions`);
+  }
+  /** PUT /v1/datasets/{id} — upserts the mutable metadata (name/task);
+   *  `task` omitted entirely when the field is left blank. */
+  putDataset(id: string, body: { name: string; task?: string }):
+    Observable<DatasetStored> {
+    return this.put(`/datasets/${id}`, body);
+  }
+  /** PUT /v1/datasets/{id}/versions/{v} — append-only; a repeat of an
+   *  existing (dataset, version) pair is a server-side 409. */
+  putDatasetVersion(id: string, version: string,
+    body: { cases: DatasetCaseInput[]; description?: string }):
+    Observable<DatasetVersionStored> {
+    return this.put(`/datasets/${id}/versions/${version}`, body);
+  }
+  /** POST /v1/eval/compare — both cohorts carry stored `trace_ids`;
+   *  a per-side `dataset` string is a report label, not a case lookup. */
+  runCompare(body: CompareRequest): Observable<CompareReport> {
+    return this.post('/eval/compare', body);
   }
   getOps(): Observable<OpsSummary> { return this.get(`/ops/summary`); }
   getCapabilities(): Observable<Capabilities> { return this.get(`/capabilities`); }

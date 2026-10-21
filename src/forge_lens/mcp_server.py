@@ -66,6 +66,7 @@ def _tools() -> list[dict[str, Any]]:
                         "newest activity first (matches /v1/sessions).",
          "inputSchema": {"type": "object", "properties": {
              "limit": {"type": "integer", "default": 100},
+             "offset": {"type": "integer", "default": 0},
              "project_id": {"type": "string"}}}},
         {"name": "lens.stats",
          "description": "Store statistics snapshot.",
@@ -76,6 +77,7 @@ def _tools() -> list[dict[str, Any]]:
                         "avg duration per tool.name (matches /v1/tools).",
          "inputSchema": {"type": "object", "properties": {
              "limit": {"type": "integer", "default": 100},
+             "offset": {"type": "integer", "default": 0},
              "project_id": {"type": "string"}}}},
         {"name": "lens.trace_efficiency",
          "description": "Per-trace efficiency roll-up "
@@ -189,26 +191,27 @@ def serve(db_path: str) -> int:
             return classify_failure(trace).model_dump(mode="json")
         if name == "lens.list_datasets":
             return {"datasets": store.list_datasets(_pid(args))}
+        def _page_args(default_limit: int) -> tuple[int, int]:
+            """Bounded limit/offset shared by the roll-up tools."""
+            lim_raw, off_raw = args.get("limit"), args.get("offset")
+            for name_, v in (("limit", lim_raw), ("offset", off_raw)):
+                if v is not None and (
+                    isinstance(v, bool)
+                    or not isinstance(v, (int, float, str))
+                ):
+                    raise TypeError(f"{name_} must be a number")
+            lim = default_limit if lim_raw is None else int(lim_raw)
+            off = 0 if off_raw is None else int(off_raw)
+            return min(500, max(0, lim)), max(0, off)
+
         if name == "lens.sessions":
-            raw_lim = args.get("limit")
-            if raw_lim is not None and (
-                isinstance(raw_lim, bool)
-                or not isinstance(raw_lim, (int, float, str))
-            ):
-                raise TypeError("limit must be a number")
-            lim = 100 if raw_lim is None else int(raw_lim)
+            lim, off = _page_args(100)
             return {"sessions": store.list_sessions(
-                _pid(args), limit=min(500, max(0, lim)))}
+                _pid(args), limit=lim, offset=off)}
         if name == "lens.tools":
-            raw_lim = args.get("limit")
-            if raw_lim is not None and (
-                isinstance(raw_lim, bool)
-                or not isinstance(raw_lim, (int, float, str))
-            ):
-                raise TypeError("limit must be a number")
-            lim = 100 if raw_lim is None else int(raw_lim)
+            lim, off = _page_args(100)
             return {"tools": store.list_tools(
-                _pid(args), limit=min(500, max(0, lim)))}
+                _pid(args), limit=lim, offset=off)}
         if name == "lens.capabilities":
             from forge_lens.adapters.capabilities import capability_matrix
 
