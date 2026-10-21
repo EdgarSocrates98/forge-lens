@@ -143,9 +143,12 @@ proporções, só para métricas binárias 0/1 com n≥10 por lado),
 `insufficient_data`, `not_tested` (métrica contínua — p-valor nunca é
 fabricado), `not_computable` (variância pooled zero).
 
-Avaliadores: `error_free` (binário), `tool_success` (binário, `null` sem
-tool spans), `latency_budget` (param `budget_ms`, relógio do envelope),
-`token_budget` (param `max_total_tokens`).
+Avaliadores: `error_free` (binário), `tool_success` (binário por trace —
+pass = todas as tools ok; `null` sem tool spans), `latency_budget`
+(param `budget_ms`, relógio do envelope), `token_budget` (param
+`max_total_tokens`), `has_span` (binário; params `name`/`kind`
+opcionais). Specs malformados retornam `score=null` + `reason` — um run
+nunca 500 por spec inválido. Limites: ≤500 `trace_ids`, ≤100 specs.
 
 ## Ops
 

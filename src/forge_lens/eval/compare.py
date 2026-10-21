@@ -31,8 +31,10 @@ class MetricDelta(LensModel):
     pass_rate_a: float | None = None
     pass_rate_b: float | None = None
     significance: str = "not_tested"
-    """``significant`` | ``not_significant`` | ``insufficient_data`` |
-    ``not_tested`` (continuous metric — no p-value is fabricated)."""
+    """``significant`` | ``not_significant`` | ``insufficient_data``
+    (n < 10/side) | ``not_computable`` (zero pooled variance — the test
+    is undefined, not merely underpowered) | ``not_tested`` (continuous
+    metric — no p-value is fabricated)."""
     p_value: float | None = None
 
 
@@ -90,7 +92,7 @@ def compare_runs(a: EvalReport, b: EvalReport) -> dict[str, Any]:
                 row.pass_rate_a or 0.0, n_a, row.pass_rate_b or 0.0, n_b
             )
             if res is None:
-                row.significance = "insufficient_data"
+                row.significance = "not_computable"
             else:
                 row.p_value = round(res[1], 6)
                 row.significance = (

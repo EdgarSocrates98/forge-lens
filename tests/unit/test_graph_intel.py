@@ -683,19 +683,69 @@ def test_eval_compare_significance() -> None:
     assert d2["p_value"] < 0.05
 
 
-def test_eval_continuous_metric_no_pvalue() -> None:
+def test_eval_tool_success_binary_ztest() -> None:
+    """tool_success is binary at trace granularity (pass = all tools ok)
+    — 15 all-pass vs 15 all-fail is a defined, significant z."""
     from forge_lens.eval import compare_runs, evaluate_traces
 
     a = evaluate_traces(
-        [_trace([_span("a1", "t", kind=SpanKind.TOOL)]) for _ in range(15)],
+        [_trace([_span("a1", "t", kind=SpanKind.TOOL)],
+                trace_id=f"{i:032x}") for i in range(15)],
         [{"name": "tool_success"}], dataset="a",
     )
     b = evaluate_traces(
-        [_trace([_err_span("a1", "t", SpanKind.TOOL)]) for _ in range(15)],
+        [_trace([_err_span("a1", "t", SpanKind.TOOL)],
+                trace_id=f"{i + 100:032x}") for i in range(15)],
         [{"name": "tool_success"}], dataset="b",
     )
     out = compare_runs(a, b)
     d = out["deltas"][0]
-    assert d["significance"] == "not_tested"  # continuous — never fabricated
-    assert d["p_value"] is None
+    assert d["significance"] == "significant"
+    assert d["p_value"] is not None
     assert d["delta"] == -1.0
+
+
+def test_eval_compare_not_computable_when_degenerate() -> None:
+    """Zero pooled variance (both sides all-pass) → not_computable,
+    distinct from insufficient_data — the test is defined, uncomputable."""
+    from forge_lens.eval import compare_runs, evaluate_traces
+
+    a = evaluate_traces(
+        [_trace([_span("a1", "t", kind=SpanKind.TOOL)],
+                trace_id=f"{i:032x}") for i in range(15)],
+        [{"name": "error_free"}], dataset="a",
+    )
+    b = evaluate_traces(
+        [_trace([_span("b1", "t", kind=SpanKind.TOOL)],
+                trace_id=f"{i + 100:032x}") for i in range(15)],
+        [{"name": "error_free"}], dataset="b",
+    )
+    d = compare_runs(a, b)["deltas"][0]
+    assert d["significance"] == "not_computable"
+    assert d["p_value"] is None
+
+
+def test_eval_negative_envelope_duration_is_no_verdict() -> None:
+    from forge_lens.eval import run_evaluators
+
+    t = _trace([_span("a1", "w")])
+    t.ended_at = t.started_at  # ended BEFORE started claims → invalid
+    t.started_at = t.started_at  # keep; shift end instead
+    from datetime import timedelta
+    t.ended_at = t.ended_at - timedelta(milliseconds=5)
+    res = run_evaluators(
+        t, [{"name": "latency_budget", "params": {"budget_ms": 99999}}]
+    )
+    assert res[0].score is None
+    assert "negative" in res[0].details["reason"]
+
+
+def test_eval_summary_emits_sum_and_dedupes_ids() -> None:
+    from forge_lens.eval import evaluate_traces
+
+    t = _trace([_span("a1", "ok", kind=SpanKind.TOOL)])
+    report = evaluate_traces([t, t, t], [{"name": "error_free"}])
+    # a duplicated id is evaluated once, counted once
+    assert report.trace_ids == [t.trace_id]
+    assert report.summary["error_free/no_error_spans"]["n"] == 1
+    assert report.summary["error_free/no_error_spans"]["sum"] == 1.0

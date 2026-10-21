@@ -175,9 +175,10 @@ def ingest(
         # most max+1 bytes: read_bytes() on a giant file would OOM before
         # payload_bytes is ever checked
         max_bytes = cfg.max_payload_bytes
-        if file.stat().st_size > max_bytes:
+        size = file.stat().st_size
+        if size > max_bytes:
             raise ValueError(
-                f"file {file} ({file.stat().st_size}B) exceeds "
+                f"file {file} ({size}B) exceeds "
                 f"max_payload_bytes ({max_bytes}B)"
             )
         with file.open("rb") as fh:

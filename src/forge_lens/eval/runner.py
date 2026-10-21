@@ -28,7 +28,7 @@ class EvalReport(LensModel):
 
 def evaluate_traces(
     traces: list[Trace],
-    specs: list[dict[str, Any]],
+    specs: list[Any],
     *,
     dataset: str | None = None,
     now: datetime | None = None,
@@ -38,7 +38,9 @@ def evaluate_traces(
     Deterministic: traces processed in id order, results keyed by id.
     ``score=None`` results count in ``nulls``, never silently as 0.
     """
-    ordered = sorted(traces, key=lambda t: t.trace_id)
+    # repeated trace_ids evaluate once — a duplicated id inflates neither
+    # results nor summary; trace_ids reports the distinct set evaluated
+    ordered = sorted({t.trace_id: t for t in traces}.values(), key=lambda t: t.trace_id)
     results = {
         t.trace_id: run_evaluators(t, specs, now=now) for t in ordered
     }
@@ -60,6 +62,7 @@ def evaluate_traces(
         key: {
             "n": s["n"],
             "nulls": s["nulls"],
+            "sum": round(s["sum"], 6),
             "mean_score": round(s["sum"] / s["n"], 6) if s["n"] else None,
             "pass_rate": round(s["passes"] / s["n"], 6) if s["n"] else None,
         }

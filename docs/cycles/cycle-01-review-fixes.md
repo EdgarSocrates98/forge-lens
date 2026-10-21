@@ -664,3 +664,29 @@ ordem span_start/event, has_token_usage malformado, doctor imutável).
 
 Testes: +10 (parent-divergence CONFLICT, producer-flag strip, eval
 battery ×6, endpoints eval ×2).
+
+## Round 14 — limites e 4xx nos endpoints de eval
+
+- **`json.loads` sem guarda** em `eval/run` e `eval/compare` → 400
+  (mesmo padrão de `ingest_otlp`), não 500.
+- **Validação única de shape**: `trace_ids` (1..500 strings), `evaluators`
+  (1..100), `dataset`/`project_id` (str|None), sides de `compare`
+  não-vazios — tudo 422 antes de tocar store/engine.
+- **Specs malformados nunca 500**: `run_evaluators` valida `spec` dict e
+  `params` dict — junk vira `score=None` + `details.reason`
+  (`invalid_spec`/`evaluator_error`), alinhado ao docstring.
+- **Specs cap 100** — fan-out de resultados fica bounded (specs × traces).
+- **`_read_capped_body`/`_check_declared_size` parametrizados** com o
+  reject — oversize em eval conta em `api.errors`, não `ingest.errors`.
+- **`not_computable` real**: variância pooled zero (teste indefinido)
+  distinguido de `insufficient_data` (n<10).
+- **`sum` emitido** no summary; `tool_success` registrado binário
+  (pass = todas as tools ok); `has_span` documentado.
+- **`latency_budget` honesto**: `ended_at < started_at` → `score=None`
+  + reason (envelope inválido não passa trivialmente no budget).
+- **Dedupe consistente**: `trace_ids` repetidos avaliam uma vez;
+  `EvalReport.trace_ids` reporta o conjunto distinto avaliado.
+- **CLI**: `file.stat()` hoisted (era chamado 2× no caminho de erro).
+
+Testes: +5 (bateria de 11 bodies malformados → 4xx, specs junk →
+score=None, `not_computable`, negative-duration, dedupe+sum).

@@ -53,7 +53,11 @@ def _reject_request(status_code: int, detail: str) -> HTTPException:
     return HTTPException(status_code=status_code, detail=detail)
 
 
-def _check_declared_size(request: Request, max_bytes: int) -> None:
+def _check_declared_size(
+    request: Request,
+    max_bytes: int,
+    reject: Callable[[int, str], HTTPException] = _reject_ingest,
+) -> None:
     """Fast-path 413 on Content-Length before reading any body bytes.
 
     A courtesy check only — the header can be absent (chunked) or lie;
@@ -61,23 +65,28 @@ def _check_declared_size(request: Request, max_bytes: int) -> None:
     """
     cl = request.headers.get("content-length")
     if cl is not None and cl.isdigit() and int(cl) > max_bytes:
-        raise _reject_ingest(413, "payload too large")
+        raise reject(413, "payload too large")
 
 
-async def _read_capped_body(request: Request, max_bytes: int) -> bytes:
+async def _read_capped_body(
+    request: Request,
+    max_bytes: int,
+    reject: Callable[[int, str], HTTPException] = _reject_ingest,
+) -> bytes:
     """Stream the body and abort the moment it exceeds ``max_bytes``.
 
     ``request.body()``/``request.json()`` buffer the entire payload
     before any size check can run — a chunked or headerless POST of
     arbitrary size would be materialized first. Streaming keeps memory
-    at ≤ max_bytes + one chunk.
+    at ≤ max_bytes + one chunk. ``reject`` picks the metric family:
+    ingest endpoints count ingest errors; query-by-body endpoints don't.
     """
     chunks: list[bytes] = []
     total = 0
     async for chunk in request.stream():
         total += len(chunk)
         if total > max_bytes:
-            raise _reject_ingest(413, "payload too large")
+            raise reject(413, "payload too large")
         chunks.append(chunk)
     return b"".join(chunks)
 
@@ -420,30 +429,71 @@ def create_app(
             "results": [r.model_dump(mode="json") for r in results],
         }
 
+    _MAX_EVAL_TRACES = 500
+    _MAX_EVAL_SPECS = 100
+
+    def _eval_specs(body: dict[str, Any]) -> list[Any]:
+        specs = body.get("evaluators")
+        if (
+            not isinstance(specs, list)
+            or not specs
+            or len(specs) > _MAX_EVAL_SPECS
+        ):
+            raise _reject_request(
+                422, f"evaluators: 1..{_MAX_EVAL_SPECS} specs required"
+            )
+        return specs
+
+    def _eval_project_id(body: dict[str, Any]) -> str | None:
+        pid = body.get("project_id")
+        if pid is not None and not isinstance(pid, str):
+            raise _reject_request(422, "project_id must be a string")
+        return pid
+
+    def _eval_dataset(body: dict[str, Any]) -> str | None:
+        ds = body.get("dataset")
+        if ds is not None and not isinstance(ds, str):
+            raise _reject_request(422, "dataset must be a string")
+        return ds
+
+    def _eval_traces(body: dict[str, Any]) -> list[Any]:
+        trace_ids = body.get("trace_ids")
+        if (
+            not isinstance(trace_ids, list)
+            or not trace_ids
+            or len(trace_ids) > _MAX_EVAL_TRACES
+            or not all(isinstance(t, str) for t in trace_ids)
+        ):
+            raise _reject_request(
+                422, f"trace_ids: 1..{_MAX_EVAL_TRACES} strings required"
+            )
+        pid = _eval_project_id(body)
+        return [_get_trace_or_404(tid, pid) for tid in trace_ids]
+
+    async def _eval_body(request: Request) -> Any:
+        _check_declared_size(request, cfg.max_payload_bytes, _reject_request)
+        try:
+            body = json.loads(
+                await _read_capped_body(
+                    request, cfg.max_payload_bytes, _reject_request
+                )
+            )
+        except json.JSONDecodeError as exc:
+            raise _reject_request(400, f"invalid JSON: {exc}") from exc
+        if not isinstance(body, dict):
+            raise _reject_request(422, "body must be a JSON object")
+        return body
+
     @app.post(f"/{API_VERSION}/eval/run", dependencies=read_deps)
     async def eval_run(request: Request) -> dict[str, Any]:
         """Evaluate specs over a set of stored traces → EvalReport."""
         from forge_lens.eval import evaluate_traces
 
-        body = json.loads(
-            await _read_capped_body(request, cfg.max_payload_bytes)
-        )
-        if not isinstance(body, dict):
-            raise _reject_request(422, "body must be a JSON object")
-        trace_ids = body.get("trace_ids")
-        if not isinstance(trace_ids, list) or not trace_ids:
-            raise _reject_request(422, "trace_ids: non-empty list required")
-        specs = body.get("evaluators")
-        if not isinstance(specs, list) or not specs:
-            raise _reject_request(422, "evaluators: non-empty list of specs required")
-        traces = [
-            _get_trace_or_404(str(tid), body.get("project_id"))
-            for tid in trace_ids[:500]
-        ]
+        body = await _eval_body(request)
         report = evaluate_traces(
-            traces,
-            specs,
-            dataset=body.get("dataset"),
+            _eval_traces(body),
+            _eval_specs(body),
+            dataset=_eval_dataset(body),
         )
         return report.model_dump(mode="json")
 
@@ -452,25 +502,19 @@ def create_app(
         """A/B compare: ``{a: {trace_ids,dataset}, b: {...}, evaluators}``."""
         from forge_lens.eval import compare_runs, evaluate_traces
 
-        body = json.loads(
-            await _read_capped_body(request, cfg.max_payload_bytes)
-        )
-        if not isinstance(body, dict):
-            raise _reject_request(422, "body must be a JSON object")
-        specs = body.get("evaluators")
-        if not isinstance(specs, list) or not specs:
-            raise _reject_request(422, "evaluators: non-empty list of specs required")
+        body = await _eval_body(request)
+        specs = _eval_specs(body)
 
         def _side(key: str) -> Any:
             side = body.get(key)
-            if not isinstance(side, dict) or not isinstance(side.get("trace_ids"), list):
-                raise _reject_request(422, f"{key}: {{trace_ids: [...]}} required")
-            traces = [
-                _get_trace_or_404(str(tid), body.get("project_id"))
-                for tid in side["trace_ids"][:500]
-            ]
+            if not isinstance(side, dict):
+                raise _reject_request(422, f"{key}: object required")
+            side_ids = dict(side)
+            side_ids.setdefault("project_id", _eval_project_id(body))
             return evaluate_traces(
-                traces, specs, dataset=side.get("dataset"),
+                _eval_traces(side_ids),
+                specs,
+                dataset=_eval_dataset(side),
             )
 
         return compare_runs(_side("a"), _side("b"))

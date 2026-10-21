@@ -69,6 +69,19 @@ def _latency_budget(
         )
     # envelope wall-clock — the honest "how long did the run take"
     observed = (trace.ended_at - trace.started_at).total_seconds() * 1000.0
+    if observed < 0:
+        return _result(
+            "latency_budget",
+            "within_budget_ms",
+            None,
+            trace,
+            now,
+            {
+                "budget_ms": str(budget),
+                "observed_ms": f"{observed:.3f}",
+                "reason": "negative envelope duration — no verdict",
+            },
+        )
     return _result(
         "latency_budget",
         "within_budget_ms",
@@ -159,7 +172,7 @@ EVALUATORS: dict[str, tuple[Evaluator, bool]] = {
     "error_free": (_error_free, True),
     "latency_budget": (_latency_budget, True),
     "token_budget": (_token_budget, True),
-    "tool_success": (_tool_success, False),
+    "tool_success": (_tool_success, True),
     "has_span": (_has_span, True),
 }
 """Binary flag: ``True`` = score∈{0,1} → proportion test applies."""
@@ -167,7 +180,7 @@ EVALUATORS: dict[str, tuple[Evaluator, bool]] = {
 
 def run_evaluators(
     trace: Trace,
-    specs: list[dict[str, Any]],
+    specs: list[Any],
     *,
     now: datetime | None = None,
 ) -> list[EvaluationResult]:
@@ -179,6 +192,19 @@ def run_evaluators(
     """
     out: list[EvaluationResult] = []
     for spec in specs:
+        if not isinstance(spec, dict):
+            # a malformed spec reports itself — it never 500s the run
+            out.append(
+                _result(
+                    "invalid_spec",
+                    "evaluator_error",
+                    None,
+                    trace,
+                    now,
+                    {"reason": f"spec must be an object, got {type(spec).__name__}"},
+                )
+            )
+            continue
         name = str(spec.get("name", ""))
         entry = EVALUATORS.get(name)
         params = spec.get("params") or {}
@@ -191,6 +217,18 @@ def run_evaluators(
                     trace,
                     now,
                     {"reason": f"unknown evaluator {name!r}"},
+                )
+            )
+            continue
+        if not isinstance(params, dict):
+            out.append(
+                _result(
+                    name,
+                    "evaluator_error",
+                    None,
+                    trace,
+                    now,
+                    {"reason": f"params must be an object, got {type(params).__name__}"},
                 )
             )
             continue

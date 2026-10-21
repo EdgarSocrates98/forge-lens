@@ -670,3 +670,73 @@ def test_eval_run_and_compare_endpoints(
         "/v1/eval/compare", json={"a": {}, "b": {"trace_ids": [tid]},
                                   "evaluators": [{"name": "x"}]}
     ).status_code == 422
+
+
+def test_eval_malformed_bodies_are_4xx_not_500(
+    client: TestClient, synthetic_trace: Trace
+) -> None:
+    """Every malformed eval body shape must be 4xx — the round-3 rule."""
+    client.post("/v1/traces", json=TraceIngest(traces=[synthetic_trace]).model_dump(mode="json"))
+    tid = synthetic_trace.trace_id
+    bad_bodies = [
+        ("{not json", "raw"),                                    # bad JSON
+        ('[1,2]', "raw"),                                        # non-object
+        ({"trace_ids": [tid], "evaluators": []}, "json"),        # empty specs
+        ({"trace_ids": [tid] * 501,
+          "evaluators": [{"name": "error_free"}]}, "json"),      # over cap
+        ({"trace_ids": ["x" * i for i in range(1)],
+          "evaluators": [{"name": "error_free"}] * 0}, "json"),  # empty again
+        ({"trace_ids": [1, 2], "evaluators": [{"name": "x"}]}, "json"),  # non-str ids
+        ({"trace_ids": [tid], "evaluators": [{"name": "error_free"}] * 101}, "json"),
+        ({"trace_ids": [tid], "evaluators": [{"name": "error_free"}],
+          "dataset": 123}, "json"),                              # non-str dataset
+        ({"trace_ids": [tid], "evaluators": [{"name": "error_free"}],
+          "project_id": {"x": 1}}, "json"),                      # non-str project
+    ]
+    for body, kind in bad_bodies:
+        if kind == "raw":
+            r = client.post("/v1/eval/run", content=body,
+                            headers={"Content-Type": "application/json"})
+        else:
+            r = client.post("/v1/eval/run", json=body)
+        assert r.status_code in (400, 404, 422), (body, r.status_code, r.text)
+
+    # malformed compare bodies
+    for body in (
+        "{bad",
+        {"a": {}, "b": {"trace_ids": [tid]}, "evaluators": [{"name": "x"}]},
+        {"a": {"trace_ids": []}, "b": {"trace_ids": [tid]},
+         "evaluators": [{"name": "x"}]},                          # empty side
+        {"a": {"trace_ids": [tid]}, "b": "x",
+         "evaluators": [{"name": "x"}]},
+        {"a": {"trace_ids": [tid]}, "b": {"trace_ids": [tid]},
+         "evaluators": [{"name": "x"}], "project_id": 5},
+    ):
+        r = client.post(
+            "/v1/eval/compare",
+            content=body if isinstance(body, str) else None,
+            json=None if isinstance(body, str) else body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert r.status_code in (400, 404, 422), (body, r.status_code)
+
+
+def test_eval_specs_never_500_even_when_junk(
+    client: TestClient, synthetic_trace: Trace
+) -> None:
+    """Junk spec *contents* (non-dict, str params) score None — the
+    engine reports the defect instead of crashing on it."""
+    client.post("/v1/traces", json=TraceIngest(traces=[synthetic_trace]).model_dump(mode="json"))
+    tid = synthetic_trace.trace_id
+    r = client.post(
+        "/v1/eval/run",
+        json={"trace_ids": [tid],
+              "evaluators": [{"name": "has_span", "params": "oops"}, 42]},
+    )
+    assert r.status_code == 200
+    results = r.json()["results"][tid]
+    assert all(res["score"] is None for res in results)
+    assert any("spec must be an object" in res["details"]["reason"]
+               for res in results)
+    assert any("params must be an object" in res["details"]["reason"]
+               for res in results)
