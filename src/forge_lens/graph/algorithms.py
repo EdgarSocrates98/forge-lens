@@ -46,10 +46,11 @@ def critical_path(graph: ExecutionGraph) -> dict[str, object]:
         while stack:
             node, expanded = stack.pop()
             if not expanded:
+                # nodes are pushed only while WHITE, so a (node, False)
+                # entry can only pop as WHITE or BLACK (already resolved
+                # from another entry point)
                 if color[node] == BLACK:
                     continue
-                if color[node] == GRAY:
-                    continue  # re-entry handled at the parent's expansion
                 color[node] = GRAY
                 stack.append((node, True))
                 for child in sorted(kids.get(node, []), reverse=True):

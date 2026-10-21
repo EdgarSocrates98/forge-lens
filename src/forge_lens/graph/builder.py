@@ -12,6 +12,8 @@ from collections.abc import Iterable
 from forge_lens.contracts.v1.trace import Span, Trace
 from forge_lens.graph.models import EdgeKind, ExecutionGraph, GraphEdge, GraphNode
 
+WHITE, GRAY, BLACK = 0, 1, 2
+
 
 def _node(span: Span) -> GraphNode:
     return GraphNode(
@@ -96,25 +98,38 @@ def build_trace_graph(trace: Trace) -> ExecutionGraph:
     )
 
 
-def _cycle_members(spans: list[Span]) -> int:
-    """Count of nodes sitting on a parent-pointer cycle.
+def cycle_member_ids(parent_of: dict[str, str | None]) -> set[str]:
+    """Ids of nodes sitting on a parent-pointer cycle — O(n).
 
-    A span is a cycle member iff walking its ancestor chain returns to
-    itself; nodes whose chain merely *leads into* a cycle are affected
-    downstream but not members.
+    Parentage is a functional graph (each node has ≤1 parent), so a
+    three-color walk finds every cycle member in one pass: a node is a
+    member iff walking its ancestor chain re-enters a node still open
+    in the *same* walk. Nodes that merely lead into a cycle are visited
+    but not members.
     """
-    parent_of = {s.span_id: s.parent_span_id for s in spans}
-    ids = set(parent_of)
-    members = 0
-    for sid in ids:
-        node: str | None = sid
-        seen: set[str] = set()
-        while node is not None and node in ids and node not in seen:
-            seen.add(node)
+    color = dict.fromkeys(parent_of, WHITE)
+    members: set[str] = set()
+    for start in parent_of:
+        if color[start] != WHITE:
+            continue
+        path: list[str] = []
+        node: str | None = start
+        while node is not None and node in parent_of and color[node] == WHITE:
+            color[node] = GRAY
+            path.append(node)
             node = parent_of.get(node)
-        if node == sid:
-            members += 1
+        if node is not None and node in parent_of and color[node] == GRAY:
+            # re-entered a node open in this walk — the cycle is the
+            # tail of path from that node on
+            members.update(path[path.index(node) :])
+        for p in path:
+            color[p] = BLACK
     return members
+
+
+def _cycle_members(spans: list[Span]) -> int:
+    parent_of = {s.span_id: s.parent_span_id for s in spans}
+    return len(cycle_member_ids(parent_of))
 
 
 def _max_depth(siblings: dict[str | None, list[Span]], root_id: str | None) -> int:

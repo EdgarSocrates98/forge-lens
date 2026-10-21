@@ -569,3 +569,36 @@ backend (`forge_lens/investigate/`): `classify_failure`,
 `replay_timeline`, `incident_bundle`, endpoints `/failure` `/replay`
 `/incident`, CLI `forge-lens incident` — relatório em
 `cycle-05-final-report.md`.
+
+## Rodada 11 — correções em Cycle 05 + hardening de ciclos
+
+- **`replay_timeline` vazio sem chaves (crítico)**: trace zero-span
+  retornava sem `total_ms`/`unclosed_spans` → `KeyError` no CLI
+  `incident` e schema inconsistente em `/replay`. Ambas sempre emitidas.
+- **`CYCLE` só via self-parent**: agora qualquer ciclo real —
+  `cycle_member_ids` (walk funcional O(n), WHITE/GRAY/BLACK) público em
+  `graph/builder.py`, reutilizado pelo classifier e pelo stat
+  `cycle_members`. `failed=true` para topologia impossível.
+- **`_cycle_members` O(n²)**: o walk por nó era O(n·depth) (~15s em 5k
+  spans, minutos em 20k = limite legal de ingest). Substituído pelo
+  mesmo detector O(n).
+- **`failed` em CLOCK_SKEW**: flag de data-quality não é veredicto —
+  `failed = erros | não-fechados | ciclo`.
+- **`rate_limit` escopo**: apenas spans com erro — 429 recuperado não
+  é causa.
+- **`confidence: Literal["observed","inferred"]`** — disciplina de
+  contrato.
+- **`UNKNOWN_TOKENS` em usage malformado**: `extract_usage() is None`
+  cobre ausente **e** não-parseável.
+- **`span_trace_id` determinístico**: `ORDER BY (trace_id = ?) DESC,
+  trace_id` — mesma-trace primeiro (sem falso ORPHAN em entregas
+  parciais) e desempate estável.
+- **ORPHAN stale**: `_refresh_integrity_flags` e `_merge_span` limpam
+  ORPHAN quando o parent aterrissa na mesma trace.
+- **`_TIMEOUT_RE`**: "exceeded" nu removido ("context length exceeded"
+  não é timeout); `_msg` inclui `exception.type`.
+- **Dead GRAY check** em `critical_path` removido (pushes só em WHITE).
+
+Testes: +12 (ciclos multi-nó/self/lead-in, cadeia 5k, skew≠falha,
+429 recuperado, context-length≠timeout, exception.type, replay vazio,
+ORPHAN resolvido/falso, usage malformado).

@@ -381,3 +381,114 @@ def test_incident_bundle_composes_evidence() -> None:
     assert "waste" in b
     assert "replay" in b
     assert b["bundle_version"] == "1.0.0"
+
+
+# -- round-11 regressions -----------------------------------------------------
+
+
+def test_replay_empty_trace_has_full_schema() -> None:
+    """Zero-span trace → replay emits every key the CLI/API consume."""
+    from forge_lens.investigate import incident_bundle, replay_timeline
+
+    out = replay_timeline(_trace([]))
+    assert out["entries"] == []
+    assert out["total_ms"] == 0.0
+    assert out["unclosed_spans"] == 0
+    # the CLI formats bundle['replay']['total_ms'] — must not KeyError
+    b = incident_bundle(_trace([]), PricingRegistry())
+    assert b["replay"]["total_ms"] == 0.0
+
+
+def test_classify_cycle_multi_node() -> None:
+    """A↔B parent cycle → cycle category with both members as evidence."""
+    from forge_lens.investigate import classify_failure
+
+    a = _span("a1", "a", parent="b1")
+    b = _span("b1", "b", parent="a1")
+    r = classify_failure(_trace([a, b]))
+    assert r.failed is True
+    assert r.category == "cycle"
+    assert sorted(r.evidence["span_ids"]) == [
+        "a1".ljust(16, "0"),
+        "b1".ljust(16, "0"),
+    ]
+
+
+def test_classify_cycle_self_parent() -> None:
+    from forge_lens.investigate import classify_failure
+
+    s = _span("a1", "self", parent="a1")
+    r = classify_failure(_trace([s]))
+    assert r.category == "cycle"
+    assert r.evidence["span_ids"] == ["a1".ljust(16, "0")]
+
+
+def test_classify_lead_into_cycle_is_not_member() -> None:
+    """Node whose chain leads into a cycle is not itself a member."""
+    from forge_lens.investigate import classify_failure
+
+    a = _span("a1", "a", parent="b1")
+    b = _span("b1", "b", parent="a1")
+    lead = _span("c1", "lead", parent="a1")  # hangs off the cycle
+    r = classify_failure(_trace([a, b, lead]))
+    assert r.category == "cycle"
+    assert "c1".ljust(16, "0") not in r.evidence["span_ids"]
+
+
+def test_classify_clock_skew_is_not_failure() -> None:
+    """CLOCK_SKEW is a data-quality flag — not an execution failure."""
+    from forge_lens.investigate import classify_failure
+
+    s = _span("a1", "skewed", flags=[IntegrityFlag.CLOCK_SKEW])
+    r = classify_failure(_trace([s]))
+    assert r.failed is False
+    assert r.category == "unknown"
+
+
+def test_classify_recovered_429_not_failure() -> None:
+    """A 429 on a span that ended ok → no rate_limit verdict."""
+    from forge_lens.investigate import classify_failure
+
+    ok = _span("a1", "retried", attrs={"http.status_code": 429})
+    r = classify_failure(_trace([ok]))
+    assert r.failed is False
+    assert r.category == "unknown"
+
+
+def test_classify_context_length_exceeded_not_timeout() -> None:
+    from forge_lens.investigate import classify_failure
+
+    s = _err_span("a1", "gen", SpanKind.LLM, msg="context length exceeded")
+    r = classify_failure(_trace([s]))
+    assert r.category == "llm_error"  # not timeout — "exceeded" alone isn't evidence
+
+
+def test_classify_timeout_via_exception_type() -> None:
+    from forge_lens.investigate import classify_failure
+
+    s = _err_span("a1", "call", SpanKind.TOOL,
+                  attrs={"exception.type": "TimeoutError"})
+    assert classify_failure(_trace([s])).category == "timeout"
+
+
+def test_cycle_members_linear_deep_chain() -> None:
+    """O(n) walk: 5k-deep chain reports zero cycle members quickly."""
+    spans = [
+        _span(f"{i:04x}", f"s{i}", parent=f"{i - 1:04x}" if i else None)
+        for i in range(5000)
+    ]
+    g = build_trace_graph(_trace(spans))
+    assert g.stats["cycle_members"] == 0
+    assert g.stats["span_count"] == 5000
+
+
+def test_cycle_members_disconnected_cycles() -> None:
+    from forge_lens.graph.builder import cycle_member_ids
+
+    p = {
+        "a": "b", "b": "a",          # cycle 1
+        "c": "d", "d": "e", "e": "c",  # cycle 2 (3 nodes)
+        "f": "a",                     # leads into cycle 1 — not a member
+        "g": None,                    # clean root
+    }
+    assert cycle_member_ids(p) == {"a", "b", "c", "d", "e"}

@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
 from forge_lens.contracts.base import LensModel
 from forge_lens.contracts.v1.trace import IntegrityFlag, Span, SpanKind, Trace
+from forge_lens.graph.builder import cycle_member_ids
 
 
 class FailureCategory(StrEnum):
@@ -48,13 +49,16 @@ class FailureReport(LensModel):
     trace_id: str
     failed: bool
     category: FailureCategory = FailureCategory.UNKNOWN
-    confidence: str = "observed"
+    confidence: Literal["observed", "inferred"] = "observed"
     """``observed`` = direct span evidence; ``inferred`` = heuristic."""
     evidence: dict[str, Any] = Field(default_factory=dict)
     detail: str = ""
 
 
-_TIMEOUT_RE = re.compile(r"timeout|timed?\s*out|deadline|exceeded", re.IGNORECASE)
+# "timeout"/"timed out"/"deadline" — bare "exceeded" is deliberately
+# excluded: "context length exceeded" / "budget exceeded" are not
+# timeout signals
+_TIMEOUT_RE = re.compile(r"timeout|timed?\s*out|deadline", re.IGNORECASE)
 
 
 def _err_spans(trace: Trace) -> list[Span]:
@@ -63,7 +67,12 @@ def _err_spans(trace: Trace) -> list[Span]:
 
 def _msg(span: Span) -> str:
     parts = [span.status.message or ""]
-    for key in ("error.message", "exception.message", "http.status_text"):
+    for key in (
+        "error.message",
+        "exception.message",
+        "exception.type",
+        "http.status_text",
+    ):
         v = span.attributes.get(key)
         if isinstance(v, str):
             parts.append(v)
@@ -73,28 +82,38 @@ def _msg(span: Span) -> str:
 def classify_failure(trace: Trace) -> FailureReport:
     """Classify a trace's failure from observed span evidence.
 
-    Rules run in specificity order; the first match wins. A trace with
-    no error spans and no integrity anomalies reports ``failed=False``.
+    Rules run in specificity order; the first match wins. ``failed`` is
+    True only when work errored, never completed, or the declared
+    topology is impossible — data-quality flags alone don't fail.
     """
+    errs = _err_spans(trace)
+    unclosed = [
+        s for s in trace.spans if IntegrityFlag.MISSING_END in s.integrity_flags
+    ]
+    cyclic = sorted(
+        cycle_member_ids({s.span_id: s.parent_span_id for s in trace.spans})
+    )
+    # a trace "failed" when work errored, never completed, or its own
+    # declared topology is impossible — data-quality flags (clock_skew,
+    # duplicate, …) stay evidence, not failure verdicts
     report = FailureReport(
         trace_id=trace.trace_id,
-        failed=bool(_err_spans(trace))
-        or any(
-            IntegrityFlag.CLOCK_SKEW in s.integrity_flags for s in trace.spans
-        ),
+        failed=bool(errs) or bool(unclosed) or bool(cyclic),
     )
-    errs = _err_spans(trace)
 
-    # parent-cycle evidence: member flags emitted at ingest/graph time
-    cyclic = [s.span_id for s in trace.spans if s.parent_span_id == s.span_id]
+    # parent-pointer cycle — any member of a real cycle in the stored
+    # topology (self-loop or multi-node), via the same O(n) walk the
+    # graph builder uses
     if cyclic:
         report.category = FailureCategory.CYCLE
         report.evidence = {"span_ids": cyclic}
-        report.detail = "span declares itself as parent — corrupted topology"
+        report.detail = "parent-pointer cycle in stored topology — corrupted parentage"
         return report
 
-    # rate limit: 429 in attributes/status of any span
-    for s in trace.spans:
+    # rate limit: 429 evidence on spans that actually errored — a
+    # recovered throttle (retried internally, ended ok) is not the
+    # failure cause
+    for s in errs:
         status_code = s.attributes.get("http.status_code") or s.attributes.get(
             "http.response.status_code"
         )
@@ -133,9 +152,6 @@ def classify_failure(trace: Trace) -> FailureReport:
 
     # unclosed spans — execution truncated mid-flight (crash/timeout of
     # the host process itself)
-    unclosed = [
-        s for s in trace.spans if IntegrityFlag.MISSING_END in s.integrity_flags
-    ]
     if unclosed and not errs:
         report.category = FailureCategory.INCOMPLETE
         report.confidence = "inferred"

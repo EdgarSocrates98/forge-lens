@@ -489,7 +489,9 @@ class SQLiteTraceStore:
         if merged.parent_span_id is None or self._span_exists(
             project_id, merged.trace_id, merged.parent_span_id
         ):
+            # parent resolved inside this trace — both absence flags die
             flags.discard(IntegrityFlag.MISSING_PARENT)
+            flags.discard(IntegrityFlag.ORPHAN)
         merged.integrity_flags = sorted(flags, key=lambda f: f.value)
 
         if merged.model_dump(mode="json", exclude={"integrity_flags"}) == stored.model_dump(
@@ -534,29 +536,40 @@ class SQLiteTraceStore:
             is not None
         )
 
-    def span_trace_id(self, project_id: str, span_id: str) -> str | None:
+    def span_trace_id(
+        self, project_id: str, span_id: str, *, trace_id: str | None = None
+    ) -> str | None:
         """Which stored trace owns ``span_id`` in this project, if any.
 
         Used at ingest to mark ORPHAN: a ``parent_span_id`` that exists
         under a *different* trace will never resolve inside this one.
+        A ``span_id`` can legitimately live under several traces
+        (cross-trace deliveries); the same-trace row is preferred so a
+        parent already delivered *here* doesn't produce a false ORPHAN,
+        and remaining ties break on ``trace_id`` for determinism.
         """
         row = self._conn.execute(
-            "SELECT trace_id FROM spans WHERE project_id=? AND span_id=?",
-            (project_id, span_id),
+            "SELECT trace_id FROM spans WHERE project_id=? AND span_id=? "
+            "ORDER BY (trace_id = ?) DESC, trace_id LIMIT 1",
+            (project_id, span_id, trace_id or ""),
         ).fetchone()
         return str(row["trace_id"]) if row else None
 
     def _refresh_integrity_flags(self, trace: Trace) -> None:
-        """Clear MISSING_PARENT/MISSING_END flags the stored data resolved."""
+        """Clear MISSING_PARENT/ORPHAN/MISSING_END the stored data resolved."""
         # json_each gives an exact element match — LIKE '%missing_end%'
         # would treat '_' as a single-char wildcard
         rows = self._conn.execute(
             "SELECT span_id, parent_span_id, ended_ns, integrity_flags_json FROM spans "
             "WHERE project_id=? AND trace_id=? AND EXISTS ("
             "  SELECT 1 FROM json_each(spans.integrity_flags_json) je"
-            "  WHERE je.value IN ('missing_parent','missing_end'))",
+            "  WHERE je.value IN ('missing_parent','missing_end','orphan'))",
             (trace.project_id, trace.trace_id),
         ).fetchall()
+        resolved_parent = {
+            IntegrityFlag.MISSING_PARENT.value,
+            IntegrityFlag.ORPHAN.value,
+        }
         for r in rows:
             flags = json.loads(r["integrity_flags_json"])
             keep = list(flags)
@@ -565,7 +578,9 @@ class SQLiteTraceStore:
             if r["parent_span_id"] is None or self._span_exists(
                 trace.project_id, trace.trace_id, r["parent_span_id"]
             ):
-                keep = [f for f in keep if f != IntegrityFlag.MISSING_PARENT.value]
+                # the parent now exists *in this trace* — orphanhood is
+                # stale the same way missing_parent is
+                keep = [f for f in keep if f not in resolved_parent]
             if keep != flags:
                 self._conn.execute(
                     "UPDATE spans SET integrity_flags_json=? "

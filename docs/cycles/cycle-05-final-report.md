@@ -21,10 +21,15 @@ hipotético multi-hipótese e a UI de investigação dependem de Cycles 02/07.
 Ordem de especificidade — a primeira regra que casa vence, e toda
 classificação nomeia spans/atributos em `evidence`:
 
-1. `cycle` — span declara a si mesmo como pai (topologia corrompida).
-2. `rate_limit` — `http.status_code=429` ou "rate limit" em mensagem.
-3. `timeout` — regex `timeout|timed out|deadline|exceeded` em
-   status.message/`error.message`/`exception.message`/`http.status_text`.
+1. `cycle` — qualquer membro de um ciclo real de parentesco na
+   topologia armazenada (self-loop ou multi-nó; mesmo walk O(n) do
+   graph builder). `failed=true` — a topologia declarada é impossível.
+2. `rate_limit` — `http.status_code=429` ou "rate limit" em mensagem
+   **de um span que errou** (429 recuperado não é causa).
+3. `timeout` — regex `timeout|timed out|deadline` (sem "exceeded" nu:
+   "context length exceeded" não é timeout) em
+   status.message/`error.message`/`exception.message`/`exception.type`/
+   `http.status_text`.
 4. `guardrail` → `tool_error` → `llm_error` — erro em span do kind.
 5. `incomplete` — spans com `missing_end` e nenhum span de erro
    (`confidence: inferred` — host provavelmente morreu no meio do run).

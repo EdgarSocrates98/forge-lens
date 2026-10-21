@@ -54,7 +54,13 @@ def replay_timeline(trace: Trace) -> dict[str, Any]:
             )
     entries.sort(key=lambda e: (e["_sort"], e["span_id"], e["kind"]))
     if not entries:
-        return {"trace_id": trace.trace_id, "entries": [], "span_count": 0}
+        return {
+            "trace_id": trace.trace_id,
+            "entries": [],
+            "span_count": 0,
+            "total_ms": 0.0,
+            "unclosed_spans": 0,
+        }
 
     t0 = entries[0]["_sort"]
     total_ms = (entries[-1]["_sort"] - t0).total_seconds() * 1000.0

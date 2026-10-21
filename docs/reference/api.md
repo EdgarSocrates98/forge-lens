@@ -91,12 +91,17 @@ cached_input_per_mtok}}}` — a tabela efetiva em uso.
 
 ### `GET /v1/traces/{trace_id}/failure?project_id`
 Classificação determinística de falha: `{trace_id, failed, category,
-confidence, evidence, detail}`. Categorias: `timeout`, `rate_limit`,
-`tool_error`, `llm_error`, `guardrail`, `incomplete` (spans nunca
-fechados — host provável morto), `cycle`, `unknown`. Regras correm em
-ordem de especificidade; `evidence` nomeia os spans/atributos que
-dispararam. `unknown` com `failed=false` é a resposta honesta para
-traces saudáveis.
+confidence, evidence, detail}`. `failed` é verdade somente quando o
+trabalho errou, nunca completou, ou a topologia declarada é impossível —
+flags de data-quality (`clock_skew`, `duplicate`, …) são evidência, não
+veredicto. Categorias: `timeout`, `rate_limit` (apenas em spans que
+erraram — um 429 recuperado não é causa), `tool_error`, `llm_error`,
+`guardrail`, `incomplete` (spans nunca fechados — host provável morto),
+`cycle` (qualquer ciclo de parentesco real — self-loop ou multi-nó,
+detectado pelo mesmo walk O(n) do graph builder), `unknown`. Regras
+correm em ordem de especificidade; `evidence` nomeia os
+spans/atributos que dispararam. `unknown` com `failed=false` é a
+resposta honesta para traces saudáveis.
 
 ### `GET /v1/traces/{trace_id}/replay?project_id`
 Replay **registrado** (não re-executa código do agente): timeline único

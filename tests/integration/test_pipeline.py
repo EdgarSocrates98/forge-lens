@@ -270,3 +270,118 @@ def test_partial_trace_flags_root_span(
     stored = tmp_store.get_trace(partial.trace_id)
     root = next(s for s in stored.spans if s.span_id == stored.root_span_id)
     assert IntegrityFlag.PARTIAL_TRACE in root.integrity_flags
+
+
+def test_orphan_cleared_when_parent_lands_in_trace(
+    tmp_store: SQLiteTraceStore,
+) -> None:
+    """ORPHAN is stale once the parent arrives *in the same trace*."""
+    from datetime import UTC, datetime
+
+    from forge_lens.contracts.v1.trace import Span, Trace
+
+    p = _pipeline(tmp_store)
+    child = Span(
+        trace_id="b" * 32, span_id="9" * 16, parent_span_id="1" * 16,
+        name="child",
+        start_time=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+        end_time=datetime(2026, 1, 1, 12, 0, 1, tzinfo=UTC),
+    )
+    # the "foreign" parent first — under a different trace
+    foreign_parent = Span(
+        trace_id="a" * 32, span_id="1" * 16, name="foreign-parent",
+        start_time=datetime(2026, 1, 1, 11, 0, tzinfo=UTC),
+        end_time=datetime(2026, 1, 1, 11, 0, 1, tzinfo=UTC),
+    )
+    p.ingest([
+        Trace(trace_id="a" * 32, project_id="default",
+              started_at=foreign_parent.start_time,
+              ended_at=foreign_parent.end_time, spans=[foreign_parent]),
+        Trace(trace_id="b" * 32, project_id="default",
+              started_at=child.start_time, ended_at=child.end_time,
+              spans=[child]),
+    ])
+    flags = tmp_store.get_trace("b" * 32).spans[0].integrity_flags
+    assert IntegrityFlag.ORPHAN in flags
+
+    # now the parent is delivered INTO trace b — orphan resolves
+    own_parent = foreign_parent.model_copy(update={"trace_id": "b" * 32})
+    p.ingest([
+        Trace(trace_id="b" * 32, project_id="default",
+              started_at=own_parent.start_time, ended_at=child.end_time,
+              spans=[own_parent, child.model_copy()]),
+    ])
+    flags2 = {
+        s.span_id: s.integrity_flags for s in tmp_store.get_trace("b" * 32).spans
+    }["9" * 16]
+    assert IntegrityFlag.ORPHAN not in flags2
+    assert IntegrityFlag.MISSING_PARENT not in flags2
+
+
+def test_parent_already_in_same_trace_no_false_orphan(
+    tmp_store: SQLiteTraceStore,
+) -> None:
+    """span_id present in this trace AND another → not an orphan."""
+    from datetime import UTC, datetime
+
+    from forge_lens.contracts.v1.trace import Span, Trace
+
+    p = _pipeline(tmp_store)
+    parent = Span(
+        trace_id="a" * 32, span_id="1" * 16, name="parent",
+        start_time=datetime(2026, 1, 1, 11, 0, tzinfo=UTC),
+        end_time=datetime(2026, 1, 1, 11, 0, 1, tzinfo=UTC),
+    )
+    p.ingest([
+        Trace(trace_id="a" * 32, project_id="default",
+              started_at=parent.start_time, ended_at=parent.end_time,
+              spans=[parent]),
+        # trace b already contains its own copy of the parent from an
+        # earlier delivery — but only a root so far
+        Trace(trace_id="b" * 32, project_id="default",
+              started_at=parent.start_time, ended_at=parent.end_time,
+              spans=[parent.model_copy(update={"trace_id": "b" * 32})]),
+    ])
+    child = Span(
+        trace_id="b" * 32, span_id="9" * 16, parent_span_id="1" * 16,
+        name="child",
+        start_time=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+        end_time=datetime(2026, 1, 1, 12, 0, 1, tzinfo=UTC),
+    )
+    # NOTE: child's parent IS in the same trace already — but the
+    # incoming trace's own span set doesn't contain it, so the pipeline
+    # consults the store; same-trace row must win → no ORPHAN
+    p.ingest([
+        Trace(trace_id="b" * 32, project_id="default",
+              started_at=child.start_time, ended_at=child.end_time,
+              spans=[child]),
+    ])
+    flags = {
+        s.span_id: s.integrity_flags for s in tmp_store.get_trace("b" * 32).spans
+    }["9" * 16]
+    assert IntegrityFlag.ORPHAN not in flags
+
+
+def test_llm_span_malformed_usage_gets_unknown_tokens(
+    tmp_store: SQLiteTraceStore,
+) -> None:
+    """A present-but-unparseable usage dict is as unknown as none."""
+    from datetime import UTC, datetime
+
+    from forge_lens.contracts.v1.trace import Span, SpanKind, Trace
+
+    bad_usage = Span(
+        trace_id="c" * 32, span_id="1" * 16, name="gen",
+        kind=SpanKind.LLM,
+        start_time=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+        end_time=datetime(2026, 1, 1, 12, 0, 1, tzinfo=UTC),
+        attributes={"forge_lens.token_usage": {"model": 42, "input_tokens": "x"}},
+    )
+    p = _pipeline(tmp_store)
+    p.ingest([
+        Trace(trace_id="c" * 32, project_id="default",
+              started_at=bad_usage.start_time, ended_at=bad_usage.end_time,
+              spans=[bad_usage]),
+    ])
+    stored = tmp_store.get_trace("c" * 32)
+    assert IntegrityFlag.UNKNOWN_TOKENS in stored.spans[0].integrity_flags

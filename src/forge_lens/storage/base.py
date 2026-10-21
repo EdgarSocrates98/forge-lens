@@ -41,9 +41,14 @@ class TraceStore(Protocol):
 
     def stats(self) -> dict[str, Any]: ...
 
-    def span_trace_id(self, project_id: str, span_id: str) -> str | None:
+    def span_trace_id(
+        self, project_id: str, span_id: str, *, trace_id: str | None = None
+    ) -> str | None:
         """Which stored trace owns ``span_id`` in this project, if any —
-        lets ingest mark ORPHAN for cross-trace parent references."""
+        lets ingest mark ORPHAN for cross-trace parent references.
+        When ``trace_id`` is given, a row under that trace wins (the
+        parent already delivered into this trace is not an orphan); the
+        result is deterministic regardless."""
         ...
 
     def close(self) -> None: ...

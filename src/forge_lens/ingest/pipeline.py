@@ -25,6 +25,7 @@ from forge_lens.core.metrics import (
     METRICS,
 )
 from forge_lens.core.time import ensure_aware
+from forge_lens.intel.cost import extract_usage
 from forge_lens.sanitize.redact import SanitizeReport, sanitize_trace
 from forge_lens.storage.base import TraceStore
 
@@ -93,9 +94,10 @@ def flag_integrity(trace: Trace) -> list[str]:
             span.integrity_flags.append(IntegrityFlag.CLOCK_SKEW)
         if (
             span.kind is SpanKind.LLM
-            and "forge_lens.token_usage" not in span.attributes
+            and extract_usage(span) is None
             and IntegrityFlag.UNKNOWN_TOKENS not in span.integrity_flags
         ):
+            # absent OR malformed usage — both are "we don't know"
             span.integrity_flags.append(IntegrityFlag.UNKNOWN_TOKENS)
     if not trace.spans:
         warnings.append("trace contains no spans")
@@ -236,7 +238,9 @@ class IngestPipeline:
                         and IntegrityFlag.ORPHAN not in span.integrity_flags
                         and (
                             owner := self.store.span_trace_id(
-                                trace.project_id, span.parent_span_id
+                                trace.project_id,
+                                span.parent_span_id,
+                                trace_id=trace.trace_id,
                             )
                         )
                         is not None
