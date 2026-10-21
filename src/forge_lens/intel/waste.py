@@ -31,6 +31,11 @@ class WasteFinding(LensModel):
 
 def _arg_fingerprint(span_attrs: dict[str, Any]) -> str | None:
     """Stable hash of tool-call arguments — identical retries share it."""
+    direct = span_attrs.get("forge_lens.tool_args_sha256")
+    if isinstance(direct, str) and direct:
+        # SDK-emitted fingerprint — survives capture=metadata (the args
+        # themselves stay client-side; the hash is metadata-safe)
+        return direct
     for key in ("forge_lens.tool_args", "tool.parameters", "tool_call.arguments"):
         raw = span_attrs.get(key)
         if isinstance(raw, (str, dict)):

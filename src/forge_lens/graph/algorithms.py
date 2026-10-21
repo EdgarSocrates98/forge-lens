@@ -34,7 +34,7 @@ def critical_path(graph: ExecutionGraph) -> dict[str, object]:
     root candidate and take the maximum — ties break on the
     lexicographically smallest path.
     """
-    durations = {n.id: (n.duration_ms or 0.0) for n in graph.nodes}
+    durations = {n.id: max(0.0, n.duration_ms or 0.0) for n in graph.nodes}
     kids = _children(graph)
     color = {n.id: WHITE for n in graph.nodes}
     memo: dict[str, tuple[float, list[str]]] = {}
@@ -106,7 +106,7 @@ def self_time_ranking(graph: ExecutionGraph, top: int = 5) -> list[dict[str, obj
     invented negative work).
     """
     kids = _children(graph)
-    durations = {n.id: (n.duration_ms or 0.0) for n in graph.nodes}
+    durations = {n.id: max(0.0, n.duration_ms or 0.0) for n in graph.nodes}
     scored: list[tuple[float, str, dict[str, object]]] = []
     for n in graph.nodes:
         child_ms = sum(durations.get(c, 0.0) for c in kids.get(n.id, []))

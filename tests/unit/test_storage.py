@@ -532,3 +532,74 @@ def test_span_provenance_upgrades_on_redelivery(
     trace = tmp_store.get_trace(synthetic_trace.trace_id)
     assert trace is not None
     assert all(s.provenance == Provenance.OBSERVED for s in trace.spans)
+
+
+def test_status_derived_from_spans_on_insert_idempotent(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """W1: INSERT must bind the same span-derived status the UPDATE
+    CASE computes — declared-vs-derived divergence used to flip state
+    on every identical re-delivery."""
+    # declared ERROR + all-OK spans → stored 'ok' from write #1
+    t = synthetic_trace.model_copy(deep=True)
+    for s in t.spans:
+        s.status.code = StatusCode.OK
+    t.status.code = StatusCode.ERROR
+    tmp_store.upsert_trace(t)
+    s1 = tmp_store.get_trace(t.trace_id)
+    assert s1.status.code == StatusCode.OK
+    tmp_store.upsert_trace(t)  # identical re-delivery
+    assert tmp_store.get_trace(t.trace_id).status.code == StatusCode.OK
+
+    # declared OK + an ERROR span → 'error' + error_count on write #1
+    t2 = synthetic_trace.model_copy(deep=True)
+    t2.trace_id = "d" * 32
+    for s in t2.spans:
+        s.trace_id = t2.trace_id
+    t2.status.code = StatusCode.OK
+    tmp_store.upsert_trace(t2)
+    s2 = tmp_store.get_trace(t2.trace_id)
+    assert s2.status.code == StatusCode.ERROR
+    listed = tmp_store.list_traces(project_id="default", status="error")
+    assert any(i["trace_id"] == t2.trace_id for i in listed)
+
+
+def test_naive_event_time_normalized_on_direct_upsert(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """W2: upsert_trace is the public contract — a naive SpanEvent.time
+    must normalize like the pipeline does, or replay 500s."""
+    from forge_lens.contracts.v1.trace import SpanEvent
+    from forge_lens.investigate import replay_timeline
+
+    t = synthetic_trace.model_copy(deep=True)
+    naive_time = datetime(2026, 1, 1, 12, 0, 1, tzinfo=UTC).replace(tzinfo=None)
+    t.spans[0].events = [SpanEvent(name="e", time=naive_time)]
+    tmp_store.upsert_trace(t)
+    stored = tmp_store.get_trace(t.trace_id)
+    assert stored.spans[0].events[0].time.tzinfo is not None
+    tl = replay_timeline(stored)
+    assert any(e["kind"] == "event" for e in tl["entries"])
+
+
+def test_non_finite_attribute_stored_as_null_not_invalid_json(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """W3: NaN/Infinity have no JSON literal — persisted as null, and
+    the stored document stays json_valid (verified in sqlite itself)."""
+    t = synthetic_trace.model_copy(deep=True)
+    t.spans[0].attributes["temperature"] = float("nan")
+    t.resource_attributes["threshold"] = float("inf")
+    tmp_store.upsert_trace(t)
+    row = tmp_store._conn.execute(
+        "SELECT json_valid(attributes_json) AS va, "
+        "       json_valid((SELECT resource_attributes_json FROM traces "
+        "                  WHERE trace_id=?)) AS vr "
+        "FROM spans WHERE trace_id=? AND span_id=?",
+        (t.trace_id, t.trace_id, t.spans[0].span_id),
+    ).fetchone()
+    assert row["va"] == 1
+    assert row["vr"] == 1
+    stored = tmp_store.get_trace(t.trace_id)
+    assert stored.spans[0].attributes["temperature"] is None
+    assert stored.resource_attributes["threshold"] is None

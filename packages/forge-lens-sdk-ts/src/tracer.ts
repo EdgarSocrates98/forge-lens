@@ -107,6 +107,10 @@ export interface LensTracerOptions {
   redact?: (span: Span) => void;
   /** Consecutive export failures before a trace is dead-lettered (default 5). */
   maxExportFailures?: number;
+  /** Maximum retained dead letters — overflow is counted on
+   *  `deadLettersDropped` so a permanently-broken exporter cannot grow
+   *  memory forever (default 1000). */
+  maxDeadLetters?: number;
   /** Register a beforeExit hook that best-effort flushes pending traces
    *  (default true). */
   shutdownHook?: boolean;
@@ -118,8 +122,10 @@ export class LensTracer {
   /** Failed auto-flush exports — observability never breaks the host. */
   exportErrors = 0;
   /** Traces dropped after `maxExportFailures` consecutive export failures —
-   *  explicit, inspectable, never silent. */
+   *  explicit, inspectable, never silent. Bounded by `maxDeadLetters`. */
   readonly deadLetters: Trace[] = [];
+  /** Dead letters that overflowed `maxDeadLetters` — still counted. */
+  deadLettersDropped = 0;
   private readonly exporter: Exporter;
   private readonly autoFlush: boolean;
   private readonly sessionId?: string;
@@ -128,6 +134,7 @@ export class LensTracer {
   private readonly onDeadLetter?: (trace: Trace) => void;
   private readonly redact?: (span: Span) => void;
   private readonly maxExportFailures: number;
+  private readonly maxDeadLetters: number;
   private readonly pending = new Map<string, Trace>();
   private readonly roots = new Map<string, string>();
   private readonly failures = new Map<string, number>();
@@ -153,6 +160,7 @@ export class LensTracer {
     this.onDeadLetter = opts.onDeadLetter;
     this.redact = opts.redact;
     this.maxExportFailures = Math.max(1, opts.maxExportFailures ?? 5);
+    this.maxDeadLetters = Math.max(1, opts.maxDeadLetters ?? 1000);
     if (opts.shutdownHook !== false) {
       process.once("beforeExit", () => {
         void this.flush().catch(() => {
@@ -345,7 +353,11 @@ export class LensTracer {
       // persistently failing (e.g. permanent 413) — dead-letter
       // explicitly, inspectable via `deadLetters`, never silent
       this.drop(live.trace_id);
-      this.deadLetters.push(live);
+      if (this.deadLetters.length < this.maxDeadLetters) {
+        this.deadLetters.push(live);
+      } else {
+        this.deadLettersDropped += 1;
+      }
       if (this.onDeadLetter) {
         try {
           this.onDeadLetter(live);

@@ -749,3 +749,26 @@ def test_eval_summary_emits_sum_and_dedupes_ids() -> None:
     assert report.trace_ids == [t.trace_id]
     assert report.summary["error_free/no_error_spans"]["n"] == 1
     assert report.summary["error_free/no_error_spans"]["sum"] == 1.0
+
+
+def test_retry_amplification_via_sdk_fingerprint() -> None:
+    """_arg_fingerprint reads forge_lens.tool_args_sha256 — the
+    heuristic fires under capture=metadata where raw args never land."""
+    reg = PricingRegistry()
+    fp = "a" * 16
+    spans = [
+        _span(f"{i:016x}", "tool search", kind=SpanKind.TOOL,
+              attrs={"forge_lens.tool_args_sha256": fp})
+        for i in range(1, 4)
+    ]
+    findings = detect_waste(_trace(spans), reg)
+    assert any(f.kind == "retry_amplification" for f in findings)
+
+
+def test_model_price_rejects_non_finite() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="finite"):
+        ModelPrice(input_per_mtok=float("inf"), output_per_mtok=1.0)
+    with pytest.raises(ValueError, match="finite"):
+        ModelPrice(input_per_mtok=1.0, output_per_mtok=float("nan"))

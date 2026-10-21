@@ -495,3 +495,37 @@ def test_get_tracer_singleton_is_thread_safe() -> None:
         assert len({id(t) for t in results}) == 1  # one instance, not 8
     finally:
         tracer_mod._default = old
+
+
+def test_dead_letters_bounded_with_drop_counter() -> None:
+    """A permanently-broken exporter must not grow memory forever —
+    dead_letters caps, overflow counts in dead_letters_dropped, and
+    on_dead_letter still fires for every one (never silent)."""
+    exporter = _FlakyExporter(failures=9999)
+    dead: list = []
+    tracer = LensTracer(
+        service_name="t", exporter=exporter, auto_flush=False,
+        register_atexit=False, max_export_failures=1, max_dead_letters=2,
+        on_dead_letter=dead.append,
+    )
+    for _ in range(4):
+        with tracer.start_span("doomed"):
+            pass
+        with pytest.raises(ConnectionError):
+            tracer.flush()
+    assert len(tracer.dead_letters) == 2
+    assert tracer.dead_letters_dropped == 2
+    assert len(dead) == 4  # callback sees all, even overflowed ones
+
+
+def test_tool_call_emits_args_fingerprint_without_capture() -> None:
+    """forge_lens.tool_args_sha256 is emitted even with capture_args
+    unset — retry-amplification detection works at metadata level."""
+    tracer = LensTracer(service_name="t", register_atexit=False)
+    with tracer.tool_call("search", arguments={"q": "forge"}):
+        pass
+    span = tracer.exporter.traces[0].spans[0]  # auto-flushed on span end
+    fp = span.attributes.get("forge_lens.tool_args_sha256")
+    assert isinstance(fp, str)
+    assert len(fp) == 16
+    assert "tool.parameters" not in span.attributes  # args stay private

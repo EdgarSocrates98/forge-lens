@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import atexit
 import functools
+import hashlib
 import inspect
 import json
 import sys
@@ -73,6 +74,7 @@ class LensTracer:
         session_id: str | None = None,
         project_id: str = "default",
         max_export_failures: int = 5,
+        max_dead_letters: int = 1_000,
         register_atexit: bool = True,
     ) -> None:
         self.source = TraceSource(
@@ -96,8 +98,12 @@ class LensTracer:
         self.session_id = session_id
         self.project_id = project_id
         self.max_export_failures = max_export_failures
+        # a permanently-broken exporter must not grow memory forever —
+        # dead letters cap, overflow counted in dead_letters_dropped
+        self.max_dead_letters = max(1, max_dead_letters)
         self.export_errors = 0
         self.dead_letters: list[Trace] = []
+        self.dead_letters_dropped = 0
         self._pending: dict[str, Trace] = {}
         self._root_ctx: dict[str, SpanContext] = {}
         self._failures: dict[str, int] = {}
@@ -235,9 +241,17 @@ class LensTracer:
         """Track a tool invocation.
 
         Arguments are recorded only when ``capture_args=True`` —
-        mirroring the capture-level policy (metadata by default).
+        mirroring the capture-level policy (metadata by default). A
+        sha256 fingerprint is always emitted when arguments are given:
+        it lets waste detection spot identical retries without ever
+        storing the arguments themselves.
         """
         attrs.setdefault("tool.name", tool_name)
+        if arguments is not None:
+            blob = json.dumps(arguments, sort_keys=True, default=str)
+            attrs["forge_lens.tool_args_sha256"] = hashlib.sha256(
+                blob.encode()
+            ).hexdigest()[:16]
         if capture_args and arguments is not None:
             params_json = json.dumps(arguments, default=str)
             if len(params_json) > 4096:
@@ -313,7 +327,10 @@ class LensTracer:
         count = self._failures.get(tid, 0) + 1
         if count >= max(1, self.max_export_failures):
             self._drop(tid)
-            self.dead_letters.append(trace)
+            if len(self.dead_letters) < self.max_dead_letters:
+                self.dead_letters.append(trace)
+            else:
+                self.dead_letters_dropped += 1
             dead.append(trace)
             return
         self._failures[tid] = count

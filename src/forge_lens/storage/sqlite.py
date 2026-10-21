@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 import threading
 from datetime import datetime
@@ -129,11 +130,53 @@ def _stronger_provenance(a: Provenance, b: Provenance) -> Provenance:
 def _span_digest(span: Span) -> str:
     """Content hash of a span, excluding integrity flags (they evolve)."""
     payload = json.dumps(
-        span.model_dump(mode="json", exclude={"integrity_flags"}),
+        _json_finite(span.model_dump(mode="json", exclude={"integrity_flags"})),
         sort_keys=True,
         default=str,
     )
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _json_finite(value: Any) -> Any:
+    """Coerce non-finite floats to ``None`` before persistence.
+
+    ``NaN``/``Infinity`` have no valid JSON literal — ``json.dumps``
+    emits them bare and sqlite then stores ``json_valid()=0`` rows;
+    ``json_patch`` silently mutates them to ``null`` on merge. ``None``
+    is the honest representation of an unrepresentable number.
+    """
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _json_finite(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_finite(v) for v in value]
+    return value
+
+
+def _derived_status_code(spans: list[Span]) -> str | None:
+    """The UPDATE path's CASE, in Python — bound on INSERT so a first
+    write and its identical re-delivery agree (idempotent status)."""
+    if not spans:
+        return None
+    if any(s.status.code == StatusCode.ERROR for s in spans):
+        return "error"
+    if all(s.status.code == StatusCode.OK for s in spans):
+        return "ok"
+    return "unset"
+
+
+def _events_json(events: list[SpanEvent]) -> str:
+    dumped = [
+        e.model_copy(update={"time": ensure_aware(e.time)}).model_dump(mode="json")
+        for e in events
+    ]
+    return json.dumps(_json_finite(dumped), sort_keys=True, default=str)
+
+
+def _links_json(links: list[SpanLink]) -> str:
+    dumped = [lk.model_dump(mode="json") for lk in links]
+    return json.dumps(_json_finite(dumped), sort_keys=True, default=str)
 
 
 def _merge_status(stored: Status, incoming: Status) -> Status:
@@ -357,10 +400,13 @@ class SQLiteTraceStore:
                     trace.root_span_id,
                     started_ns,
                     ended_ns,
-                    trace.status.code.value,
+                    _derived_status_code(trace.spans) or trace.status.code.value,
                     trace.status.message,
                     trace.source.model_dump_json(),
-                    json.dumps(trace.resource_attributes, sort_keys=True, default=str),
+                    json.dumps(
+                        _json_finite(trace.resource_attributes),
+                        sort_keys=True, default=str,
+                    ),
                     trace.provenance.value,
                     len(trace.spans),
                     sum(1 for s in trace.spans if s.status.code == StatusCode.ERROR),
@@ -395,15 +441,9 @@ class SQLiteTraceStore:
                 span.duration_ms,
                 span.status.code.value,
                 span.status.message,
-                json.dumps(span.attributes, sort_keys=True, default=str),
-                json.dumps(
-                    [e.model_dump(mode="json") for e in span.events],
-                    sort_keys=True, default=str,
-                ),
-                json.dumps(
-                    [lk.model_dump(mode="json") for lk in span.links],
-                    sort_keys=True, default=str,
-                ),
+                json.dumps(_json_finite(span.attributes), sort_keys=True, default=str),
+                _events_json(span.events),
+                _links_json(span.links),
                 json.dumps([f.value for f in span.integrity_flags]),
                 span.provenance.value,
                 digest,
@@ -426,15 +466,9 @@ class SQLiteTraceStore:
                 merged.duration_ms,
                 merged.status.code.value,
                 merged.status.message,
-                json.dumps(merged.attributes, sort_keys=True, default=str),
-                json.dumps(
-                    [e.model_dump(mode="json") for e in merged.events],
-                    sort_keys=True, default=str,
-                ),
-                json.dumps(
-                    [lk.model_dump(mode="json") for lk in merged.links],
-                    sort_keys=True, default=str,
-                ),
+                json.dumps(_json_finite(merged.attributes), sort_keys=True, default=str),
+                _events_json(merged.events),
+                _links_json(merged.links),
                 json.dumps([f.value for f in merged.integrity_flags]),
                 merged.provenance.value,
                 _span_digest(merged),

@@ -9,6 +9,7 @@ Operators override via ``pricing_file`` (JSON).
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,17 @@ class ModelPrice:
     input_per_mtok: float
     output_per_mtok: float
     cached_input_per_mtok: float | None = None
+
+    def __post_init__(self) -> None:
+        for field_name, rate in (
+            ("input_per_mtok", self.input_per_mtok),
+            ("output_per_mtok", self.output_per_mtok),
+            ("cached_input_per_mtok", self.cached_input_per_mtok),
+        ):
+            if rate is not None and not math.isfinite(rate):
+                raise ValueError(
+                    f"{field_name} must be finite, got {rate!r}"
+                )
 
 
 # Public list prices (USD/MTok) at snapshot time. Estimates derived

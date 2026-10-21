@@ -716,3 +716,35 @@ score=None, `not_computable`, negative-duration, dedupe+sum).
 
 Testes: +2 (surrogates em trace_ids/project_id/side → 422;
 Infinity/-Infinity/NaN/1e999 → score=None, nunca veredito fabricado).
+
+## Round 16 — store idempotência + limites de SDK
+
+- **Status idempotente (W1)**: o INSERT bindava o `trace.status`
+  declarado enquanto o UPDATE recomputava via CASE sobre spans —
+  um trace `status=ERROR` com spans OK flipava error→ok na 2ª escrita,
+  e `status=OK` com span error ficava invisível para
+  `list_traces(status="error")` na 1ª. O INSERT agora binda
+  `_derived_status_code(spans)` — a mesma fórmula do CASE — então
+  escrita #1 e re-delivery idêntico sempre concordam.
+- **Naive datetimes em `upsert_trace` direto (W2)**: `SpanEvent.time`
+  naive round-trippava naive → `replay_timeline` TypeError→500. O
+  serializador coage `ensure_aware` — o store é a fronteira final,
+  não só o pipeline.
+- **Floats não-finitos persistiam JSON inválido (W3)**: `NaN`/`Infinity`
+  viram literais nus (`json_valid()=0`) e `json_patch` mutava
+  silenciosamente para null. `_json_finite` coage → `None` em
+  attributes/events/links/resource_attributes antes do dumps — o
+  "não representável" honesto.
+- **`dead_letters` bounded (W4)**: cap `max_dead_letters` (default
+  1000) + `dead_letters_dropped` counter — exporter permanentemente
+  quebrado não cresce memória; callback ainda vê todas. TS SDK idem
+  (`maxDeadLetters`/`deadLettersDropped`).
+- **`retry_amplification` sob `capture=metadata`**: `tool_call` emite
+  `forge_lens.tool_args_sha256` sempre que `arguments` é passado —
+  fingerprint metadata-safe; args nunca deixam o cliente.
+- **`ModelPrice` rejeita rates não-finitos** (`__post_init__` isfinite).
+- **`duration_ms` negativo (clock skew) clampeado a 0** em
+  critical_path/self_time.
+
+Testes: +5 (status idempotente nas 2 direções, naive event→replay,
+NaN→null+json_valid, dead-letter cap+overflow, fingerprint metadata).
