@@ -2,10 +2,13 @@ import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DatePipe, JsonPipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
+import { RouterLink } from '@angular/router';
 import {
   Api, CompareReport, CompareRequest, DatasetCaseInput, DatasetDetail,
-  DatasetRow, DatasetVersionRow,
+  DatasetRow, DatasetVersionRow, EvalSpec,
 } from './api';
+import { CompareReportComponent } from './compare-report';
+import { parseIds } from './ids';
 
 /** Form-model for one case row — input/expected stay raw text until
  *  submit, when they must parse to JSON *objects* (the contract type). */
@@ -15,7 +18,7 @@ const blankCase = (): CaseFormRow => ({ case_id: '', input: '', expected: '' });
 
 @Component({
   selector: 'lens-datasets',
-  imports: [FormsModule, DatePipe, JsonPipe],
+  imports: [FormsModule, DatePipe, JsonPipe, RouterLink, CompareReportComponent],
   styles: [`
     .ok-banner { color: var(--accent); border-radius: 4px; padding: .5rem .8rem;
       background: color-mix(in srgb, var(--accent) 12%, transparent); }
@@ -32,7 +35,8 @@ const blankCase = (): CaseFormRow => ({ case_id: '', input: '', expected: '' });
     .cohorts label { display: block; margin-bottom: .4rem; }
   `],
   template: `
-  <h1>Datasets</h1>
+  <h1>Datasets <a routerLink="/experiments" class="muted"
+     style="font-size:.8em">experiments →</a></h1>
   <div class="filters">
     <input [ngModel]="search()" (ngModelChange)="search.set($event)"
            name="search" type="search" size="28"
@@ -192,43 +196,7 @@ const blankCase = (): CaseFormRow => ({ case_id: '', input: '', expected: '' });
         </div>
         @if (cmpErr()) { <p class="err-banner">{{ cmpErr() }}</p> }
         @if (cmp(); as r) {
-          <p class="muted">
-            a: <b>{{ r.a.dataset ?? '(unlabeled)' }}</b> — {{ r.a.n }} trace(s) ·
-            b: <b>{{ r.b.dataset ?? '(unlabeled)' }}</b> — {{ r.b.n }} trace(s)
-          </p>
-          @if (r.deltas.length) {
-            <table>
-              <thead><tr>
-                <th>evaluator</th><th>metric</th><th>n a/b</th>
-                <th>mean a</th><th>mean b</th><th>Δ</th>
-                <th>pass a</th><th>pass b</th>
-                <th>significance</th><th>p</th>
-              </tr></thead>
-              <tbody>
-                @for (d of r.deltas; track d.evaluator + '/' + d.metric) {
-                  <tr>
-                    <td>{{ d.evaluator }}</td><td>{{ d.metric }}</td>
-                    <td>{{ d.n_a }}/{{ d.n_b }}</td>
-                    <td>{{ num(d.mean_a) }}</td><td>{{ num(d.mean_b) }}</td>
-                    <td>{{ num(d.delta) }}</td>
-                    <td>{{ num(d.pass_rate_a) }}</td><td>{{ num(d.pass_rate_b) }}</td>
-                    <td>{{ d.significance }}</td>
-                    <td>{{ num(d.p_value) }}</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          } @else {
-            <p class="muted">no metric deltas — the evaluators produced no
-              scored results on either cohort.</p> }
-          @if (r.gate; as g) {
-            <p>gate: <b [class.error]="!g.gate_passed">{{ g.gate_passed ? 'passed' : 'failed' }}</b></p>
-            @for (f of g.failures; track $index) {
-              <pre>{{ f | json }}</pre>
-            }
-          }
-          @if (r.missing_trace_ids) {
-            <p class="muted">missing trace ids: {{ r.missing_trace_ids | json }}</p> }
+          <lens-compare-report [report]="r" [evaluators]="cmpSpecs()" />
         }
       </details>
     </section>
@@ -268,12 +236,17 @@ export class DatasetsComponent implements OnInit {
   cmpRunning = signal(false);
   cmpErr = signal<string | null>(null);
   cmp = signal<CompareReport | null>(null);
+  /** The evaluator specs last posted to /eval/compare — the shared
+   *  report view needs them to recompute per-trace failures. */
+  cmpSpecs = signal<EvalSpec[]>([]);
   /** Mirrors forge_lens.eval.evaluators.EVALUATORS — specs run without
    *  params; param-required ones come back `score: null` + a reason. */
   readonly evaluatorNames = [
-    'error_free', 'latency_budget', 'token_budget', 'tool_success',
-    'has_span', 'exact_match', 'token_f1', 'allowed_tools',
-    'task_completion', 'contains', 'regex', 'tool_call_count',
+    'allowed_tools', 'claims_grounded', 'contains', 'error_free',
+    'evidence_coverage', 'exact_match', 'has_span', 'human_review',
+    'latency_budget', 'precision_recall', 'regex', 'schema_validation',
+    'task_completion', 'token_budget', 'token_f1', 'tool_call_count',
+    'tool_success',
   ];
   evalSel = signal<Set<string>>(new Set(['error_free', 'tool_success']));
 
@@ -428,8 +401,9 @@ export class DatasetsComponent implements OnInit {
     if (db) body.b.dataset = db;
     if (this.gateSig) body.gate = { fail_on_significant_regression: true };
     this.cmpRunning.set(true); this.cmp.set(null);
+    this.cmpSpecs.set(evaluators);
     this.api.runCompare(body).subscribe({
-      next: r => { this.cmpRunning.set(false); this.cmp.set(normalizeCompare(r)); },
+      next: r => { this.cmpRunning.set(false); this.cmp.set(r); },
       error: (e: HttpErrorResponse) => {
         this.cmpRunning.set(false);
         this.cmpErr.set(this.httpErr(e, 'compare failed'));
@@ -437,10 +411,6 @@ export class DatasetsComponent implements OnInit {
     });
   }
 
-  /** `null`/non-finite → honest 'n/a' — never a fabricated zero. */
-  num(v: number | null | undefined): string | number {
-    return v == null || !Number.isFinite(v) ? 'n/a' : v;
-  }
   hasMetadata(d: DatasetDetail): boolean {
     return !!d.metadata && Object.keys(d.metadata).length > 0;
   }
@@ -469,27 +439,4 @@ export class DatasetsComponent implements OnInit {
   }
 }
 
-/** textarea → deduped id list (comma/whitespace/newline separated). */
-function parseIds(raw: string): string[] {
-  return [...new Set(raw.split(/[\s,]+/).map(s => s.trim()).filter(s => s))];
-}
 
-/** Fill the fields compare_runs guarantees so the template never has to
- *  trust the wire — a truncated/error-shaped body degrades to empty
- *  cohorts instead of a crashed render. */
-function normalizeCompare(r: CompareReport): CompareReport {
-  const side = (s: CompareReport['a'] | undefined) => ({
-    dataset: s?.dataset ?? null,
-    trace_ids: s?.trace_ids ?? [],
-    n: s?.n ?? s?.trace_ids?.length ?? 0,
-  });
-  return {
-    a: side(r?.a), b: side(r?.b),
-    deltas: r?.deltas ?? [],
-    ...(r?.gate
-      ? { gate: { gate_passed: !!r.gate.gate_passed, failures: r.gate.failures ?? [] } }
-      : {}),
-    ...(r?.missing_trace_ids !== undefined
-      ? { missing_trace_ids: r.missing_trace_ids } : {}),
-  };
-}

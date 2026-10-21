@@ -88,9 +88,32 @@ cohorts** panel posts `POST /v1/eval/compare` with
 sides need stored trace ids (a missing id is a 404) and a side's `dataset`
 is only a report label. Results render per-metric `n`, means, delta, pass
 rates, significance and p-value, plus the gate verdict/failures when a gate
-was sent; `null`s render as `n/a`.
+was sent; `null`s render as `n/a`. Below the deltas, a **failure examples**
+section recomputes per-trace results (`POST /v1/eval/run` over both
+cohorts, same evaluator specs — deterministic) and lists every `score: 0`
+result with its reason and a link to the trace; and when both sides carry
+means for a quality metric *and* a cost/token metric (matched on the
+`evaluator/metric` name), a small **quality vs cost/token** table compares
+the per-side means — it renders only when both classes exist.
 
-The trace detail **evidence** tab ends with an **eval** panel that auto-loads `GET /v1/traces/:id/eval` and can run any of the built-in evaluators via `POST /v1/eval/run` (`score: null` renders as `n/a` with the evaluator's reason). Checking a param-taking evaluator reveals its inputs — `*` marks params the evaluator requires, `allowed` takes a comma-separated list, `expected` accepts a JSON value, and a malformed value blocks the run before POST (an omitted param instead comes back as an `evaluator_error` row). A collapsible **replay** panel below it renders `GET /v1/traces/:id/replay` — the recorded span/event timeline in server order (offset, kind, name, event, status), capped at 200 rows behind a show-more button, with honest empty/error states.
+The **experiments** view (`/experiments`, linked in the header and from
+`/datasets`) manages persisted A/B specs. It lists `GET /v1/experiments`
+(id, name, status, `result_ref`, created) and a **new experiment** panel
+`PUT`s `{name, description?, dataset_id?, dataset_version?, cohorts,
+evaluators}` to `/v1/experiments/{id}` — each cohort pins `trace_ids`
+(1–500) plus optional `label`/`config` labels, the dataset fields pin the
+truth the experiment evaluates against (a `dataset_version` without
+`dataset_id` is rejected client-side, matching the server's 422), and
+evaluators store as `{name}` specs. Selecting a row loads
+`GET /v1/experiments/{id}` — the spec plus the append-only run history
+(newest first: run id, timestamp, gate verdict, delta summary). **Run
+now** posts `POST /v1/experiments/{id}/run` (optional significance gate),
+prepends the recorded run, and renders its report through the same view
+as compare — deltas, gate failures, failure examples recomputed with the
+stored spec's evaluators (a run predating a re-spec is labeled as such),
+and the quality-vs-cost table when the metric classes allow it.
+
+The trace detail **evidence** tab ends with an **eval** panel that auto-loads `GET /v1/traces/:id/eval` and can run any of the built-in evaluators via `POST /v1/eval/run` (`score: null` renders as `n/a` with the evaluator's reason). Checking a param-taking evaluator reveals its inputs — `*` marks params the evaluator requires, `allowed` takes a comma-separated list, `expected` accepts a JSON value, and a malformed value blocks the run before POST (an omitted param instead comes back as an `evaluator_error` row). A collapsible **replay** panel below it renders `GET /v1/traces/:id/replay` — the recorded span/event timeline in server order (offset, kind, name, event, status), capped at 200 rows behind a show-more button, with honest empty/error states. A controls bar steps through the loaded entries (no SSE): `|«`/`»|` jump to start/end, `‹`/`›` step, play/pause auto-advances every `1000ms ÷ speed` (0.5×–4× select) and stops at the end, and `←`/`→`/space work while the panel has focus. The current row is highlighted and scrolled into view; stepping past the render cap expands it. Jump-to buttons land on the next `status: error` entry, the next entry belonging to a `kind: 'tool'` span (from the trace's own spans), or the next `kind: 'event'` — disabled when the timeline has none.
 
 The **operations** view (`/ops`, linked in the header) renders `GET /v1/ops/summary`: the store `stats` map as cards (traces, spans, error spans, db size, schema — extra keys a store adds still render), the bounded-window trace/failure counts, and the recent-failure trace ids linked to `/traces/{id}`; the payload's own `bounded window (200 traces)` note is shown verbatim. Below it, an **alerts** panel posts `POST /v1/alerts/evaluate` with `{use_saved: true}` and lists the fired rules (metric, op, threshold, observed, severity, message). The response only reports fired rules plus an `evaluated` count — there is no rules-listing GET, so passing rules are summarized ("none fired"), never rowed; rule management stays on `POST`/`DELETE /v1/alerts/rules`. A manual **refresh** button re-issues both calls — nothing polls.
 

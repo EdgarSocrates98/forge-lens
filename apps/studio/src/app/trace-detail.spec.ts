@@ -47,6 +47,42 @@ const REPLAY = {
   ],
 };
 
+// a second trace+replay where playback has somewhere to jump: a tool
+// span (kind 'tool' on the span — the entry itself doesn't carry it),
+// an event and an error end
+const TRACE_TOOL: Trace = {
+  trace_id: 't1',
+  status: { code: 'error' },
+  spans: [
+    { span_id: 's1', parent_span_id: null, name: 'root', kind: 'internal',
+      start_time: '2026-01-01T00:00:00.000Z',
+      end_time: '2026-01-01T00:00:01.000Z',
+      status: { code: 'error' }, attributes: {} },
+    { span_id: 's2', parent_span_id: 's1', name: 'search', kind: 'tool',
+      start_time: '2026-01-01T00:00:00.100Z',
+      end_time: '2026-01-01T00:00:00.300Z',
+      status: { code: 'error' }, attributes: {} },
+  ],
+};
+const REPLAY_TOOL = {
+  trace_id: 't1',
+  span_count: 2,
+  total_ms: 1000,
+  unclosed_spans: 0,
+  entries: [
+    { t: '2026-01-01T00:00:00+00:00', span_id: 's1', name: 'root',
+      kind: 'span_start', offset_ms: 0 },
+    { t: '2026-01-01T00:00:00.100+00:00', span_id: 's2', name: 'search',
+      kind: 'span_start', offset_ms: 100 },
+    { t: '2026-01-01T00:00:00.200+00:00', span_id: 's2', name: 'search',
+      kind: 'event', event: 'tool.call', offset_ms: 200 },
+    { t: '2026-01-01T00:00:00.300+00:00', span_id: 's2', name: 'search',
+      kind: 'span_end', status: 'error', offset_ms: 300 },
+    { t: '2026-01-01T00:00:01+00:00', span_id: 's1', name: 'root',
+      kind: 'span_end', status: 'error', offset_ms: 1000 },
+  ],
+};
+
 describe('TraceDetailComponent', () => {
   let http: HttpTestingController;
 
@@ -74,9 +110,9 @@ describe('TraceDetailComponent', () => {
     return f;
   };
   /** Flush the trace fetch + the lazy extras pulls fired by ngOnInit. */
-  const flushInit = (replay: object = REPLAY) => {
+  const flushInit = (replay: object = REPLAY, trace: Trace = TRACE) => {
     http.expectOne(r => r.url.endsWith('/traces/t1')
-      && r.method === 'GET').flush(TRACE);
+      && r.method === 'GET').flush(trace);
     http.expectOne(r => r.url.endsWith('/traces/t1/cost')).flush({});
     http.expectOne(r => r.url.endsWith('/traces/t1/failure')).flush({});
     http.expectOne(r => r.url.endsWith('/traces/t1/loops'))
@@ -351,11 +387,172 @@ describe('TraceDetailComponent', () => {
     f.detectChanges();
     const panel = replayPanel(f);
     expect(panel.querySelectorAll('.replay-table tbody tr').length).toBe(2);
-    const btn = panel.querySelector('button')!;
+    const btn = [...panel.querySelectorAll('button')]
+      .find(b => b.textContent?.includes('show more'))!;
     expect(btn.textContent).toContain('show more (1 hidden)');
     btn.click();
     f.detectChanges();
     expect(panel.querySelectorAll('.replay-table tbody tr').length).toBe(3);
-    expect(panel.querySelector('button')).toBeNull();
+    expect([...panel.querySelectorAll('button')]
+      .find(b => b.textContent?.includes('show more'))).toBeUndefined();
+  });
+
+  // glyph buttons carry their names in aria-label; text buttons match
+  // their text
+  const ctlBtn = (panel: Element, label: string) =>
+    [...panel.querySelectorAll<HTMLButtonElement>('.replay-controls button')]
+      .find(b => b.getAttribute('aria-label') === label ||
+        b.textContent?.trim() === label);
+
+  it('step controls walk the entries with a position indicator', () => {
+    const f = make();
+    flushInit();
+    f.componentInstance.tab.set('evidence');
+    f.detectChanges();
+    const c = f.componentInstance;
+    const panel = replayPanel(f);
+    expect(panel.querySelector('.pos')!.textContent).toContain('1/3');
+    // parked at the start — back/start disabled, first row highlighted
+    expect((ctlBtn(panel, 'step back')! as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect(panel.querySelector('tr.cur')!.textContent)
+      .toContain('span_start');
+    ctlBtn(panel, 'step forward')!.click();
+    f.detectChanges();
+    expect(c.replayPos()).toBe(1);
+    expect(panel.querySelector('.pos')!.textContent).toContain('2/3');
+    expect(panel.querySelector('tr.cur')!.textContent)
+      .toContain('model.call');
+    ctlBtn(panel, 'jump to end')!.click();
+    f.detectChanges();
+    expect(c.replayPos()).toBe(2);
+    expect((ctlBtn(panel, 'step forward')! as HTMLButtonElement).disabled)
+      .toBe(true);
+    ctlBtn(panel, 'jump to start')!.click();
+    f.detectChanges();
+    expect(c.replayPos()).toBe(0);
+  });
+
+  it('arrow keys step and space toggles play while the panel has focus', () => {
+    const f = make();
+    flushInit();
+    f.componentInstance.tab.set('evidence');
+    f.detectChanges();
+    const c = f.componentInstance;
+    const panel = replayPanel(f);
+    const box = panel.querySelector('.replay-controls') as HTMLElement;
+    box.dispatchEvent(new KeyboardEvent('keydown',
+      { key: 'ArrowRight', bubbles: true }));
+    expect(c.replayPos()).toBe(1);
+    box.dispatchEvent(new KeyboardEvent('keydown',
+      { key: 'ArrowLeft', bubbles: true }));
+    expect(c.replayPos()).toBe(0);
+    box.dispatchEvent(new KeyboardEvent('keydown',
+      { key: ' ', bubbles: true }));
+    expect(c.playing()).toBe(true);
+    box.dispatchEvent(new KeyboardEvent('keydown',
+      { key: ' ', bubbles: true }));
+    expect(c.playing()).toBe(false);
+    // a key elsewhere does nothing — the handler lives on the panel
+    (f.nativeElement as HTMLElement).dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(c.replayPos()).toBe(0);
+  });
+
+  it('play auto-advances on the speed-scaled interval and stops at the end', () => {
+    vi.useFakeTimers();
+    try {
+      const f = make();
+      flushInit();
+      const c = f.componentInstance;
+      c.tab.set('evidence');
+      c.playReplay();
+      expect(c.playing()).toBe(true);
+      vi.advanceTimersByTime(2100);      // 1× → 1000ms/step
+      expect(c.replayPos()).toBe(2);     // clamped at last entry…
+      expect(c.playing()).toBe(true);
+      vi.advanceTimersByTime(1000);      // …then auto-pauses at the end
+      expect(c.playing()).toBe(false);
+      expect(c.replayPos()).toBe(2);
+      c.pauseReplay();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a faster speed shortens the auto-advance interval; manual nav pauses', () => {
+    vi.useFakeTimers();
+    try {
+      const f = make();
+      flushInit();
+      const c = f.componentInstance;
+      c.setSpeed(4);                      // 4× → 250ms/step
+      c.playReplay();
+      vi.advanceTimersByTime(500);
+      expect(c.replayPos()).toBe(2);     // clamped to the last of 3
+      c.replayStart();                    // manual nav pauses playback
+      expect(c.playing()).toBe(false);
+      vi.advanceTimersByTime(2000);
+      expect(c.replayPos()).toBe(0);     // nothing advanced while paused
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('jump buttons land on the next matching entry, wrapping around', () => {
+    const f = make();
+    flushInit(REPLAY_TOOL, TRACE_TOOL);
+    f.componentInstance.tab.set('evidence');
+    f.detectChanges();
+    const c = f.componentInstance;
+    const panel = replayPanel(f);
+    // all three jump targets exist in this timeline
+    expect((ctlBtn(panel, 'next error')! as HTMLButtonElement).disabled)
+      .toBe(false);
+    expect((ctlBtn(panel, 'next tool')! as HTMLButtonElement).disabled)
+      .toBe(false);
+    ctlBtn(panel, 'next error')!.click();
+    expect(c.replayPos()).toBe(3);       // s2 span_end status error
+    ctlBtn(panel, 'next error')!.click();
+    expect(c.replayPos()).toBe(4);       // s1 span_end status error
+    ctlBtn(panel, 'next tool')!.click();
+    expect(c.replayPos()).toBe(1);       // wraps to s2's span_start
+    ctlBtn(panel, 'next event')!.click();
+    expect(c.replayPos()).toBe(2);       // the tool.call event
+    f.detectChanges();
+    expect(panel.querySelector('tr.cur')!.textContent)
+      .toContain('tool.call');
+  });
+
+  it('a jump target that does not exist disables its button', () => {
+    const f = make();
+    flushInit();                          // no error / no tool span
+    f.componentInstance.tab.set('evidence');
+    f.detectChanges();
+    const panel = replayPanel(f);
+    expect((ctlBtn(panel, 'next error')! as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect((ctlBtn(panel, 'next tool')! as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect((ctlBtn(panel, 'next event')! as HTMLButtonElement).disabled)
+      .toBe(false);
+  });
+
+  it('stepping beyond the rendered cap expands it', () => {
+    const f = make();
+    flushInit();
+    const c = f.componentInstance;
+    c.tab.set('evidence');
+    c.replayShown.set(2);
+    f.detectChanges();
+    const panel = replayPanel(f);
+    expect(panel.querySelectorAll('.replay-table tbody tr').length).toBe(2);
+    ctlBtn(panel, 'step forward')!.click();
+    ctlBtn(panel, 'step forward')!.click();
+    f.detectChanges();
+    expect(c.replayPos()).toBe(2);
+    expect(c.replayShown()).toBe(3);
+    expect(panel.querySelectorAll('.replay-table tbody tr').length).toBe(3);
+    expect(panel.querySelector('tr.cur')!.textContent).toContain('span_end');
   });
 });

@@ -179,12 +179,62 @@ export interface CompareGateResult {
   gate_passed: boolean;
   failures: Record<string, unknown>[];
 }
-/** POST /v1/eval/compare response. */
+/** POST /v1/eval/compare response. `multiple_comparisons` is the
+ *  server's own honesty note (k unadjusted tests at alpha=0.05) —
+ *  present only when more than one metric carried a p-value. */
 export interface CompareReport {
   a: CompareSideResult; b: CompareSideResult;
   deltas: MetricDelta[];
   gate?: CompareGateResult;
   missing_trace_ids?: unknown;
+  multiple_comparisons?: string | null;
+}
+/** Row of GET /v1/experiments — the summary shape the list route
+ *  emits (full spec fields only come from the detail route). */
+export interface ExperimentRow {
+  experiment_id: string; project_id: string; name: string | null;
+  status: string; result_ref: string | null; created_at: string | null;
+}
+/** One side of a persisted experiment spec — `label`/`config` are
+ *  declared labels stored verbatim, never resolved server-side. */
+export interface ExperimentCohort {
+  trace_ids: string[]; label?: string | null;
+  config?: Record<string, unknown>;
+}
+/** GET /v1/experiments/{id} — the stored spec plus the append-only
+ *  run history (`runs`, paged by `run_limit`/`run_offset`). */
+export interface ExperimentDetail extends ExperimentRow {
+  description?: string | null;
+  dataset_id?: string | null; dataset_version?: string | null;
+  cohorts?: { a?: ExperimentCohort; b?: ExperimentCohort };
+  evaluators?: EvalSpec[];
+  provenance?: string; metadata?: Record<string, unknown>;
+  runs?: ExperimentRun[]; run_limit?: number; run_offset?: number;
+}
+/** One row of the embedded `runs` list — `report` is the full
+ *  compare_runs payload (+ `gate` when the run requested one). */
+export interface ExperimentRun {
+  run_id: number; experiment_id: string; project_id: string;
+  run_at: string | null; report: CompareReport;
+}
+/** PUT /v1/experiments/{id} response. */
+export interface ExperimentStored {
+  experiment_id: string; project_id: string; stored: boolean;
+}
+/** PUT /v1/experiments/{id} request body — same spec shape as
+ *  eval/compare; cohorts require 1..500 stored trace ids each. */
+export interface ExperimentSpecBody {
+  name?: string; description?: string;
+  dataset_id?: string; dataset_version?: string;
+  cohorts: { a: ExperimentCohort; b: ExperimentCohort };
+  evaluators: EvalSpec[];
+}
+/** POST /v1/experiments/{id}/run response — the run is also appended
+ *  to experiment_results server-side; `report` is the compare payload
+ *  produced by that run. */
+export interface ExperimentRunResponse {
+  experiment_id: string; project_id: string;
+  run_id: number; run_at: string; report: CompareReport;
 }
 /** One node of an ExecutionGraph — a span in trace graphs, a whole
  *  trace in session graphs (`kind: 'trace'`). Mirrors the backend's
@@ -360,6 +410,37 @@ export class Api {
    *  a per-side `dataset` string is a report label, not a case lookup. */
   runCompare(body: CompareRequest): Observable<CompareReport> {
     return this.post('/eval/compare', body);
+  }
+  /** POST /v1/eval/run over an arbitrary id set — per-trace results
+   *  keyed by trace_id (used to surface failing examples a compare
+   *  report only aggregates). */
+  runEvalSet(traceIds: string[], evaluators: EvalSpec[]):
+    Observable<EvalReport> {
+    return this.post('/eval/run', { trace_ids: traceIds, evaluators });
+  }
+  /** GET /v1/experiments — `{items, limit, offset}` envelope of
+   *  summary rows, project-scoped server-side. */
+  listExperiments(limit = 500, offset = 0):
+    Observable<{ items: ExperimentRow[]; limit: number; offset: number }> {
+    const p = new HttpParams().set('limit', limit).set('offset', offset);
+    return this.http.get<{ items: ExperimentRow[]; limit: number; offset: number }>(
+      `${this.base()}/experiments`, { params: p, headers: this.headers() });
+  }
+  /** GET /v1/experiments/{id} — spec + append-only run history. */
+  getExperiment(id: string): Observable<ExperimentDetail> {
+    return this.get(`/experiments/${id}`);
+  }
+  /** PUT /v1/experiments/{id} — upserts the spec; prior runs stay
+   *  pinned in experiment_results (append-only). */
+  putExperiment(id: string, body: ExperimentSpecBody):
+    Observable<ExperimentStored> {
+    return this.put(`/experiments/${id}`, body);
+  }
+  /** POST /v1/experiments/{id}/run — executes the stored spec through
+   *  the same compare path; body is `{gate?}` (JSON object required). */
+  runExperiment(id: string, gate?: Record<string, unknown>):
+    Observable<ExperimentRunResponse> {
+    return this.post(`/experiments/${id}/run`, gate ? { gate } : {});
   }
   getOps(): Observable<OpsSummary> { return this.get(`/ops/summary`); }
   /** POST /v1/alerts/evaluate — `{use_saved: true}` merges the rules

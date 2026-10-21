@@ -194,12 +194,83 @@ describe('DatasetsComponent', () => {
       },
     });
     await f.whenStable();
+    // the report view recomputes per-trace results for the failure
+    // examples table — same evaluators over the cohort union
+    const evalRun = http.expectOne(r =>
+      r.method === 'POST' && r.url.endsWith('/eval/run'));
+    expect(evalRun.request.body).toEqual({
+      trace_ids: ['t1', 't2', 't3'],
+      evaluators: [{ name: 'error_free' }, { name: 'tool_success' }],
+    });
+    evalRun.flush({
+      dataset: null, trace_ids: ['t1', 't2', 't3'], summary: {},
+      results: {
+        t3: [{
+          evaluator: 'error_free', metric: 'no_error_spans', score: 0,
+          details: { reason: 'span s9 has status error' },
+        }],
+      },
+    });
+    await f.whenStable();
     const text = el.textContent ?? '';
     expect(text).toContain('insufficient_data');
     expect(text).toContain('n/a');           // p_value: null, honest
     expect(text).toContain('failed');        // gate verdict
     expect(text).toContain('statistically significant regression');
     expect(text).toContain('ds-1@v1');
+    // failure examples — the score-0 row with its trace link
+    expect(text).toContain('failure examples');
+    expect(text).toContain('span s9 has status error');
+    expect(el.querySelector('a[href="/traces/t3"]')).toBeTruthy();
+    // no cost/token metric in this report → no pareto table
+    expect(el.querySelector('.pareto')).toBeNull();
+  });
+
+  it('renders the quality-vs-cost table when both metric classes carry means', async () => {
+    const f = TestBed.createComponent(DatasetsComponent);
+    f.detectChanges();
+    listReq(http).flush([mkDs('ds-1')]);
+    await f.whenStable();
+    const el = f.nativeElement as HTMLElement;
+    btn(el, 'ds-1')?.click();
+    detailReq(http, 'ds-1').flush({ ...mkDs('ds-1'), metadata: {} });
+    versionsReq(http, 'ds-1').flush([]);
+    await f.whenStable();
+    const c = f.componentInstance;
+    c.aIds = 't1'; c.bIds = 't2';
+    c.evalSel.set(new Set(['token_budget']));
+    [...el.querySelectorAll('button')]
+      .find(b => b.textContent?.includes('run compare'))?.click();
+    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/eval/compare'))
+      .flush({
+        a: { dataset: null, trace_ids: ['t1'], n: 1 },
+        b: { dataset: null, trace_ids: ['t2'], n: 1 },
+        deltas: [
+          { evaluator: 'error_free', metric: 'no_error_spans',
+            n_a: 1, n_b: 1, mean_a: 1, mean_b: 0.5, delta: -0.5,
+            pass_rate_a: 1, pass_rate_b: 0.5,
+            significance: 'insufficient_data', p_value: null },
+          { evaluator: 'token_budget', metric: 'within_token_budget',
+            n_a: 1, n_b: 1, mean_a: 0.9, mean_b: 0.7, delta: -0.2,
+            pass_rate_a: 0.9, pass_rate_b: 0.7,
+            significance: 'insufficient_data', p_value: null },
+        ],
+      });
+    await f.whenStable();
+    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/eval/run'))
+      .flush({ dataset: null, trace_ids: ['t1', 't2'], summary: {},
+               results: {} });
+    await f.whenStable();
+    const pareto = el.querySelector('.pareto');
+    expect(pareto).toBeTruthy();
+    const text = pareto!.textContent ?? '';
+    // honest labels — the metric names themselves, no invented axes
+    expect(text).toContain('error_free/no_error_spans');
+    expect(text).toContain('token_budget/within_token_budget');
+    expect(text).toContain('0.9');
+    expect(text).toContain('0.7');
+    // empty per-trace recompute → honest empty state
+    expect(el.textContent).toContain('no failing eval results');
   });
 
   it('shows the compare error banner on a 404 trace', async () => {

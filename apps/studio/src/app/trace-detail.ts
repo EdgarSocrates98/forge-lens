@@ -1,11 +1,18 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  Component, ElementRef, OnDestroy, OnInit, computed, inject, signal,
+} from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { JsonPipe, KeyValuePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Api, EvalResult, EvalSpec, ReplayTimeline, Span, Trace, TraceEval }
-  from './api';
+import {
+  Api, EvalResult, EvalSpec, ReplayEntry, ReplayTimeline, Span, Trace,
+  TraceEval,
+} from './api';
 
-interface Row { span: Span; depth: number; }
+/** `left`/`width` are the waterfall bar percentages — precomputed in
+ *  `buildRows` (one Date.parse per span) so change detection never
+ *  re-parses ISO strings per row. */
+interface Row { span: Span; depth: number; left: number; width: number; }
 
 /** One input in the per-evaluator params form — `kind` drives parsing
  *  in `evalParamsFor`: number → finite Number, int → integer ≥ 0,
@@ -23,6 +30,16 @@ interface EvalParam {
 @Component({
   selector: 'lens-trace-detail',
   imports: [RouterLink, JsonPipe, KeyValuePipe],
+  styles: [`
+    .replay-controls .ctl-row { display: flex; gap: .4rem;
+      align-items: center; flex-wrap: wrap; margin-bottom: .4rem; }
+    .replay-controls:focus { outline: 1px solid var(--accent);
+      outline-offset: 2px; border-radius: 4px; }
+    .replay-controls .pos { font-weight: 600; min-width: 4rem;
+      text-align: center; }
+    .replay-table tr.cur td {
+      background: color-mix(in srgb, var(--accent) 15%, transparent); }
+  `],
   template: `
   <a routerLink="/">← traces</a>
   <h1>Trace {{ id }}</h1>
@@ -40,8 +57,8 @@ interface EvalParam {
         @for (r of rows(); track r.span.span_id) {
           <button class="row" (click)="sel.set(r.span)">
             <span class="name" [style.padding-left.px]="r.depth * 14">{{ r.span.name }}</span>
-            <span class="bar" [style.margin-left.%]="pct(r.span.start_time)"
-                  [style.width.%]="widthPct(r.span)"
+            <span class="bar" [style.margin-left.%]="r.left"
+                  [style.width.%]="r.width"
                   [class.err]="r.span.status.code === 'error'"></span>
           </button>
         }
@@ -133,6 +150,41 @@ interface EvalParam {
               {{ rp.total_ms }}ms total
               @if (rp.unclosed_spans > 0) {
                 · {{ rp.unclosed_spans }} unclosed }</p>
+            <!-- tabindex+keydown: ←/→ step, space play/pause — scoped
+                 to this panel's focus, never global -->
+            <div class="replay-controls" tabindex="0"
+                 (keydown)="replayKey($event)"
+                 aria-label="replay controls — arrow keys step, space plays/pauses">
+              <div class="ctl-row">
+                <button (click)="replayStart()" [disabled]="replayPos() === 0"
+                        aria-label="jump to start" title="start">|&#171;</button>
+                <button (click)="stepReplay(-1)" [disabled]="replayPos() === 0"
+                        aria-label="step back" title="step back">&#8249;</button>
+                <button (click)="toggleReplay()">
+                  {{ playing() ? 'pause' : 'play' }}</button>
+                <button (click)="stepReplay(1)"
+                        [disabled]="replayPos() >= rp.entries.length - 1"
+                        aria-label="step forward" title="step">&#8250;</button>
+                <button (click)="replayEnd()"
+                        [disabled]="replayPos() >= rp.entries.length - 1"
+                        aria-label="jump to end" title="end">&#187;|</button>
+                <span class="pos">{{ replayPos() + 1 }}/{{ rp.entries.length }}</span>
+                <label>speed
+                  <select [value]="speed()" aria-label="playback speed"
+                          (change)="setSpeed($any($event.target).value)">
+                    @for (s of speeds; track s) {
+                      <option [value]="s">{{ s }}&#215;</option> }
+                  </select>
+                </label>
+                <button (click)="jumpTo('error')" [disabled]="!hasErrorEntry()">
+                  next error</button>
+                <button (click)="jumpTo('tool')" [disabled]="!hasToolEntry()">
+                  next tool</button>
+                <button (click)="jumpTo('event')" [disabled]="!hasEventEntry()">
+                  next event</button>
+                <span class="muted">&#8592;/&#8594; step · space play/pause</span>
+              </div>
+            </div>
             <table class="replay-table">
               <thead><tr>
                 <th>#</th><th>+ms</th><th>t</th><th>kind</th>
@@ -140,7 +192,8 @@ interface EvalParam {
               </tr></thead>
               <tbody>
                 @for (e of replayEntries(); track $index) {
-                  <tr [class.err]="e.status === 'error'">
+                  <tr [class.err]="e.status === 'error'"
+                      [class.cur]="$index === replayPos()">
                     <td>{{ $index + 1 }}</td>
                     <td>{{ e.offset_ms }}</td>
                     <td>{{ e.t }}</td>
@@ -162,9 +215,10 @@ interface EvalParam {
     }
   } @else { <p class="muted">loading…</p> }`,
 })
-export class TraceDetailComponent implements OnInit {
+export class TraceDetailComponent implements OnInit, OnDestroy {
   private api = inject(Api);
   private route = inject(ActivatedRoute);
+  private host = inject(ElementRef);
   id = '';
   trace = signal<Trace | null>(null);
   sel = signal<Span | null>(null);
@@ -172,7 +226,6 @@ export class TraceDetailComponent implements OnInit {
   readonly tabs = ['waterfall', 'evidence'] as const;
   rows = signal<Row[]>([]);
   error = signal<string | null>(null);
-  private t0 = 0; private spanMs = 1;
   extras = signal<Record<string, unknown>>({});
   readonly sections: [string, () => unknown][] = [
     ['cost', () => this.extras()['cost']],
@@ -183,9 +236,11 @@ export class TraceDetailComponent implements OnInit {
   /** Mirrors forge_lens.eval.evaluators.EVALUATORS — checking a
    *  param-taking evaluator reveals its form row below. */
   readonly evaluatorNames = [
-    'error_free', 'latency_budget', 'token_budget', 'tool_success',
-    'has_span', 'exact_match', 'token_f1', 'allowed_tools',
-    'task_completion', 'contains', 'regex', 'tool_call_count',
+    'allowed_tools', 'claims_grounded', 'contains', 'error_free',
+    'evidence_coverage', 'exact_match', 'has_span', 'human_review',
+    'latency_budget', 'precision_recall', 'regex', 'schema_validation',
+    'task_completion', 'token_budget', 'token_f1', 'tool_call_count',
+    'tool_success',
   ];
   /** Param form per evaluator, mirroring the keys each reads in
    *  forge_lens.eval.evaluators (canonical names only — e.g.
@@ -231,6 +286,27 @@ export class TraceDetailComponent implements OnInit {
       { key: 'max', kind: 'int', required: true, hint: 'int ≥ 0' },
       { key: 'tool', kind: 'text', hint: 'tool.name' },
     ],
+    schema_validation: [
+      { key: 'schema', kind: 'json', required: true, hint: 'JSON Schema subset' },
+      { key: 'field', kind: 'text', hint: 'default output.value' },
+    ],
+    evidence_coverage: [
+      { key: 'required_attrs', kind: 'list', required: true, hint: 'attr keys' },
+      { key: 'min_coverage', kind: 'number', hint: '(0,1] default 1.0' },
+    ],
+    human_review: [
+      { key: 'rubric', kind: 'text', hint: 'optional queue marker' },
+    ],
+    precision_recall: [
+      { key: 'expected_items', kind: 'json', required: true, hint: 'JSON list' },
+      { key: 'field', kind: 'text', hint: 'XOR with tool' },
+      { key: 'tool', kind: 'bool', hint: 'XOR with field' },
+    ],
+    claims_grounded: [
+      { key: 'required_source_attr', kind: 'text', required: true, hint: 'attr key' },
+      { key: 'min_overlap', kind: 'number', hint: '(0,1] default 0.5' },
+      { key: 'field', kind: 'text', hint: 'default output.value' },
+    ],
   };
   evalSel = signal<Set<string>>(new Set(['error_free', 'tool_success']));
   evalRunResults = signal<EvalResult[] | null>(null);
@@ -241,11 +317,126 @@ export class TraceDetailComponent implements OnInit {
   replay = signal<ReplayTimeline | null>(null);
   replayErr = signal<string | null>(null);
   replayLoaded = signal(false);
-  /** Cap on rendered timeline rows — mirrors the datasets table. */
+  /** Cap on rendered timeline rows — mirrors the datasets table.
+   *  Stepping past it expands it (`setPos`), so playback can always
+   *  reach entries the cap hasn't revealed yet. */
   replayShown = signal(200);
   replayEntries = computed(() =>
     this.replay()?.entries.slice(0, this.replayShown()) ?? []);
   showMoreReplay(): void { this.replayShown.update(n => n + 500); }
+
+  // -- playback controls (operate on the full loaded entries, no SSE)
+  /** Index into `replay().entries` the controls are parked on. */
+  replayPos = signal(0);
+  playing = signal(false);
+  /** Multiplier options; 1× = 1000ms per step, so the delay is
+   *  `1000 / speed`. */
+  speed = signal(1);
+  readonly speeds = [0.5, 1, 2, 4];
+  private timer: ReturnType<typeof setInterval> | null = null;
+  /** Span ids whose span `kind` is 'tool' — observed trace evidence,
+   *  the honest source for "next tool" (replay entries don't carry
+   *  span kind). */
+  toolSpanIds = computed(() => new Set(
+    (this.trace()?.spans ?? [])
+      .filter(s => s.kind === 'tool')
+      .map(s => s.span_id)));
+  hasErrorEntry = computed(() =>
+    (this.replay()?.entries ?? []).some(e => e.status === 'error'));
+  hasToolEntry = computed(() => {
+    const t = this.toolSpanIds();
+    return (this.replay()?.entries ?? []).some(e => t.has(e.span_id));
+  });
+  hasEventEntry = computed(() =>
+    (this.replay()?.entries ?? []).some(e => e.kind === 'event'));
+
+  /** Clamp-park on index `i`; expands the render cap when the target
+   *  row isn't revealed yet, then scrolls it into view. */
+  private setPos(i: number): void {
+    const n = this.replay()?.entries.length ?? 0;
+    if (n === 0) return;
+    const pos = Math.min(Math.max(i, 0), n - 1);
+    this.replayPos.set(pos);
+    if (pos + 1 > this.replayShown()) this.replayShown.set(pos + 1);
+    // defer past the DOM update the signal change schedules
+    setTimeout(() => {
+      const rows = this.host.nativeElement
+        .querySelectorAll('.replay-table tbody tr');
+      const el = rows.item(Math.min(pos, rows.length - 1));
+      (el as HTMLElement | null)?.scrollIntoView?.({ block: 'nearest' });
+    });
+  }
+  /** Manual nav always pauses playback. */
+  stepReplay(d: number): void {
+    this.pauseReplay();
+    this.setPos(this.replayPos() + d);
+  }
+  replayStart(): void { this.pauseReplay(); this.setPos(0); }
+  replayEnd(): void {
+    this.pauseReplay();
+    this.setPos((this.replay()?.entries.length ?? 1) - 1);
+  }
+  /** Jump forward to the next matching entry, wrapping around; the
+   *  buttons are disabled when the timeline has no such entry. */
+  jumpTo(kind: 'error' | 'tool' | 'event'): void {
+    const es = this.replay()?.entries ?? [];
+    const n = es.length;
+    if (!n) return;
+    const tools = this.toolSpanIds();
+    const pred = (e: ReplayEntry): boolean =>
+      kind === 'error' ? e.status === 'error'
+        : kind === 'event' ? e.kind === 'event'
+          : tools.has(e.span_id);
+    for (let off = 1; off <= n; off++) {
+      const i = (this.replayPos() + off) % n;
+      if (pred(es[i])) { this.pauseReplay(); this.setPos(i); return; }
+    }
+  }
+  toggleReplay(): void {
+    if (this.playing()) this.pauseReplay(); else this.playReplay();
+  }
+  playReplay(): void {
+    const n = this.replay()?.entries.length ?? 0;
+    if (this.playing() || n === 0) return;
+    if (this.replayPos() >= n - 1) this.setPos(0); // replay from start
+    this.playing.set(true);
+    this.restartTimer();
+  }
+  pauseReplay(): void {
+    this.playing.set(false);
+    if (this.timer !== null) { clearInterval(this.timer); this.timer = null; }
+  }
+  private restartTimer(): void {
+    if (this.timer !== null) clearInterval(this.timer);
+    this.timer = setInterval(() => this.tickReplay(), 1000 / this.speed());
+  }
+  private tickReplay(): void {
+    const n = this.replay()?.entries.length ?? 0;
+    if (this.replayPos() + 1 >= n) { this.pauseReplay(); return; }
+    this.setPos(this.replayPos() + 1);
+  }
+  setSpeed(v: unknown): void {
+    const s = Number(v);
+    if (!Number.isFinite(s) || s <= 0) return;
+    this.speed.set(s);
+    if (this.playing()) this.restartTimer();
+  }
+  /** Scoped to the panel — the handler lives on the focusable
+   *  controls container, so keys only act while it has focus.
+   *  Interactive children keep their native keys (selects use arrows,
+   *  buttons use space) — only arrows are repurposed there. */
+  replayKey(ev: KeyboardEvent): void {
+    const tag = (ev.target as HTMLElement | null)?.tagName;
+    if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (ev.key === 'ArrowLeft') {
+      ev.preventDefault(); this.stepReplay(-1);
+    } else if (ev.key === 'ArrowRight') {
+      ev.preventDefault(); this.stepReplay(1);
+    } else if (ev.key === ' ') {
+      if (tag === 'BUTTON' || tag === 'A') return; // native activation
+      ev.preventDefault(); this.toggleReplay();
+    }
+  }
   /** Raw param input text — evaluator → key → typed string. */
   evalParams = signal<Record<string, Record<string, string>>>({});
   /** Checked evaluators that take params — sorted for stable render. */
@@ -370,23 +561,36 @@ export class TraceDetailComponent implements OnInit {
     return out;
   }
 
+  ngOnDestroy(): void { this.pauseReplay(); }
+
   private buildRows(t: Trace): void {
     this.trace.set(t);
     const sorted = [...t.spans].sort((a, b) =>
       a.start_time.localeCompare(b.start_time));
     // iterative walk — no recursion overflow on deep trees
     let min = Infinity, max = -Infinity;
+    // one Date.parse per span boundary, reused for the bar geometry
+    const times = new Map<string, { st: number; en: number }>();
     const byParent = new Map<string | null, Span[]>();
     for (const s of sorted) {
       const st = Date.parse(s.start_time);
       const en = Date.parse(s.end_time ?? s.start_time);
+      times.set(s.span_id, { st, en });
       if (st < min) min = st;
       if (en > max) max = en;
       const k = s.parent_span_id ?? null;
       const arr = byParent.get(k); if (arr) arr.push(s); else byParent.set(k, [s]);
     }
-    this.t0 = min === Infinity ? 0 : min;
-    this.spanMs = Math.max(1, max - this.t0);
+    const t0 = min === Infinity ? 0 : min;
+    const spanMs = Math.max(1, max - t0);
+    const row = (s: Span, d: number): Row => {
+      const ts = times.get(s.span_id)!;
+      return {
+        span: s, depth: d,
+        left: (ts.st - t0) / spanMs * 100,
+        width: Math.max(0.5, (ts.en - ts.st) / spanMs * 100),
+      };
+    };
     const out: Row[] = [];
     const seen = new Set<string>();
     const stack: { s: Span; d: number }[] = [];
@@ -397,17 +601,13 @@ export class TraceDetailComponent implements OnInit {
       const { s, d } = stack.pop()!;
       if (seen.has(s.span_id)) continue;
       seen.add(s.span_id);
-      out.push({ span: s, depth: d });
+      out.push(row(s, d));
       const kids = byParent.get(s.span_id) ?? [];
       for (let i = kids.length - 1; i >= 0; i--) stack.push({ s: kids[i], d: d + 1 });
     }
-    for (const s of sorted) if (!seen.has(s.span_id)) out.push({ span: s, depth: 0 });
+    for (const s of sorted) {
+      if (!seen.has(s.span_id)) out.push(row(s, 0));
+    }
     this.rows.set(out);
-  }
-
-  pct(iso: string): number { return (Date.parse(iso) - this.t0) / this.spanMs * 100; }
-  widthPct(s: Span): number {
-    const d = Date.parse(s.end_time ?? s.start_time) - Date.parse(s.start_time);
-    return Math.max(0.5, d / this.spanMs * 100);
   }
 }
