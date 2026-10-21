@@ -126,6 +126,30 @@ CREATE TABLE IF NOT EXISTS dataset_cases (
     rubric_json TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (project_id, dataset_id, version, case_id)
 );
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    key_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    key_hash TEXT NOT NULL,
+    role TEXT NOT NULL,
+    projects_json TEXT NOT NULL DEFAULT '[]',
+    created_ns INTEGER,
+    revoked_ns INTEGER,
+    PRIMARY KEY (key_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+
+CREATE TABLE IF NOT EXISTS audit_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts_ns INTEGER NOT NULL,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    detail_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(ts_ns);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_events(action);
 """
 
 
@@ -1033,6 +1057,173 @@ class SQLiteTraceStore:
             }
             for r in rows
         ]
+
+    # -- security & governance (Cycle 08) -------------------------------
+
+    def create_api_key(
+        self,
+        key_id: str,
+        *,
+        name: str,
+        key_hash: str,
+        role: str,
+        projects: list[str] | None = None,
+        now_ns: int | None = None,
+    ) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                """INSERT INTO api_keys(key_id, name, key_hash, role,
+                                        projects_json, created_ns)
+                   VALUES (?,?,?,?,?,?)""",
+                (
+                    key_id,
+                    name,
+                    key_hash,
+                    role,
+                    json.dumps(sorted(projects or [])),
+                    now_ns,
+                ),
+            )
+
+    def api_key_by_hash(self, key_hash: str) -> dict[str, Any] | None:
+        """Resolve a presented secret's hash → key record (or None).
+
+        Never returns secret material — the table stores hashes only."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM api_keys WHERE key_hash=? AND revoked_ns IS NULL",
+                (key_hash,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._api_key_dict(row)
+
+    def get_api_key(self, key_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM api_keys WHERE key_id=?", (key_id,)
+            ).fetchone()
+        return self._api_key_dict(row) if row else None
+
+    def list_api_keys(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM api_keys ORDER BY key_id"
+            ).fetchall()
+        return [self._api_key_dict(r) for r in rows]
+
+    @staticmethod
+    def _api_key_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "key_id": row["key_id"],
+            "name": row["name"],
+            "role": row["role"],
+            "projects": json.loads(row["projects_json"] or "[]"),
+            "created_at": (
+                d.isoformat() if (d := _dt(row["created_ns"])) else None
+            ),
+            "revoked_at": (
+                d.isoformat() if (d := _dt(row["revoked_ns"])) else None
+            ),
+        }
+
+    def revoke_api_key(self, key_id: str, *, now_ns: int | None = None) -> bool:
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE api_keys SET revoked_ns=? WHERE key_id=? AND revoked_ns IS NULL",
+                (now_ns or 0, key_id),
+            )
+        return cur.rowcount > 0
+
+    def record_audit(
+        self,
+        *,
+        actor: str,
+        action: str,
+        resource: str,
+        outcome: str,
+        detail: dict[str, Any] | None = None,
+        ts_ns: int | None = None,
+    ) -> None:
+        """Append an audit event. Detail must never carry secrets —
+        callers pass key ids/names, never key material."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO audit_events(ts_ns, actor, action, resource,"
+                " outcome, detail_json) VALUES (?,?,?,?,?,?)",
+                (
+                    ts_ns or 0,
+                    actor,
+                    action,
+                    resource,
+                    outcome,
+                    json.dumps(detail or {}, sort_keys=True, default=str),
+                ),
+            )
+
+    def list_audit(
+        self,
+        *,
+        action: str | None = None,
+        actor: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        clauses, params = [], []
+        if action:
+            clauses.append("action = ?")
+            params.append(action)
+        if actor:
+            clauses.append("actor = ?")
+            params.append(actor)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._lock:
+            rows = self._conn.execute(
+                f"""SELECT * FROM audit_events {where}
+                    ORDER BY ts_ns DESC, event_id DESC LIMIT ? OFFSET ?""",
+                (*params, max(0, limit), max(0, offset)),
+            ).fetchall()
+        return [
+            {
+                "event_id": r["event_id"],
+                "ts_ns": r["ts_ns"],
+                "ts": (d.isoformat() if (d := _dt(r["ts_ns"])) else None),
+                "actor": r["actor"],
+                "action": r["action"],
+                "resource": r["resource"],
+                "outcome": r["outcome"],
+                "detail": json.loads(r["detail_json"] or "{}"),
+            }
+            for r in rows
+        ]
+
+    def prune_traces(
+        self, *, before_ns: int, project_id: str | None = None
+    ) -> dict[str, int]:
+        """Retention: delete traces (and their spans) started before
+        ``before_ns``. Bounded to trace granularity — partial-trace
+        deletion would fabricate incomplete executions."""
+        clauses = ["started_ns < ?"]
+        params: list[Any] = [before_ns]
+        if project_id:
+            clauses.append("project_id = ?")
+            params.append(project_id)
+        where = " AND ".join(clauses)
+        with self._lock, self._conn:
+            doomed = self._conn.execute(
+                f"SELECT project_id, trace_id FROM traces WHERE {where}",
+                params,
+            ).fetchall()
+            for row in doomed:
+                self._conn.execute(
+                    "DELETE FROM spans WHERE project_id=? AND trace_id=?",
+                    (row["project_id"], row["trace_id"]),
+                )
+                self._conn.execute(
+                    "DELETE FROM traces WHERE project_id=? AND trace_id=?",
+                    (row["project_id"], row["trace_id"]),
+                )
+        return {"traces": len(doomed)}
 
     def close(self) -> None:
         with self._lock:

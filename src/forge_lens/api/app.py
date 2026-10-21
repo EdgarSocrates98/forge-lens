@@ -7,6 +7,7 @@ place where HTTP is handled.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import secrets
 import threading
@@ -18,6 +19,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from pydantic import ValidationError as PydanticValidationError
 
 from forge_lens import __version__
+from forge_lens.api.clock import wall_clock_ns
 from forge_lens.contracts.v1.trace import TraceIngest
 from forge_lens.core.config import LensConfig
 from forge_lens.core.errors import (
@@ -147,17 +149,117 @@ def create_app(
         description="Local-first agentic observability — ingest, store, query traces.",
     )
 
-    # -- dependencies ---------------------------------------------------
+    # -- dependencies (auth: Cycle 08) ----------------------------------
 
-    def check_auth(x_forge_lens_key: str | None = Header(default=None)) -> None:
-        """Optional ingestion auth: only enforced when api_key is configured."""
-        # compare as bytes: compare_digest raises TypeError on non-ASCII
-        # str input — an attacker-controlled header must get 401, not 500
-        if cfg.api_key and not secrets.compare_digest(
-            (x_forge_lens_key or "").encode(), cfg.api_key.encode()
-        ):
-            METRICS.inc(M_API_ERRORS)
-            raise HTTPException(status_code=401, detail="invalid or missing API key")
+    from forge_lens.security.keys import (
+        KeyIdentity,
+        hash_secret,
+        project_allowed,
+        role_at_least,
+    )
+
+    # effective mode: explicit auth_mode, else `api_key` implies "key",
+    # else local-first "none"
+    _mode = cfg.auth_mode if cfg.auth_mode != "none" else ("key" if cfg.api_key else "none")
+
+    def _audit(
+        actor: str,
+        action: str,
+        resource: str,
+        outcome: str,
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        """Best-effort audit append — never lets logging break a request.
+
+        Audit detail carries ids/names only; secrets never enter the
+        trail (the store hashes them anyway)."""
+        # suppressed deliberately: audit must never break a request —
+        # a failed trail is reported via self-metrics, not exceptions
+        with contextlib.suppress(Exception):
+            get_store().record_audit(
+                actor=actor,
+                action=action,
+                resource=resource,
+                outcome=outcome,
+                detail=detail,
+                ts_ns=wall_clock_ns(),
+            )
+
+    def _resolve(x_key: str | None) -> KeyIdentity | None:
+        """Header → identity. ``none`` mode = local single-user admin;
+        ``key`` = the shared config secret (admin); ``keys`` = a stored
+        key record (hashed lookup, role + tenant scope)."""
+        if _mode == "none":
+            return KeyIdentity(actor="local", role="admin", projects=())
+        if _mode == "key":
+            # compare as bytes: compare_digest raises TypeError on
+            # non-ASCII str input — attacker input must get 401, not 500
+            if cfg.api_key and x_key and secrets.compare_digest(
+                x_key.encode(), cfg.api_key.encode()
+            ):
+                return KeyIdentity(actor="config-key", role="admin", projects=())
+            return None
+        # keys mode
+        if not x_key:
+            return None
+        rec = get_store().api_key_by_hash(hash_secret(x_key))
+        if rec is None:
+            return None
+        return KeyIdentity(
+            actor=f"key:{rec['key_id']}",
+            role=str(rec["role"]),
+            projects=tuple(rec["projects"]),
+            key_id=str(rec["key_id"]),
+        )
+
+    def _require_role(
+        required: str,
+    ) -> Callable[[Request, str | None], Awaitable[KeyIdentity]]:
+        async def dep(
+            request: Request,
+            x_forge_lens_key: str | None = Header(default=None),
+        ) -> KeyIdentity:
+            ident = _resolve(x_forge_lens_key)
+            if ident is None:
+                _audit("unknown", "auth", request.url.path, "denied",
+                       {"reason": "invalid_or_missing_key"})
+                raise _reject_request(401, "invalid or missing API key")
+            if not role_at_least(ident.role, required):
+                _audit(ident.actor, "auth", request.url.path, "denied",
+                       {"reason": f"role {required} required", "role": ident.role})
+                raise _reject_request(403, f"role {required!r} required")
+            request.state.lens_identity = ident
+            return ident
+
+        return dep
+
+    def check_auth(
+        request: Request,
+        x_forge_lens_key: str | None = Header(default=None),
+    ) -> None:
+        """Ingest/write auth — resolves under every mode; ingest is a
+        ``writer``-level action when keys are managed."""
+        ident = _resolve(x_forge_lens_key)
+        if ident is None:
+            _audit("unknown", "auth", request.url.path, "denied",
+                   {"reason": "invalid_or_missing_key"})
+            raise _reject_ingest(401, "invalid or missing API key")
+        if not role_at_least(ident.role, "writer"):
+            _audit(ident.actor, "auth", request.url.path, "denied",
+                   {"reason": "writer role required"})
+            raise _reject_ingest(403, "writer role required")
+        request.state.lens_identity = ident
+
+    def _require_scope(request: Request, project_id: str | None) -> None:
+        """Tenant isolation: a project-scoped key may only touch its own
+        projects. Reads AND writes — the rule is uniform."""
+        ident = getattr(request.state, "lens_identity", None)
+        if ident is not None and not project_allowed(ident, project_id):
+            _audit(ident.actor, "scope", request.url.path, "denied",
+                   {"project_id": project_id})
+            raise _reject_request(
+                403, f"project {project_id!r} outside key scope"
+            )
 
     @app.middleware("http")
     async def count_requests(
@@ -178,7 +280,7 @@ def create_app(
             body = TraceIngest.model_validate_json(raw)
         except PydanticValidationError as exc:
             raise _reject_ingest(422, str(exc)) from exc
-
+        _require_scope(request, body.project_id or cfg.project_id)
         for trace in body.traces:
             # The envelope project fills traces that didn't name one;
             # an explicit per-trace project_id stays authoritative.
@@ -239,6 +341,7 @@ def create_app(
             )
         except (ValidationError, PydanticValidationError) as exc:
             raise _reject_ingest(422, str(exc)) from exc
+        _require_scope(request, cfg.project_id)
         try:
             result = get_pipeline().ingest(traces, payload_bytes=len(body))
         except (PayloadTooLargeError, RateLimitedError, ValidationError) as exc:
@@ -256,11 +359,17 @@ def create_app(
     # -- query ----------------------------------------------------------
 
     # auth_reads=true (with api_key configured) extends the same key check
-    # to reads; default keeps local-first reads open
-    read_deps = [Depends(check_auth)] if cfg.auth_reads else []
+    # to reads; in `keys` mode reads ALWAYS require a reader identity —
+    # tenant isolation is meaningless if unauthenticated reads stay open
+    read_deps = (
+        [Depends(_require_role("reader"))]
+        if (cfg.auth_reads or _mode == "keys")
+        else []
+    )
 
     @app.get(f"/{API_VERSION}/traces", dependencies=read_deps)
     async def list_traces(
+        request: Request,
         project_id: str | None = None,
         session_id: str | None = None,
         status: str | None = None,
@@ -269,6 +378,7 @@ def create_app(
     ) -> dict[str, Any]:
         limit = max(1, min(limit, 500))
         offset = max(0, offset)  # symmetric with limit — clamp, don't reject
+        _require_scope(request, project_id or cfg.project_id)
         with METRICS.timer(M_QUERY_LATENCY):
             items = get_store().list_traces(
                 project_id=project_id or cfg.project_id,
@@ -280,7 +390,10 @@ def create_app(
         return {"items": items, "limit": limit, "offset": offset}
 
     @app.get(f"/{API_VERSION}/traces/{{trace_id}}", dependencies=read_deps)
-    async def get_trace(trace_id: str, project_id: str | None = None) -> dict[str, Any]:
+    async def get_trace(
+        request: Request, trace_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        _require_scope(request, project_id or cfg.project_id)
         with METRICS.timer(M_QUERY_LATENCY):
             trace = get_store().get_trace(trace_id, project_id=project_id or cfg.project_id)
         if trace is None:
@@ -411,6 +524,18 @@ def create_app(
         trace = _get_trace_or_404(trace_id, project_id)
         return incident_bundle(trace, _registry())
 
+    @app.get(
+        f"/{API_VERSION}/traces/{{trace_id}}/security", dependencies=read_deps
+    )
+    async def trace_security(
+        trace_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        """MCP/tool-call security observations — observer mode, evidence only."""
+        from forge_lens.security.mcp_inspect import inspect_trace
+
+        trace = _get_trace_or_404(trace_id, project_id)
+        return inspect_trace(trace)
+
     # -- evaluation (Cycle 06): deterministic evidence-based scores ------
 
     @app.get(f"/{API_VERSION}/traces/{{trace_id}}/eval", dependencies=read_deps)
@@ -519,6 +644,7 @@ def create_app(
         # not cost a fan-out of store lookups before the 422 fires
         specs = _eval_specs(body)
         dataset = _eval_dataset(body)
+        _require_scope(request, _eval_project_id(body))
         report = evaluate_traces(_eval_traces(body), specs, dataset=dataset)
         return report.model_dump(mode="json")
 
@@ -553,6 +679,8 @@ def create_app(
 
         a_ids, a_pid, a_dataset = _side_params("a")
         b_ids, b_pid, b_dataset = _side_params("b")
+        _require_scope(request, a_pid)
+        _require_scope(request, b_pid)
         result = compare_runs(
             evaluate_traces(
                 [_get_trace_or_404(t, a_pid) for t in a_ids],
@@ -607,6 +735,7 @@ def create_app(
             raise _reject_request(422, "metadata: object required")
         created_ns = _optional_body_datetime_ns(body, "created_at")
         pid = body.get("project_id") or cfg.project_id
+        _require_scope(request, str(pid))
         get_store().upsert_dataset(
             dataset_id,
             project_id=str(pid),
@@ -618,13 +747,17 @@ def create_app(
         return {"dataset_id": dataset_id, "project_id": str(pid), "stored": True}
 
     @app.get(f"/{API_VERSION}/datasets", dependencies=read_deps)
-    async def list_datasets(project_id: str | None = None) -> list[dict[str, Any]]:
+    async def list_datasets(
+        request: Request, project_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        _require_scope(request, project_id or cfg.project_id)
         return get_store().list_datasets(project_id)
 
     @app.get(f"/{API_VERSION}/datasets/{{dataset_id}}", dependencies=read_deps)
     async def get_dataset(
-        dataset_id: str, project_id: str | None = None
+        request: Request, dataset_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
+        _require_scope(request, project_id or cfg.project_id)
         ds = get_store().get_dataset(dataset_id, project_id or cfg.project_id)
         if ds is None:
             raise _reject_request(404, f"dataset {dataset_id!r} not found")
@@ -639,6 +772,7 @@ def create_app(
     ) -> dict[str, Any]:
         body = await _eval_body(request)
         pid = str(body.get("project_id") or cfg.project_id)
+        _require_scope(request, pid)
         if get_store().get_dataset(dataset_id, pid) is None:
             raise _reject_request(
                 404, f"dataset {dataset_id!r} not found — create it first"
@@ -673,8 +807,9 @@ def create_app(
         dependencies=read_deps,
     )
     async def list_dataset_versions(
-        dataset_id: str, project_id: str | None = None
+        request: Request, dataset_id: str, project_id: str | None = None
     ) -> list[dict[str, Any]]:
+        _require_scope(request, project_id or cfg.project_id)
         if get_store().get_dataset(dataset_id, project_id or cfg.project_id) is None:
             raise _reject_request(404, f"dataset {dataset_id!r} not found")
         return get_store().list_dataset_versions(
@@ -686,8 +821,10 @@ def create_app(
         dependencies=read_deps,
     )
     async def get_dataset_version(
-        dataset_id: str, version: str, project_id: str | None = None
+        request: Request, dataset_id: str, version: str,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
+        _require_scope(request, project_id or cfg.project_id)
         v = get_store().get_dataset_version(
             dataset_id, version, project_id or cfg.project_id
         )
@@ -696,6 +833,122 @@ def create_app(
                 404, f"dataset version {dataset_id!r}@{version!r} not found"
             )
         return v
+
+    # -- admin (Cycle 08: keys, audit, retention) ------------------------
+
+    admin_deps = [Depends(_require_role("admin"))]
+
+    @app.post(f"/{API_VERSION}/admin/keys", dependencies=admin_deps)
+    async def admin_create_key(request: Request) -> dict[str, Any]:
+        """Issue a managed key. The secret is returned exactly once —
+        only its hash is stored."""
+        from forge_lens.security.keys import ROLES, generate_key
+
+        body = await _eval_body(request)
+        name = body.get("name")
+        role = body.get("role")
+        projects = body.get("projects")
+        if not isinstance(name, str) or not name.strip():
+            raise _reject_request(422, "name: non-empty string required")
+        if not isinstance(role, str) or role not in ROLES:
+            raise _reject_request(422, f"role: one of {ROLES}")
+        if projects is not None and (
+            not isinstance(projects, list)
+            or any(not isinstance(p, str) for p in projects)
+        ):
+            raise _reject_request(422, "projects: list of strings required")
+        key_id, secret, hashed = generate_key()
+        get_store().create_api_key(
+            key_id,
+            name=name.strip(),
+            key_hash=hashed,
+            role=role,
+            projects=projects,
+            now_ns=wall_clock_ns(),
+        )
+        ident = getattr(request.state, "lens_identity", None)
+        _audit(
+            ident.actor if ident else "unknown",
+            "key.create",
+            key_id,
+            "ok",
+            {"name": name.strip(), "role": role},
+        )
+        return {
+            "key_id": key_id,
+            "secret": secret,
+            "role": role,
+            "projects": projects or [],
+            "warning": "the secret is shown once — only its hash is stored",
+        }
+
+    @app.get(f"/{API_VERSION}/admin/keys", dependencies=admin_deps)
+    async def admin_list_keys() -> list[dict[str, Any]]:
+        return get_store().list_api_keys()
+
+    @app.delete(f"/{API_VERSION}/admin/keys/{{key_id}}", dependencies=admin_deps)
+    async def admin_revoke_key(request: Request, key_id: str) -> dict[str, Any]:
+        if not get_store().revoke_api_key(key_id, now_ns=wall_clock_ns()):
+            raise _reject_request(404, f"key {key_id!r} not found or already revoked")
+        ident = getattr(request.state, "lens_identity", None)
+        _audit(
+            ident.actor if ident else "unknown",
+            "key.revoke", key_id, "ok",
+        )
+        return {"key_id": key_id, "revoked": True}
+
+    @app.get(f"/{API_VERSION}/admin/audit", dependencies=admin_deps)
+    async def admin_audit(
+        action: str | None = None,
+        actor: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        return get_store().list_audit(
+            action=action, actor=actor, limit=limit, offset=offset
+        )
+
+    @app.post(f"/{API_VERSION}/admin/prune", dependencies=admin_deps)
+    async def admin_prune(request: Request) -> dict[str, Any]:
+        """Retention enforcement — delete traces older than a cutoff.
+
+        ``before`` (ISO) or ``older_than_days`` selects the cutoff;
+        ``project_id`` bounds the prune to one tenant."""
+        body = await _eval_body(request)
+        before = body.get("before")
+        older_days = body.get("older_than_days")
+        pid = body.get("project_id")
+        if pid is not None and not isinstance(pid, str):
+            raise _reject_request(422, "project_id: string required")
+        _require_scope(request, pid)
+        if before is not None and older_days is not None:
+            raise _reject_request(422, "before and older_than_days are exclusive")
+        if before is not None:
+            cutoff = _optional_body_datetime_ns(body, "before")
+            if cutoff is None:
+                raise _reject_request(422, "before: ISO datetime required")
+        elif older_days is not None:
+            if (
+                not isinstance(older_days, (int, float))
+                or isinstance(older_days, bool)
+                or older_days < 0
+            ):
+                raise _reject_request(422, "older_than_days: non-negative number required")
+            cutoff = wall_clock_ns() - int(older_days * 86_400_000_000_000)
+        else:
+            raise _reject_request(422, "before or older_than_days required")
+        deleted = get_store().prune_traces(
+            before_ns=cutoff, project_id=pid
+        )
+        ident = getattr(request.state, "lens_identity", None)
+        _audit(
+            ident.actor if ident else "unknown",
+            "traces.prune",
+            pid or "*",
+            "ok",
+            {"before_ns": cutoff, **deleted},
+        )
+        return {"deleted": deleted, "before_ns": cutoff}
 
     # -- ops ------------------------------------------------------------
 

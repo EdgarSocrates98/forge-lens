@@ -885,7 +885,8 @@ def test_datasets_api(client: TestClient) -> None:
     r = client.put("/v1/datasets/qa", json={"name": "QA set", "task": "qa"})
     assert r.status_code == 200, r.text
     r = client.get("/v1/datasets/qa")
-    assert r.status_code == 200 and r.json()["name"] == "QA set"
+    assert r.status_code == 200
+    assert r.json()["name"] == "QA set"
 
     r = client.put("/v1/datasets/qa/versions/v1", json={
         "description": "first",
@@ -894,11 +895,13 @@ def test_datasets_api(client: TestClient) -> None:
              "allowed_tools": ["web_search"]},
         ],
     })
-    assert r.status_code == 200 and r.json()["cases"] == 1
+    assert r.status_code == 200
+    assert r.json()["cases"] == 1
 
     r = client.get("/v1/datasets/qa/versions")
     assert r.status_code == 200
-    assert r.json()[0]["version"] == "v1" and r.json()[0]["case_count"] == 1
+    assert r.json()[0]["version"] == "v1"
+    assert r.json()[0]["case_count"] == 1
 
     r = client.get("/v1/datasets/qa/versions/v1")
     assert r.status_code == 200
@@ -912,7 +915,8 @@ def test_datasets_api(client: TestClient) -> None:
     assert client.get("/v1/datasets/qa/versions/v9").status_code == 404
     assert client.get("/v1/datasets/nope").status_code == 404
     r = client.get("/v1/datasets")
-    assert r.status_code == 200 and any(d["dataset_id"] == "qa" for d in r.json())
+    assert r.status_code == 200
+    assert any(d["dataset_id"] == "qa" for d in r.json())
 
 
 def test_eval_new_evaluators_and_gate(client: TestClient, synthetic_trace: Trace) -> None:
@@ -951,7 +955,8 @@ def test_eval_new_evaluators_and_gate(client: TestClient, synthetic_trace: Trace
         **body, "gate": {"metrics": {
             "error_free/no_error_spans": {"min_pass_rate_b": 0.0}}}}
     )
-    assert r.status_code == 200 and r.json()["gate"]["gate_passed"] is True
+    assert r.status_code == 200
+    assert r.json()["gate"]["gate_passed"] is True
     r = client.post("/v1/eval/compare", json={
         **body, "gate": {"metrics": {
             "error_free/no_error_spans": {"min_pass_rate_b": 1.0}}}}
@@ -966,3 +971,56 @@ def test_eval_new_evaluators_and_gate(client: TestClient, synthetic_trace: Trace
     assert r.json()["gate"]["gate_passed"] is False
     assert client.post("/v1/eval/compare", json={
         **body, "gate": "x"}).status_code == 422
+
+
+def test_keys_mode_tenancy(tmp_path, synthetic_trace: Trace) -> None:
+    """Cycle 08 E2E: managed keys, roles, project isolation, audit."""
+    from forge_lens.security.keys import generate_key
+
+    store = SQLiteTraceStore(tmp_path / "k.db")
+    cfg = LensConfig(
+        data_dir=tmp_path, db_path=tmp_path / "k.db", auth_mode="keys"
+    )
+    app = create_app(store=store, config=cfg)
+    kid, secret, h = generate_key()
+    store.create_api_key(kid, name="root", key_hash=h, role="admin")
+    try:
+        with TestClient(app) as c:
+            admin = {"X-Forge-Lens-Key": secret}
+            # unauthenticated → 401 even on reads (isolation requires auth)
+            assert c.get("/v1/traces").status_code == 401
+            assert c.get("/v1/health").status_code == 401
+            # admin works
+            assert c.get("/v1/health", headers=admin).status_code == 200
+            # mint a p1-scoped writer through the API
+            r = c.post("/v1/admin/keys", headers=admin,
+                       json={"name": "w", "role": "writer",
+                             "projects": ["p1"]})
+            assert r.status_code == 200, r.text
+            scoped = {"X-Forge-Lens-Key": r.json()["secret"]}
+            # writer ingests into its tenant
+            env = TraceIngest(
+                traces=[synthetic_trace], project_id="p1"
+            ).model_dump(mode="json")
+            r = c.post("/v1/traces", json=env, headers=scoped)
+            assert r.status_code == 200, r.text
+            # but not into the default tenant
+            env2 = TraceIngest(traces=[synthetic_trace]).model_dump(mode="json")
+            assert c.post("/v1/traces", json=env2, headers=scoped).status_code == 403
+            # scoped read inside tenant ok, outside denied
+            assert c.get("/v1/traces?project_id=p1", headers=scoped).status_code == 200
+            assert c.get("/v1/traces?project_id=default", headers=scoped).status_code == 403
+            # reader role cannot write
+            r = c.post("/v1/admin/keys", headers=admin,
+                       json={"name": "ro", "role": "reader"})
+            reader = {"X-Forge-Lens-Key": r.json()["secret"]}
+            assert c.post("/v1/traces", json=env, headers=reader).status_code == 403
+            # non-admin cannot reach admin routes
+            assert c.get("/v1/admin/keys", headers=reader).status_code == 403
+            assert c.get("/v1/admin/keys").status_code == 401
+            # audit: denials + key.create recorded
+            events = c.get("/v1/admin/audit", headers=admin).json()
+            actions = {e["action"] for e in events}
+            assert {"auth", "key.create", "scope"} <= actions
+    finally:
+        store.close()

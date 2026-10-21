@@ -90,4 +90,49 @@ class TraceStore(Protocol):
         self, dataset_id: str, project_id: str = "default"
     ) -> list[dict[str, Any]]: ...
 
+    # -- security & governance (Cycle 08) -------------------------------
+
+    def create_api_key(
+        self,
+        key_id: str,
+        *,
+        name: str,
+        key_hash: str,
+        role: str,
+        projects: list[str] | None = None,
+        now_ns: int | None = None,
+    ) -> None: ...
+
+    def api_key_by_hash(self, key_hash: str) -> dict[str, Any] | None: ...
+
+    def get_api_key(self, key_id: str) -> dict[str, Any] | None: ...
+
+    def list_api_keys(self) -> list[dict[str, Any]]: ...
+
+    def revoke_api_key(self, key_id: str, *, now_ns: int | None = None) -> bool: ...
+
+    def record_audit(
+        self,
+        *,
+        actor: str,
+        action: str,
+        resource: str,
+        outcome: str,
+        detail: dict[str, Any] | None = None,
+        ts_ns: int | None = None,
+    ) -> None: ...
+
+    def list_audit(
+        self,
+        *,
+        action: str | None = None,
+        actor: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]: ...
+
+    def prune_traces(
+        self, *, before_ns: int, project_id: str | None = None
+    ) -> dict[str, int]: ...
+
     def close(self) -> None: ...

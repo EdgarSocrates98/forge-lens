@@ -4,6 +4,8 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
+import pytest
+
 import forge_lens.storage.sqlite as store_mod
 from forge_lens.contracts.v1.trace import IntegrityFlag, Status, StatusCode, Trace
 from forge_lens.storage.sqlite import SQLiteTraceStore
@@ -185,7 +187,6 @@ def test_store_rejects_span_trace_id_mismatch(
 ) -> None:
     """The store itself defends consistency: a span naming a different
     trace_id would be persisted under a key get_trace can never reach."""
-    import pytest
 
     from forge_lens.core.errors import ValidationError
 
@@ -635,7 +636,8 @@ def test_dataset_store(tmp_store: SQLiteTraceStore) -> None:
         metadata={"owner": "evals"}, now_ns=1_000,
     )
     ds = tmp_store.get_dataset("qa", "p1")
-    assert ds is not None and ds["name"] == "QA set"
+    assert ds is not None
+    assert ds["name"] == "QA set"
     assert ds["metadata"]["owner"] == "evals"
     assert tmp_store.get_dataset("qa", "other") is None
 
@@ -650,7 +652,8 @@ def test_dataset_store(tmp_store: SQLiteTraceStore) -> None:
     )
     assert n == 2
     versions = tmp_store.list_dataset_versions("qa", "p1")
-    assert len(versions) == 1 and versions[0]["case_count"] == 2
+    assert len(versions) == 1
+    assert versions[0]["case_count"] == 2
     v = tmp_store.get_dataset_version("qa", "v1", "p1")
     assert v is not None
     assert [c["case_id"] for c in v["cases"]] == ["c1", "c2"]

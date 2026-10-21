@@ -44,6 +44,17 @@ class LensConfig:
     """When true (and ``api_key`` is set), query/read endpoints require
     the key too. Default off: local-first reads stay open by design."""
 
+    auth_mode: str = "none"
+    """``none`` (local single-user) | ``key`` (single shared key — implied
+    by ``api_key``) | ``keys`` (table-managed keys with roles and
+    per-project tenancy). In ``keys`` mode every request, reads
+    included, must present a valid key — that is what makes tenant
+    isolation enforceable."""
+
+    retention_days: int = 0
+    """0 disables automatic retention; >0 makes ``lens prune`` without an
+    explicit ``--before`` delete traces older than this many days."""
+
     endpoint: str = "http://127.0.0.1:7777"
     max_payload_bytes: int = 8 * 1024 * 1024
     max_traces_per_request: int = 10_000
@@ -76,6 +87,14 @@ def _toml_to_config(data: dict[str, object], base: LensConfig) -> LensConfig:
         kwargs["api_key"] = v
     if isinstance(v := section.get("auth_reads"), bool):
         kwargs["auth_reads"] = v
+    if isinstance(v := section.get("auth_mode"), str) and v in {
+        "none", "key", "keys",
+    }:
+        kwargs["auth_mode"] = v
+    if isinstance(v := section.get("retention_days"), int) and not isinstance(
+        v, bool
+    ):
+        kwargs["retention_days"] = v
     if isinstance(v := section.get("endpoint"), str):
         kwargs["endpoint"] = v
     if isinstance(v := section.get("pricing_file"), str):
@@ -116,6 +135,8 @@ def load_config(project_dir: Path | None = None) -> LensConfig:
         "FORGE_LENS_CAPTURE": "capture",
         "FORGE_LENS_API_KEY": "api_key",
         "FORGE_LENS_AUTH_READS": "auth_reads",
+        "FORGE_LENS_AUTH_MODE": "auth_mode",
+        "FORGE_LENS_RETENTION_DAYS": "retention_days",
         "FORGE_LENS_ENDPOINT": "endpoint",
         "FORGE_LENS_PRICING_FILE": "pricing_file",
         "FORGE_LENS_MAX_PAYLOAD_BYTES": "max_payload_bytes",
@@ -137,6 +158,10 @@ def load_config(project_dir: Path | None = None) -> LensConfig:
                 overrides[field_name] = CaptureLevel(raw)
             elif field_name == "auth_reads":
                 overrides[field_name] = raw.lower() in {"1", "true", "yes", "on"}
+            elif field_name == "auth_mode":
+                if raw not in {"none", "key", "keys"}:
+                    raise ValueError(f"invalid auth_mode {raw!r}")
+                overrides[field_name] = raw
             elif field_name in {"endpoint", "project_id", "api_key"}:
                 overrides[field_name] = raw
             else:  # every remaining mapped field is int-valued

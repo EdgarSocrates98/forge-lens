@@ -30,6 +30,10 @@ forge-lens doctor               # install health check
     evidence) and as the *injectable default* clock for `RateLimiter`/
     `IngestPipeline` (production passes the default; tests inject fakes).
     Neither reads civil time nor influences persisted data.
+  - *Documented exception 2*: `api/clock.py` (`wall_clock_ns`, backed by
+    `time.time_ns`) is the *only* civil-time seam, used by the API/CLI
+    boundary for audit timestamps and retention cutoffs — never inside
+    engine modules, never for trace/evidence timestamps.
 - **Contracts are versioned**: changes to `contracts/v1` require bumping
   `schema_version` and regenerating `schemas/v1/`; never break readers of
   older payloads (unknown fields are preserved, not dropped).

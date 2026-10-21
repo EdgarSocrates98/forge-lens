@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -24,6 +25,8 @@ app = typer.Typer(
 )
 traces_app = typer.Typer(help="Inspect stored traces.", no_args_is_help=True)
 app.add_typer(traces_app, name="traces")
+keys_app = typer.Typer(help="Manage API keys (Cycle 08).", no_args_is_help=True)
+app.add_typer(keys_app, name="keys")
 
 
 def _config(db: Path | None = None) -> LensConfig:
@@ -97,6 +100,12 @@ def serve(
         int | None, typer.Option("--port", "-p", help="defaults to the endpoint config")
     ] = None,
     db: Annotated[Path | None, typer.Option("--db")] = None,
+    ssl_certfile: Annotated[
+        Path | None, typer.Option("--ssl-certfile", help="TLS certificate (remote mode)")
+    ] = None,
+    ssl_keyfile: Annotated[
+        Path | None, typer.Option("--ssl-keyfile", help="TLS private key (remote mode)")
+    ] = None,
 ) -> None:
     """Run the Forge Lens ingestion + query API.
 
@@ -135,11 +144,19 @@ def serve(
     application = create_app(config=cfg)
     _warn_if_exposed(host, cfg)
     shown = port if port != 0 else "ephemeral"  # uvicorn logs the real bound port
-    typer.echo(f"Forge Lens v{__version__} listening on http://{host}:{shown}")
+    scheme = "https" if ssl_certfile else "http"
+    typer.echo(f"Forge Lens v{__version__} listening on {scheme}://{host}:{shown}")
     typer.echo("  OTLP endpoint:   POST /v1/otlp/traces")
     typer.echo("  Native endpoint: POST /v1/traces")
     typer.echo(f"  DB: {cfg.resolved_db_path}")
-    uvicorn.run(application, host=host, port=port, log_level="info")
+    uvicorn.run(
+        application,
+        host=host,
+        port=port,
+        log_level="info",
+        ssl_certfile=str(ssl_certfile) if ssl_certfile else None,
+        ssl_keyfile=str(ssl_keyfile) if ssl_keyfile else None,
+    )
 
 
 @app.command()
@@ -572,6 +589,128 @@ def doctor(
         except Exception as exc:
             check("pricing file parseable", False, str(exc))
     raise typer.Exit(0 if ok else 1)
+
+
+@keys_app.command("create")
+def keys_create(
+    name: Annotated[str, typer.Option("--name")],
+    role: Annotated[str, typer.Option("--role", help="reader|writer|admin")] = "writer",
+    project: Annotated[
+        list[str] | None,
+        typer.Option("--project", help="tenant scope; repeatable; omit for unscoped"),
+    ] = None,
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+) -> None:
+    """Issue an API key. The secret prints once — only its hash is stored."""
+    from forge_lens.api.clock import wall_clock_ns
+    from forge_lens.security.keys import ROLES, generate_key
+
+    if role not in ROLES:
+        typer.echo(f"invalid role {role!r} — one of {ROLES}", err=True)
+        raise typer.Exit(2)
+    store = _store(_config(db))
+    try:
+        key_id, secret, hashed = generate_key()
+        store.create_api_key(
+            key_id, name=name, key_hash=hashed, role=role,
+            projects=project, now_ns=wall_clock_ns(),
+        )
+    finally:
+        store.close()
+    typer.echo(f"key_id:  {key_id}")
+    typer.echo(f"secret:  {secret}   # shown once — store keeps only its hash")
+    typer.echo(f"role:    {role}")
+    typer.echo(f"projects: {project or ['*unscoped*']}")
+
+
+@keys_app.command("list")
+def keys_list(db: Annotated[Path | None, typer.Option("--db")] = None) -> None:
+    store = _store(_config(db))
+    try:
+        for k in store.list_api_keys():
+            state = "revoked" if k["revoked_at"] else "active"
+            typer.echo(
+                f"{k['key_id']}  {k['name']}  role={k['role']}  "
+                f"projects={k['projects'] or ['*']}  {state}"
+            )
+    finally:
+        store.close()
+
+
+@keys_app.command("revoke")
+def keys_revoke(
+    key_id: str, db: Annotated[Path | None, typer.Option("--db")] = None
+) -> None:
+    from forge_lens.api.clock import wall_clock_ns
+
+    store = _store(_config(db))
+    try:
+        if not store.revoke_api_key(key_id, now_ns=wall_clock_ns()):
+            typer.echo(f"key {key_id!r} not found or already revoked", err=True)
+            raise typer.Exit(1)
+    finally:
+        store.close()
+    typer.echo(f"revoked {key_id}")
+
+
+@app.command()
+def prune(
+    before: Annotated[
+        str | None, typer.Option("--before", help="ISO datetime cutoff")
+    ] = None,
+    days: Annotated[
+        int | None, typer.Option("--days", help="delete traces older than N days")
+    ] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="confirm deletion")] = False,
+) -> None:
+    """Retention enforcement — delete traces older than a cutoff.
+
+    Destructive: requires --yes or an interactive confirmation."""
+    from forge_lens.api.clock import wall_clock_ns
+    from forge_lens.core.time import ensure_aware, to_unix_nano
+
+    cfg = _config(db)
+    if before is not None and days is not None:
+        typer.echo("--before and --days are exclusive", err=True)
+        raise typer.Exit(2)
+    if before is not None:
+        try:
+            cutoff = to_unix_nano(ensure_aware(datetime.fromisoformat(before)))
+        except ValueError:
+            typer.echo(f"invalid --before {before!r}", err=True)
+            raise typer.Exit(2) from None
+    elif days is not None:
+        if days < 0:
+            typer.echo("--days must be non-negative", err=True)
+            raise typer.Exit(2)
+        cutoff = wall_clock_ns() - days * 86_400_000_000_000
+    elif cfg.retention_days > 0:
+        cutoff = wall_clock_ns() - cfg.retention_days * 86_400_000_000_000
+    else:
+        typer.echo(
+            "no cutoff: pass --before, --days, or set retention_days in config",
+            err=True,
+        )
+        raise typer.Exit(2)
+    store = _store(cfg)
+    try:
+        if not yes:
+            typer.confirm(
+                f"delete all traces older than the cutoff in "
+                f"project {project or '*'}? This cannot be undone.",
+                abort=True,
+            )
+        deleted = store.prune_traces(before_ns=cutoff, project_id=project)
+        store.record_audit(
+            actor="cli", action="traces.prune",
+            resource=project or "*", outcome="ok",
+            detail={"before_ns": cutoff, **deleted}, ts_ns=wall_clock_ns(),
+        )
+    finally:
+        store.close()
+    typer.echo(f"pruned {deleted['traces']} trace(s)")
 
 
 if __name__ == "__main__":
