@@ -529,3 +529,28 @@ def test_tool_call_emits_args_fingerprint_without_capture() -> None:
     assert isinstance(fp, str)
     assert len(fp) == 16
     assert "tool.parameters" not in span.attributes  # args stay private
+
+
+def test_tool_call_exotic_arg_keys_never_crash_host() -> None:
+    """json.dumps raises TypeError on mixed/tuple dict keys — the
+    fingerprint is best-effort and must degrade to a marker, never
+    throw into the observed application."""
+    tracer = LensTracer(service_name="t", register_atexit=False)
+    # mixed-type keys defeat sort_keys; tuple keys defeat keys entirely
+    for args in ({1: "a", "k": "v"}, {(1, 2): "x"}):
+        with tracer.tool_call("t", arguments=args, capture_args=True):
+            pass
+    spans = [s for t in tracer.exporter.traces for s in t.spans]
+    assert len(spans) == 2
+    import json as _json
+    for s in spans:
+        assert s.attributes["forge_lens.tool_args_unhashable"] is True
+        assert "forge_lens.tool_args_sha256" not in s.attributes
+    # mixed int/str keys coerce without sort_keys — real params land;
+    # tuple keys can't encode at all → parseable marker
+    assert _json.loads(spans[0].attributes["tool.parameters"]) == {
+        "1": "a", "k": "v",
+    }
+    assert _json.loads(spans[1].attributes["tool.parameters"])[
+        "_forge_lens.unserializable"
+    ] is True

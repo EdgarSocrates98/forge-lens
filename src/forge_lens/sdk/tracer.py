@@ -248,12 +248,23 @@ class LensTracer:
         """
         attrs.setdefault("tool.name", tool_name)
         if arguments is not None:
-            blob = json.dumps(arguments, sort_keys=True, default=str)
-            attrs["forge_lens.tool_args_sha256"] = hashlib.sha256(
-                blob.encode()
-            ).hexdigest()[:16]
+            try:
+                blob = json.dumps(arguments, sort_keys=True, default=str)
+            except (TypeError, ValueError):
+                # observability must never break the host — an
+                # unfingerprintable args dict is evidence, recorded
+                attrs["forge_lens.tool_args_unhashable"] = True
+            else:
+                attrs["forge_lens.tool_args_sha256"] = hashlib.sha256(
+                    blob.encode()
+                ).hexdigest()[:16]
         if capture_args and arguments is not None:
-            params_json = json.dumps(arguments, default=str)
+            try:
+                params_json = json.dumps(arguments, default=str)
+            except (TypeError, ValueError):
+                params_json = json.dumps(
+                    {"_forge_lens.unserializable": True}
+                )
             if len(params_json) > 4096:
                 # mid-string truncation would yield unparseable JSON —
                 # emit an explicit parseable marker instead

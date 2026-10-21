@@ -748,3 +748,18 @@ Infinity/-Infinity/NaN/1e999 → score=None, nunca veredito fabricado).
 
 Testes: +5 (status idempotente nas 2 direções, naive event→replay,
 NaN→null+json_valid, dead-letter cap+overflow, fingerprint metadata).
+
+## Round 17 — `tool_call` nunca quebra o host
+
+- `json.dumps(arguments, sort_keys=True)` levanta `TypeError` em
+  dicts com chaves de tipos mistos; a fingerprint escapava para a
+  aplicação observada — violando o invariante "observability must
+  never change the observed program's behavior" (o mesmo módulo
+  engole export/redact/callback errors por essa razão).
+- Sha path: `TypeError`/`ValueError` → `forge_lens.tool_args_unhashable`
+  marker (evidência, não silêncio); params path: mesmo tratamento →
+  `{"_forge_lens.unserializable": true}` parseável, no molde do
+  marcador de truncamento existente.
+
+Testes: +1 (mixed/tuple keys × capture_args — host nunca recebe exceção,
+marcadores corretos por caminho).
