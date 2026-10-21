@@ -130,6 +130,7 @@ def test_tools_list_covers_read_intel(
         "lens.get_trace",
         "lens.list_datasets",
         "lens.list_traces",
+        "lens.sessions",
         "lens.stats",
         "lens.trace_efficiency",
     }
@@ -376,3 +377,37 @@ def test_unknown_tool_is_data_not_death(
     )
     assert "unknown tool" in _payload(by_id[1])["error"]
     assert by_id[2]["result"] == {}
+
+
+def test_sessions_tool_rolls_up(
+    seeded_db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two traces sharing session_id collapse to one roll-up row."""
+    db_store = SQLiteTraceStore(seeded_db, readonly=False)
+    base = _loop_trace()
+    for i in range(2):
+        t = base.model_copy(deep=True)
+        t.trace_id = f"{'c' * 31}{i:x}"
+        for s in t.spans:
+            s.trace_id = t.trace_id
+        t.session_id = "sess-shared"
+        db_store.upsert_trace(t)
+    db_store.close()
+
+    by_id = _serve(
+        seeded_db,
+        [
+            _call_tool(1, "lens.sessions", {"limit": 10}),
+            _call_tool(2, "lens.sessions", {"limit": "x"}),
+        ],
+        capsys,
+    )
+    rows = _payload(by_id[1])["sessions"]
+    shared = [r for r in rows if r["session_id"] == "sess-shared"]
+    assert shared
+    assert shared[0]["traces"] == 2
+    assert set(shared[0]) == {
+        "session_id", "traces", "spans",
+        "first_started_at", "last_activity_at",
+    }
+    assert by_id[2]["error"]["code"] == -32603

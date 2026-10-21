@@ -61,6 +61,12 @@ def _tools() -> list[dict[str, Any]]:
          "inputSchema": {"type": "object", "properties": {
              "limit": {"type": "integer", "default": 20},
              "project_id": {"type": "string"}}}},
+        {"name": "lens.sessions",
+         "description": "Session roll-up — one row per session_id, "
+                        "newest activity first (matches /v1/sessions).",
+         "inputSchema": {"type": "object", "properties": {
+             "limit": {"type": "integer", "default": 100},
+             "project_id": {"type": "string"}}}},
         {"name": "lens.stats",
          "description": "Store statistics snapshot.",
          "inputSchema": {"type": "object", "properties": {
@@ -177,6 +183,16 @@ def serve(db_path: str) -> int:
             return classify_failure(trace).model_dump(mode="json")
         if name == "lens.list_datasets":
             return {"datasets": store.list_datasets(_pid(args))}
+        if name == "lens.sessions":
+            raw_lim = args.get("limit")
+            if raw_lim is not None and (
+                isinstance(raw_lim, bool)
+                or not isinstance(raw_lim, (int, float, str))
+            ):
+                raise TypeError("limit must be a number")
+            lim = 100 if raw_lim is None else int(raw_lim)
+            return {"sessions": store.list_sessions(
+                _pid(args), limit=min(500, max(0, lim)))}
         if name == "lens.capabilities":
             from forge_lens.adapters.capabilities import capability_matrix
 

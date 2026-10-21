@@ -5,6 +5,25 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 
 ## [Unreleased]
 
+### Added — improvement wave (post-review)
+
+- `GET /v1/traces` server-side filters: `status`, `session_id`, `tool`,
+  `q`, `since`, `until`, `min_duration_ms`, `max_duration_ms`
+  (traces sem `ended_at` são excluídas por filtros de duração); os
+  mesmos filtros em `forge-lens traces list`.
+- `GET /v1/sessions`: roll-up por `session_id` (traces, spans,
+  first_started_at, last_activity_at) + `lens.sessions` no MCP.
+- MCP stdio: `lens.detect_loops`, `lens.trace_efficiency`, `lens.cost`,
+  `lens.failure`, `lens.list_datasets`, `lens.sessions`,
+  `lens.capabilities` (9 tools read-only).
+- Avaliadores `contains`, `regex`, `tool_call_count`;
+  `latency_budget` aceita `max_duration_ms` (`budget_ms` segue como alias).
+- Studio: barra de filtros completa no Trace Explorer (deep-linkável,
+  saved views) e nova view `/sessions`.
+- Docs: `guides/operations-runbook.md`, `guides/troubleshooting.md`;
+  referências `cli.md`/`mcp.md` e `security/retention.md` sincronizadas
+  com o código.
+
 ### Added — cycles 06–12
 
 - Datasets versionados + casos (ground truth), avaliadores
