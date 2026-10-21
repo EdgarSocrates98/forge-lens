@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -10,7 +9,6 @@ from typing import Any
 import pytest
 
 from forge_lens.contracts.v1.trace import Span, SpanKind, Status, StatusCode, Trace, TraceSource
-from forge_lens.core.ids import new_span_id, new_trace_id
 from forge_lens.storage.sqlite import SQLiteTraceStore
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -157,14 +155,3 @@ def otlp_payload() -> dict[str, Any]:
 def fixtures_dir() -> Path:
     FIXTURES.mkdir(exist_ok=True)
     return FIXTURES
-
-
-def write_fixture(name: str, data: Any) -> Path:
-    FIXTURES.mkdir(exist_ok=True)
-    path = FIXTURES / name
-    path.write_text(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
-    return path
-
-
-# touch the imports used by helpers so linters see them as used
-_ = (new_trace_id, new_span_id)

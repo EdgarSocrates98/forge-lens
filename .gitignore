@@ -18,23 +18,17 @@ venv/
 coverage.xml
 htmlcov/
 
-# Data Sentinel local state
-.data-sentinel/
-data/sentinel.db
+# Node / TypeScript SDK
+node_modules/
 
 # Editors / OS
 .idea/
 .vscode/
 .DS_Store
 
-graphify-out/
+# Local prompt/working notes (not part of the shipped repo)
 prompt_evo*md
 prompt_inicial.md
 
-# Frontend (Angular)
-node_modules/
-frontend/dist/
-frontend/.angular/
-frontend/coverage/
 # Forge Lens runtime state
 .forge-lens/

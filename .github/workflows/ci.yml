@@ -22,7 +22,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run mypy src
       - run: uv run pytest --cov=src/forge_lens --cov-report=term-missing
-      - run: uv run python -m build
+      - run: uv build
       - name: schemas are in sync with models
         run: |
           uv run python -m forge_lens.contracts.jsonschema > /dev/null

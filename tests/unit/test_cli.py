@@ -76,3 +76,45 @@ def test_version() -> None:
     r = runner.invoke(app, ["--version"])
     assert r.exit_code == 0
     assert r.output.strip() != ""
+
+
+def test_traces_show_deep_tree_no_recursion_error(
+    tmp_path: Path, synthetic_trace
+) -> None:
+    """A chain deeper than the recursion limit must render iteratively."""
+    from datetime import timedelta
+
+    base = synthetic_trace.spans[0]
+    spans = []
+    for i in range(1200):
+        s = base.model_copy(deep=True)
+        s.span_id = f"{i:016x}"
+        s.parent_span_id = f"{i - 1:016x}" if i else None
+        s.name = f"deep-{i}"
+        s.start_time = base.start_time + timedelta(milliseconds=i)
+        s.end_time = None
+        spans.append(s)
+    deep = synthetic_trace.model_copy(deep=True)
+    deep.spans = spans
+
+    db = tmp_path / "deep.db"
+    from forge_lens.storage.sqlite import SQLiteTraceStore
+
+    store = SQLiteTraceStore(db)
+    store.upsert_trace(deep)
+    store.close()
+
+    r = runner.invoke(
+        app, ["traces", "show", deep.trace_id, "--db", str(db), "--project", "default"]
+    )
+    assert r.exit_code == 0, r.output[:500]
+    assert "deep-1199" in r.output  # tail of the chain rendered
+    assert r.output.count("deep-0 ") == 1  # root rendered exactly once
+
+
+def test_ingest_invalid_payload_exits_1(tmp_path: Path) -> None:
+    f = tmp_path / "bad.json"
+    f.write_text('{"traces": [{"bogus": true}]}')
+    r = runner.invoke(app, ["ingest", str(f), "--db", str(tmp_path / "x.db")])
+    assert r.exit_code == 1
+    assert "ingest failed" in r.output

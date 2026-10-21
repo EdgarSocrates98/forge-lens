@@ -93,3 +93,116 @@ def test_otlp_invalid_json(client: TestClient) -> None:
         "/v1/otlp/traces", content=b"{broken", headers={"Content-Type": "application/json"}
     )
     assert r.status_code == 400
+
+
+def test_native_payload_size_limit(tmp_path, synthetic_trace: Trace) -> None:
+    """POST /v1/traces enforces max_payload_bytes — not just OTLP."""
+    store = SQLiteTraceStore(tmp_path / "small.db")
+    cfg = LensConfig(
+        data_dir=tmp_path, db_path=tmp_path / "small.db", max_payload_bytes=1024
+    )
+    app = create_app(store=store, config=cfg)
+    with TestClient(app) as c:
+        envelope = TraceIngest(traces=[synthetic_trace]).model_dump(mode="json")
+        r = c.post("/v1/traces", json=envelope)
+        assert r.status_code == 413
+    store.close()
+
+
+def test_otlp_payload_size_limit(tmp_path, otlp_payload: dict) -> None:
+    store = SQLiteTraceStore(tmp_path / "small.db")
+    cfg = LensConfig(
+        data_dir=tmp_path, db_path=tmp_path / "small.db", max_payload_bytes=256
+    )
+    app = create_app(store=store, config=cfg)
+    with TestClient(app) as c:
+        r = c.post("/v1/otlp/traces", json=otlp_payload)
+        assert r.status_code == 413
+    store.close()
+
+
+def test_span_trace_id_mismatch_is_422(
+    client: TestClient, synthetic_trace: Trace
+) -> None:
+    """Span declaring another trace_id → controlled 422, nothing stored."""
+    bad = synthetic_trace.model_copy(deep=True)
+    bad.spans[1].trace_id = "d" * 32
+    envelope = TraceIngest(traces=[bad]).model_dump(mode="json")
+    r = client.post("/v1/traces", json=envelope)
+    assert r.status_code == 422
+    assert client.get(f"/v1/traces/{bad.trace_id}").status_code == 404
+
+
+def test_otlp_malformed_span_quarantined_not_500(
+    client: TestClient, otlp_payload: dict
+) -> None:
+    """One bad span → 200 + quarantine warning, good spans still land."""
+    otlp_payload["resourceSpans"][0]["scopeSpans"][0]["spans"].append(
+        {
+            "traceId": "b" * 32,
+            "spanId": "f" * 16,
+            "name": "broken",
+            "startTimeUnixNano": "notnano",
+        }
+    )
+    r = client.post("/v1/otlp/traces", json=otlp_payload)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["accepted_spans"] == 2
+    assert any("quarantined" in w for w in body["warnings"])
+
+    # the trace itself is retrievable
+    r = client.get(f"/v1/traces/{'b' * 32}")
+    assert r.status_code == 200
+
+
+def test_otlp_bad_intvalue_quarantined_not_500(
+    client: TestClient, otlp_payload: dict
+) -> None:
+    otlp_payload["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"].append(
+        {"key": "n", "value": {"intValue": "junk"}}
+    )
+    r = client.post("/v1/otlp/traces", json=otlp_payload)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # the polluted span was quarantined; its sibling survived
+    assert body["accepted_spans"] == 1
+    assert any("intValue" in w for w in body["warnings"])
+
+
+def test_native_ingest_reports_updated_spans(
+    client: TestClient, synthetic_trace: Trace
+) -> None:
+    """Late end_time via API → updated_spans, stored span completes."""
+    running = synthetic_trace.model_copy(deep=True)
+    running.spans = [running.spans[0]]
+    running.spans[0].end_time = None
+    envelope = TraceIngest(traces=[running]).model_dump(mode="json")
+    r = client.post("/v1/traces", json=envelope)
+    assert r.status_code == 200
+    assert r.json()["accepted_spans"] == 1
+
+    completed = synthetic_trace.model_copy(deep=True)
+    completed.spans = [completed.spans[0]]
+    envelope = TraceIngest(traces=[completed]).model_dump(mode="json")
+    r = client.post("/v1/traces", json=envelope)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["updated_spans"] == 1
+    assert body["duplicate_spans"] == 0
+
+    stored = client.get(f"/v1/traces/{synthetic_trace.trace_id}").json()
+    assert stored["spans"][0]["end_time"] is not None
+
+
+def test_import_has_no_db_side_effect(tmp_path, monkeypatch) -> None:
+    """importing api.app must not create .forge-lens/ or open a DB."""
+    import importlib
+    import sys
+
+    monkeypatch.chdir(tmp_path)
+    for mod in list(sys.modules):
+        if mod.startswith("forge_lens.api"):
+            del sys.modules[mod]
+    importlib.import_module("forge_lens.api.app")
+    assert not (tmp_path / ".forge-lens").exists()

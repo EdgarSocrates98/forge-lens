@@ -105,6 +105,54 @@ def test_otlp_file_to_store(tmp_path, otlp_payload: dict) -> None:
     store.close()
 
 
+def test_http_exporter_over_real_socket(tmp_path) -> None:
+    """Real TCP round-trip: HTTPExporter → uvicorn → SQLite.
+
+    The flush-failure regressions only survived because every prior test
+    used TestClient/mocked urlopen — this exercises the real socket path.
+    """
+    import socket
+    import threading
+    import time
+
+    import uvicorn
+
+    db = tmp_path / "live.db"
+    store = SQLiteTraceStore(db)
+    app = create_app(store=store, config=LensConfig(data_dir=tmp_path, db_path=db))
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 10
+        while not server.started and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert server.started, "uvicorn did not start"
+
+        exporter = HTTPExporter(f"http://127.0.0.1:{port}", project_id="live")
+        tracer = LensTracer(service_name="live-agent", exporter=exporter)
+        simulate_agent_run(tracer)  # auto-flush over the wire on root end
+
+        # flush is synchronous for the py SDK — the trace must be stored
+        items = store.list_traces(project_id="live")
+        assert len(items) == 1
+        loaded = store.get_trace(items[0]["trace_id"], project_id="live")
+        assert loaded is not None
+        assert len(loaded.spans) == 4
+        assert any(s.status.code.value == "error" for s in loaded.spans)
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+        store.close()
+
+
 def test_exporter_body_shape() -> None:
     """HTTPExporter builds a valid TraceIngest body — verified offline."""
     import json

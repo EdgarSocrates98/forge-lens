@@ -63,4 +63,6 @@ def parse_traceparent(header: str) -> tuple[str, str, bool] | None:
     if not match:
         return None
     _, trace_id, span_id, flags = match.groups()
-    return trace_id, span_id, flags.endswith("1")
+    # W3C: the sampled flag is bit 0x01 of the flags byte, not the last char
+    # (e.g. flags=03 → 0x03 & 0x01 → sampled).
+    return trace_id, span_id, bool(int(flags, 16) & 0x01)

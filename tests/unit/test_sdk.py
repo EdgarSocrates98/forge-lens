@@ -79,3 +79,80 @@ def test_record_usage() -> None:
     usage = trace.spans[0].attributes["forge_lens.token_usage"]
     assert usage["input_tokens"] == 10
     assert usage["measurement_source"] == "provider"
+
+
+class _FlakyExporter:
+    """Fails on the first N export calls, then records like InMemoryExporter."""
+
+    def __init__(self, failures: int = 1) -> None:
+        self.failures = failures
+        self.traces: list = []
+        self.calls = 0
+
+    def export(self, traces: list, **kw):  # type: ignore[no-untyped-def]
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise ConnectionError("endpoint down")
+        self.traces.extend(traces)
+        return {"accepted_spans": sum(len(t.spans) for t in traces)}
+
+
+def test_flush_failure_keeps_pending_for_retry() -> None:
+    """P0: an export failure must not destroy the pending batch."""
+    exporter = _FlakyExporter(failures=1)
+    tracer = LensTracer(service_name="t", exporter=exporter, auto_flush=False)
+    with tracer.start_span("s"):
+        pass
+    with pytest.raises(ConnectionError):
+        tracer.flush()
+    assert tracer._pending  # batch retained
+    result = tracer.flush()  # retry succeeds, clears pending
+    assert result == {"accepted_spans": 1}
+    assert not tracer._pending
+    assert len(exporter.traces) == 1
+
+
+def test_auto_flush_export_failure_is_swallowed() -> None:
+    """Observability must never break the observed program."""
+    exporter = _FlakyExporter(failures=10)
+    tracer = LensTracer(service_name="t", exporter=exporter)
+    with tracer.start_span("root"):  # would raise ExportError on root end
+        pass
+    assert tracer.export_errors == 1
+    assert tracer._pending  # telemetry retained for a later flush
+
+
+def test_auto_flush_never_masks_app_exception() -> None:
+    """P0: app raises ValueError; failing export must not replace it."""
+    exporter = _FlakyExporter(failures=10)
+    tracer = LensTracer(service_name="t", exporter=exporter)
+    with pytest.raises(ValueError, match="app-bug"), tracer.start_span("root"):
+        raise ValueError("app-bug")
+    assert tracer.export_errors == 1
+
+
+def test_on_export_error_callback_receives_trace() -> None:
+    exporter = _FlakyExporter(failures=10)
+    seen: list[tuple[Exception, object]] = []
+    tracer = LensTracer(
+        service_name="t",
+        exporter=exporter,
+        on_export_error=lambda exc, trace: seen.append((exc, trace)),
+    )
+    with tracer.start_span("root"):
+        pass
+    assert len(seen) == 1
+    exc, trace = seen[0]
+    assert isinstance(exc, ConnectionError)
+    assert trace.trace_id == next(iter(tracer._pending))
+
+
+def test_invalid_trace_id_is_flagged_not_silently_replaced() -> None:
+    """Producer bugs stay visible: bad trace_id → span flagged + new id."""
+    tracer, exporter = _tracer()
+    with tracer.start_span("s", trace_id="not-a-valid-id") as s:
+        pass
+    assert s.attributes["forge_lens.trace_id_regenerated"] is True
+    assert s.attributes["forge_lens.invalid_trace_id_supplied"] == "not-a-valid-id"
+    trace = exporter.traces[0]
+    assert trace.trace_id != "not-a-valid-id"

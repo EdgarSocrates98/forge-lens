@@ -49,5 +49,6 @@ export function parseTraceparent(header: string): SpanContext | null {
   if (!/^[0-9a-f]{2}$/.test(version) || !isValidTraceId(traceId) || !isValidSpanId(spanId) || !/^[0-9a-f]{2}$/.test(flags)) {
     return null;
   }
-  return { traceId, spanId, sampled: flags.endsWith("1") };
+  // W3C: sampled is bit 0x01 of the flags byte (flags=03 → sampled).
+  return { traceId, spanId, sampled: (parseInt(flags, 16) & 0x01) === 1 };
 }

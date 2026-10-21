@@ -5,23 +5,29 @@ Design notes:
 - Spans and events stored as rows; attributes serialized as canonical
   JSON (queryable via ``json_extract`` when needed).
 - Upsert semantics are deterministic: a span is identified by
-  ``(trace_id, span_id)``; re-ingesting an identical span is a
-  duplicate, not an error.
+  ``(project_id, trace_id, span_id)``; re-ingesting an identical span
+  (same ``span_hash``) is a duplicate, not an error. A re-delivered span
+  whose content *changed* (e.g. a late ``end_time``) is merged, not
+  dropped — partial traces can complete.
+- Each ``upsert_trace`` runs in a single transaction: a crash mid-ingest
+  never leaves a half-written trace.
 - The schema is versioned via ``lens_meta.schema_version`` so future
   migrations have a hook.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from forge_lens.contracts.provenance import Provenance
 from forge_lens.contracts.v1.trace import (
+    IntegrityFlag,
     Span,
     SpanEvent,
     SpanLink,
@@ -30,7 +36,7 @@ from forge_lens.contracts.v1.trace import (
     Trace,
     TraceSource,
 )
-from forge_lens.core.time import to_unix_nano
+from forge_lens.core.time import from_unix_nano, to_unix_nano
 
 SCHEMA_VERSION = "1.0.0"
 
@@ -93,9 +99,49 @@ def _ns(dt: datetime | None) -> int | None:
 
 
 def _dt(ns: int | None) -> datetime | None:
-    if ns is None:
-        return None
-    return datetime.fromtimestamp(ns / 1_000_000_000, tz=UTC)
+    return from_unix_nano(ns) if ns is not None else None
+
+
+def _span_digest(span: Span) -> str:
+    """Content hash of a span, excluding integrity flags (they evolve)."""
+    payload = json.dumps(
+        span.model_dump(mode="json", exclude={"integrity_flags"}),
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _merge_status(stored: Status, incoming: Status) -> Status:
+    """Highest severity wins; on a tie the latest observation wins."""
+    rank = {StatusCode.ERROR: 2, StatusCode.OK: 1, StatusCode.UNSET: 0}
+    return incoming if rank[incoming.code] >= rank[stored.code] else stored
+
+
+def _merge_events(stored: list[SpanEvent], incoming: list[SpanEvent]) -> list[SpanEvent]:
+    """Union of events, deduplicated by (name, timestamp), order preserved."""
+    seen = {(e.name, e.time.isoformat()) for e in stored}
+    out = list(stored)
+    for ev in incoming:
+        key = (ev.name, ev.time.isoformat())
+        if key not in seen:
+            seen.add(key)
+            out.append(ev)
+    return out
+
+
+def _merge_links(stored: list[SpanLink], incoming: list[SpanLink]) -> list[SpanLink]:
+    """Union of links by (trace_id, span_id); attributes merge dict-wise."""
+    by_id: dict[tuple[str, str], SpanLink] = {(lk.trace_id, lk.span_id): lk for lk in stored}
+    order = [(lk.trace_id, lk.span_id) for lk in stored]
+    for lk in incoming:
+        key = (lk.trace_id, lk.span_id)
+        if key in by_id:
+            by_id[key].attributes = {**by_id[key].attributes, **lk.attributes}
+        else:
+            by_id[key] = lk
+            order.append(key)
+    return [by_id[k] for k in order]
 
 
 class SQLiteTraceStore:
@@ -105,9 +151,9 @@ class SQLiteTraceStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        self._conn = sqlite3.connect(
-            str(self.path), check_same_thread=False, isolation_level=None
-        )
+        # Default (deferred) isolation level so `with self._conn:` is a real
+        # transaction — upsert_trace is atomic per docs/architecture/storage.md.
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=5000")
@@ -127,69 +173,55 @@ class SQLiteTraceStore:
 
     # -- write ----------------------------------------------------------
 
-    def upsert_trace(self, trace: Trace) -> tuple[int, int]:
-        inserted, duplicates = 0, 0
-        now_ns = to_unix_nano(datetime.now(tz=UTC))
+    def upsert_trace(self, trace: Trace) -> tuple[int, int, int]:
+        """Persist a trace in one transaction.
+
+        Returns ``(inserted, updated, duplicates)``: identical re-delivery
+        counts as duplicate; a changed span (e.g. a late ``end_time``) is
+        merged into the stored row and counted as updated.
+        """
+        inserted = updated = duplicates = 0
+        # Deterministic seen-markers derived from trace data — no wall clock.
+        started_ns = _ns(trace.started_at)
+        ended_ns = _ns(trace.ended_at)
+        seen_ns = max(v for v in (started_ns, ended_ns) if v is not None) if (
+            started_ns is not None or ended_ns is not None
+        ) else 0
         with self._lock, self._conn:
             for span in trace.spans:
                 row = self._conn.execute(
-                    "SELECT span_hash FROM spans WHERE project_id=? AND trace_id=? AND span_id=?",
+                    "SELECT * FROM spans WHERE project_id=? AND trace_id=? AND span_id=?",
                     (trace.project_id, span.trace_id, span.span_id),
                 ).fetchone()
-                if row is not None:
+                if row is None:
+                    self._insert_span(trace, span, _span_digest(span))
+                    inserted += 1
+                    continue
+                if row["span_hash"] == _span_digest(span):
+                    # identical re-delivery → evidence that a retry happened
+                    flags = json.loads(row["integrity_flags_json"] or "[]")
+                    if IntegrityFlag.DUPLICATE.value not in flags:
+                        flags.append(IntegrityFlag.DUPLICATE.value)
+                        self._conn.execute(
+                            "UPDATE spans SET integrity_flags_json=? "
+                            "WHERE project_id=? AND trace_id=? AND span_id=?",
+                            (json.dumps(flags), trace.project_id,
+                             span.trace_id, span.span_id),
+                        )
                     duplicates += 1
                     continue
-                span_hash = json.dumps(
-                    span.model_dump(mode="json", exclude={"integrity_flags"}),
-                    sort_keys=True,
-                    default=str,
-                )
-                import hashlib
+                merged = self._merge_span(row, span, trace.project_id)
+                if merged is None:
+                    duplicates += 1
+                    continue
+                self._update_span(trace, merged)
+                updated += 1
 
-                digest = hashlib.sha256(span_hash.encode()).hexdigest()
-                self._conn.execute(
-                    """
-                    INSERT INTO spans (
-                        trace_id, project_id, span_id, parent_span_id, name, kind,
-                        started_ns, ended_ns, duration_ms,
-                        status_code, status_message,
-                        attributes_json, events_json, links_json,
-                        integrity_flags_json, provenance, span_hash
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                    """,
-                    (
-                        span.trace_id,
-                        trace.project_id,
-                        span.span_id,
-                        span.parent_span_id,
-                        span.name,
-                        span.kind.value,
-                        _ns(span.start_time),
-                        _ns(span.end_time),
-                        span.duration_ms,
-                        span.status.code.value,
-                        span.status.message,
-                        json.dumps(span.attributes, sort_keys=True, default=str),
-                        json.dumps(
-                            [e.model_dump(mode="json") for e in span.events],
-                            sort_keys=True,
-                            default=str,
-                        ),
-                        json.dumps(
-                            [lk.model_dump(mode="json") for lk in span.links],
-                            sort_keys=True,
-                            default=str,
-                        ),
-                        json.dumps([f.value for f in span.integrity_flags]),
-                        span.provenance.value,
-                        digest,
-                    ),
-                )
-                inserted += 1
+            # flags must reflect stored truth: a parent that arrives in a
+            # later batch clears MISSING_PARENT; a completed span clears
+            # MISSING_END — even when the span content itself didn't change.
+            self._refresh_integrity_flags(trace)
 
-            error_count = sum(
-                1 for s in trace.spans if s.status.code == StatusCode.ERROR
-            )
             self._conn.execute(
                 """
                 INSERT INTO traces (
@@ -203,12 +235,17 @@ class SQLiteTraceStore:
                         COALESCE(excluded.ended_ns, traces.ended_ns), traces.ended_ns),
                     started_ns = MIN(
                         COALESCE(excluded.started_ns, traces.started_ns), traces.started_ns),
-                    status_code = CASE
-                        WHEN excluded.status_code = 'error' OR traces.status_code = 'error'
-                            THEN 'error'
-                        WHEN excluded.status_code = 'ok' AND traces.status_code = 'ok'
-                            THEN 'ok'
-                        ELSE 'unset' END,
+                    session_id = COALESCE(traces.session_id, excluded.session_id),
+                    root_span_id = COALESCE(traces.root_span_id, excluded.root_span_id),
+                    status_code = (
+                        SELECT CASE
+                            WHEN SUM(s.status_code='error') > 0 THEN 'error'
+                            WHEN COUNT(*) > 0 AND SUM(s.status_code='ok') = COUNT(*)
+                                THEN 'ok'
+                            ELSE 'unset' END
+                        FROM spans s
+                        WHERE s.project_id=traces.project_id
+                          AND s.trace_id=traces.trace_id),
                     span_count = (
                         SELECT COUNT(*) FROM spans
                         WHERE project_id=traces.project_id
@@ -218,27 +255,170 @@ class SQLiteTraceStore:
                         WHERE project_id=traces.project_id
                           AND trace_id=traces.trace_id
                           AND status_code='error'),
-                    last_seen_ns = excluded.last_seen_ns
+                    first_seen_ns = MIN(traces.first_seen_ns, excluded.first_seen_ns),
+                    last_seen_ns = MAX(traces.last_seen_ns, excluded.last_seen_ns)
                 """,
                 (
                     trace.trace_id,
                     trace.project_id,
                     trace.session_id,
                     trace.root_span_id,
-                    _ns(trace.started_at),
-                    _ns(trace.ended_at),
+                    started_ns or seen_ns,
+                    ended_ns,
                     trace.status.code.value,
                     trace.status.message,
                     trace.source.model_dump_json(),
                     json.dumps(trace.resource_attributes, sort_keys=True, default=str),
                     trace.provenance.value,
                     len(trace.spans),
-                    error_count,
-                    now_ns,
-                    now_ns,
+                    sum(1 for s in trace.spans if s.status.code == StatusCode.ERROR),
+                    started_ns or seen_ns,
+                    seen_ns,
                 ),
             )
-        return inserted, duplicates
+        return inserted, updated, duplicates
+
+    # -- span write helpers ----------------------------------------------
+
+    def _insert_span(self, trace: Trace, span: Span, digest: str) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO spans (
+                trace_id, project_id, span_id, parent_span_id, name, kind,
+                started_ns, ended_ns, duration_ms,
+                status_code, status_message,
+                attributes_json, events_json, links_json,
+                integrity_flags_json, provenance, span_hash
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                span.trace_id,
+                trace.project_id,
+                span.span_id,
+                span.parent_span_id,
+                span.name,
+                span.kind.value,
+                _ns(span.start_time),
+                _ns(span.end_time),
+                span.duration_ms,
+                span.status.code.value,
+                span.status.message,
+                json.dumps(span.attributes, sort_keys=True, default=str),
+                json.dumps(
+                    [e.model_dump(mode="json") for e in span.events],
+                    sort_keys=True, default=str,
+                ),
+                json.dumps(
+                    [lk.model_dump(mode="json") for lk in span.links],
+                    sort_keys=True, default=str,
+                ),
+                json.dumps([f.value for f in span.integrity_flags]),
+                span.provenance.value,
+                digest,
+            ),
+        )
+
+    def _update_span(self, trace: Trace, merged: Span) -> None:
+        self._conn.execute(
+            """
+            UPDATE spans SET
+                parent_span_id=?, ended_ns=?, duration_ms=?,
+                status_code=?, status_message=?,
+                attributes_json=?, events_json=?, links_json=?,
+                integrity_flags_json=?, span_hash=?
+            WHERE project_id=? AND trace_id=? AND span_id=?
+            """,
+            (
+                merged.parent_span_id,
+                _ns(merged.end_time),
+                merged.duration_ms,
+                merged.status.code.value,
+                merged.status.message,
+                json.dumps(merged.attributes, sort_keys=True, default=str),
+                json.dumps(
+                    [e.model_dump(mode="json") for e in merged.events],
+                    sort_keys=True, default=str,
+                ),
+                json.dumps(
+                    [lk.model_dump(mode="json") for lk in merged.links],
+                    sort_keys=True, default=str,
+                ),
+                json.dumps([f.value for f in merged.integrity_flags]),
+                _span_digest(merged),
+                trace.project_id,
+                merged.trace_id,
+                merged.span_id,
+            ),
+        )
+
+    def _merge_span(self, row: sqlite3.Row, incoming: Span, project_id: str) -> Span | None:
+        """Merge a re-delivered span into the stored row.
+
+        Returns the merged ``Span`` when it adds information, ``None``
+        when the stored row already covers everything (→ duplicate).
+        Mutable fields merge; identity fields (name/kind/start) stay
+        first-observed.
+        """
+        stored = self._span_from_row(row)
+        merged = stored.model_copy(
+            update={
+                "parent_span_id": stored.parent_span_id or incoming.parent_span_id,
+                "end_time": incoming.end_time or stored.end_time,
+                "attributes": {**stored.attributes, **incoming.attributes},
+                "events": _merge_events(stored.events, incoming.events),
+                "links": _merge_links(stored.links, incoming.links),
+                "status": _merge_status(stored.status, incoming.status),
+            }
+        )
+        # integrity flags: union minus flags resolved by the merged data
+        flags = set(stored.integrity_flags) | set(incoming.integrity_flags)
+        if merged.end_time is not None:
+            flags.discard(IntegrityFlag.MISSING_END)
+        if merged.parent_span_id is None or self._span_exists(
+            project_id, merged.trace_id, merged.parent_span_id
+        ):
+            flags.discard(IntegrityFlag.MISSING_PARENT)
+        merged.integrity_flags = sorted(flags, key=lambda f: f.value)
+
+        if merged.model_dump(mode="json", exclude={"integrity_flags"}) == stored.model_dump(
+            mode="json", exclude={"integrity_flags"}
+        ):
+            return None
+        return merged
+
+    def _span_exists(self, project_id: str, trace_id: str, span_id: str) -> bool:
+        return (
+            self._conn.execute(
+                "SELECT 1 FROM spans WHERE project_id=? AND trace_id=? AND span_id=?",
+                (project_id, trace_id, span_id),
+            ).fetchone()
+            is not None
+        )
+
+    def _refresh_integrity_flags(self, trace: Trace) -> None:
+        """Clear MISSING_PARENT/MISSING_END flags the stored data resolved."""
+        rows = self._conn.execute(
+            "SELECT span_id, parent_span_id, ended_ns, integrity_flags_json FROM spans "
+            "WHERE project_id=? AND trace_id=? AND ("
+            "  integrity_flags_json LIKE '%missing_parent%' OR"
+            "  integrity_flags_json LIKE '%missing_end%')",
+            (trace.project_id, trace.trace_id),
+        ).fetchall()
+        for r in rows:
+            flags = json.loads(r["integrity_flags_json"])
+            keep = list(flags)
+            if r["ended_ns"] is not None:
+                keep = [f for f in keep if f != IntegrityFlag.MISSING_END.value]
+            if r["parent_span_id"] is None or self._span_exists(
+                trace.project_id, trace.trace_id, r["parent_span_id"]
+            ):
+                keep = [f for f in keep if f != IntegrityFlag.MISSING_PARENT.value]
+            if keep != flags:
+                self._conn.execute(
+                    "UPDATE spans SET integrity_flags_json=? "
+                    "WHERE project_id=? AND trace_id=? AND span_id=?",
+                    (json.dumps(keep), trace.project_id, trace.trace_id, r["span_id"]),
+                )
 
     # -- read -----------------------------------------------------------
 
@@ -266,7 +446,7 @@ class SQLiteTraceStore:
             parent_span_id=row["parent_span_id"],
             name=row["name"],
             kind=row["kind"],
-            start_time=_dt(row["started_ns"]) or datetime.now(tz=UTC),
+            start_time=from_unix_nano(row["started_ns"]),
             end_time=_dt(row["ended_ns"]),
             attributes=json.loads(row["attributes_json"] or "{}"),
             events=events,
@@ -303,7 +483,7 @@ class SQLiteTraceStore:
             project_id=trow["project_id"],
             session_id=trow["session_id"],
             root_span_id=trow["root_span_id"],
-            started_at=_dt(trow["started_ns"]) or datetime.now(tz=UTC),
+            started_at=from_unix_nano(trow["started_ns"]),
             ended_at=_dt(trow["ended_ns"]),
             status=Status(
                 code=StatusCode(trow["status_code"]),

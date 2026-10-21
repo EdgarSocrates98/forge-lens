@@ -9,10 +9,19 @@ header `X-Forge-Lens-Key`; leitura é aberta (modelo local).
 ### `POST /v1/traces`
 Envelope nativo `TraceIngest` (`schemas/v1/trace-ingest.json`).
 `project_id` do envelope é aplicado às traces.
-Resposta: `{accepted_spans, duplicate_spans, traces[], sanitize{}, warnings[]}`.
+Resposta: `{accepted_spans, updated_spans, duplicate_spans, traces[],
+sanitize{}, warnings[]}`.
+Erros: `413` payload/limite excedido, `422` envelope inválido ou span com
+`trace_id` divergente, `429` rate limit.
+
+`updated_spans` conta re-entregas **alteradas** mescladas no store
+(ex.: `end_time` tardio); `duplicate_spans` conta re-entregas idênticas.
 
 ### `POST /v1/otlp/traces`
 `ExportTraceServiceRequest` **JSON** (OTLP/HTTP). Protobuf não é aceito.
+Resposta: `{accepted_spans, updated_spans, duplicate_spans, traces[],
+warnings[]}` — spans malformados são *quarantined*: descartados com
+motivo listado em `warnings`, enquanto os válidos são ingeridos.
 Erros: `400` JSON inválido, `413` payload/limite excedido, `422` forma OTLP
 inválida, `429` rate limit.
 

@@ -1,15 +1,16 @@
-"""Time helpers — nanosecond precision, UTC everywhere.
+"""Time helpers — UTC everywhere, exact integer nanosecond math.
 
-Internally we keep ``datetime`` (UTC, tz-aware) plus a parallel integer
-``unix_nano`` for exact ordering — the same convention OTLP uses on the
-wire.
+All conversions are integer-only: ``datetime`` has microsecond
+resolution, so sub-microsecond nanos are truncated on the way in
+(documented, deterministic — never silently rounded by float error).
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 NANOS_PER_SECOND = 1_000_000_000
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def utc_now() -> datetime:
@@ -17,14 +18,25 @@ def utc_now() -> datetime:
 
 
 def to_unix_nano(dt: datetime) -> int:
-    """UTC-aware datetime → nanoseconds since epoch."""
+    """UTC-aware datetime → nanoseconds since epoch (exact, no float)."""
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
-    return int(dt.timestamp() * NANOS_PER_SECOND)
+    delta = dt - _EPOCH
+    return (
+        delta.days * 86_400 * NANOS_PER_SECOND
+        + delta.seconds * NANOS_PER_SECOND
+        + delta.microseconds * 1_000
+    )
 
 
 def from_unix_nano(nanos: int) -> datetime:
-    return datetime.fromtimestamp(nanos / NANOS_PER_SECOND, tz=UTC)
+    """Nanoseconds since epoch → UTC datetime.
+
+    ``datetime`` cannot hold sub-microsecond precision; the ns remainder
+    is truncated (not rounded) so round-trips are stable.
+    """
+    seconds, rem_ns = divmod(int(nanos), NANOS_PER_SECOND)
+    return _EPOCH + timedelta(seconds=seconds, microseconds=rem_ns // 1_000)
 
 
 def parse_unix_nano(value: int | str) -> int:

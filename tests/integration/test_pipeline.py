@@ -6,7 +6,7 @@ import pytest
 
 from forge_lens.contracts.v1.trace import IntegrityFlag, Trace
 from forge_lens.core.config import LensConfig
-from forge_lens.core.errors import PayloadTooLargeError, RateLimitedError
+from forge_lens.core.errors import PayloadTooLargeError, RateLimitedError, ValidationError
 from forge_lens.ingest.pipeline import IngestPipeline, RateLimiter, flag_integrity
 from forge_lens.storage.sqlite import SQLiteTraceStore
 
@@ -90,3 +90,51 @@ def test_event_cap_flags_truncated(tmp_store: SQLiteTraceStore, synthetic_trace:
     stored = tmp_store.get_trace(big.trace_id)
     assert len(stored.spans[0].events) == 3
     assert IntegrityFlag.TRUNCATED in stored.spans[0].integrity_flags
+
+
+def test_span_trace_id_mismatch_rejected(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """A span naming another trace would black-hole data — reject before write."""
+    bad = synthetic_trace.model_copy(deep=True)
+    bad.spans[1].trace_id = "d" * 32
+    with pytest.raises(ValidationError, match="different"):
+        _pipeline(tmp_store).ingest([bad])
+    assert tmp_store.get_trace(synthetic_trace.trace_id) is None  # nothing written
+    assert tmp_store.get_trace("d" * 32) is None
+
+
+def test_empty_trace_no_misleading_warning(tmp_store: SQLiteTraceStore) -> None:
+    """An empty trace warns 'no spans' — not 'no span end times'."""
+    from datetime import UTC, datetime
+
+    empty = Trace(
+        trace_id="e" * 32,
+        started_at=datetime.now(UTC),
+        spans=[],
+    )
+    result = _pipeline(tmp_store).ingest([empty])
+    assert any("no spans" in w for w in result.warnings)
+    assert not any("no span end times" in w for w in result.warnings)
+
+
+def test_late_end_time_update_counts_updated(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """Re-delivering a running span with end_time → updated, not duplicate."""
+    running = synthetic_trace.model_copy(deep=True)
+    running.spans = [running.spans[0]]
+    running.spans[0].end_time = None
+    p = _pipeline(tmp_store)
+    r1 = p.ingest([running])
+    assert r1.accepted_spans == 1
+
+    completed = synthetic_trace.model_copy(deep=True)
+    completed.spans = [completed.spans[0]]
+    r2 = p.ingest([completed])
+    assert r2.updated_spans == 1
+    assert r2.accepted_spans == 0
+    assert r2.duplicate_spans == 0
+
+    r3 = p.ingest([completed])
+    assert r3.duplicate_spans == 1  # identical re-delivery is a duplicate

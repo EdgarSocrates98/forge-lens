@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from forge_lens.contracts.v1.trace import Span, Trace
+from forge_lens.contracts.v1.trace import Trace
 
 
 class TraceStore(Protocol):
@@ -17,8 +17,14 @@ class TraceStore(Protocol):
 
     def init_schema(self) -> None: ...
 
-    def upsert_trace(self, trace: Trace) -> tuple[int, int]:
-        """Persist a trace. Returns ``(inserted_spans, duplicate_spans)``."""
+    def upsert_trace(self, trace: Trace) -> tuple[int, int, int]:
+        """Persist a trace atomically.
+
+        Returns ``(inserted, updated, duplicates)`` span counts: a
+        re-delivered span whose content changed (e.g. a late
+        ``end_time``) is merged → ``updated``; identical re-delivery →
+        ``duplicates``.
+        """
         ...
 
     def get_trace(self, trace_id: str, project_id: str | None = None) -> Trace | None: ...
@@ -36,7 +42,3 @@ class TraceStore(Protocol):
     def stats(self) -> dict[str, Any]: ...
 
     def close(self) -> None: ...
-
-
-class SpanWriter(Protocol):
-    def insert_spans(self, spans: list[Span]) -> tuple[int, int]: ...

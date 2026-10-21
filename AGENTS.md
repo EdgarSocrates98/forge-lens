@@ -10,7 +10,7 @@ uv sync --extra server          # dev env (server extra for FastAPI/uvicorn)
 python -m pytest -q             # tests
 python -m ruff check .          # lint (line length 100)
 python -m mypy src              # strict types
-python -m build                 # wheel + sdist
+uv build                        # wheel + sdist
 python -m forge_lens.contracts.jsonschema   # regenerate schemas/v1/*.json
 cd packages/forge-lens-sdk-ts && npm test   # TS SDK (tsc + node:test)
 forge-lens doctor               # install health check

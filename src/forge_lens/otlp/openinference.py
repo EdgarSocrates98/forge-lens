@@ -64,6 +64,8 @@ _MODEL_KEYS = (
 _PROVIDER_KEYS = ("llm.provider", "gen_ai.system", "llm.system")
 
 # Content-bearing attributes that must only be captured at level=full.
+# ``input.mime_type``/``output.mime_type`` are metadata (they describe the
+# dropped body) and therefore survive at capture=metadata.
 CONTENT_ATTRIBUTES = frozenset(
     {
         "input.value",
@@ -73,8 +75,6 @@ CONTENT_ATTRIBUTES = frozenset(
         "llm.prompts",
         "tool.parameters",
         "retrieval.documents",
-        "input.mime_type",
-        "output.mime_type",
     }
 )
 

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import ValidationError as PydanticValidationError
+
 from forge_lens.contracts.provenance import Provenance
 from forge_lens.contracts.v1.trace import (
     Span,
@@ -32,13 +34,23 @@ def _attr_value(raw: Any) -> Any:
     for key in ("stringValue", "intValue", "doubleValue", "boolValue"):
         if key in raw:
             v = raw[key]
-            return int(v) if key == "intValue" and isinstance(v, str) else v
+            if key == "intValue" and isinstance(v, str):
+                try:
+                    return int(v)
+                except ValueError:
+                    raise ValidationError(f"OTLP intValue is not an integer: {v!r:.80}") from None
+            return v
     if "arrayValue" in raw:
-        return [_attr_value(v) for v in raw["arrayValue"].get("values", [])]
+        arr = raw["arrayValue"]
+        return [_attr_value(v) for v in arr.get("values", [])] if isinstance(arr, dict) else raw
     if "kvlistValue" in raw:
+        kvl = raw["kvlistValue"]
+        if not isinstance(kvl, dict):
+            return raw
         return {
             kv.get("key", ""): _attr_value(kv.get("value"))
-            for kv in raw["kvlistValue"].get("values", [])
+            for kv in kvl.get("values", [])
+            if isinstance(kv, dict)
         }
     if "bytesValue" in raw:
         return {"_bytes": len(str(raw["bytesValue"]))}
@@ -58,7 +70,10 @@ def _attrs(raw_list: Any) -> dict[str, Any]:
 def _parse_time(value: Any) -> Any:
     if value is None:
         return None
-    return from_unix_nano(int(value))
+    try:
+        return from_unix_nano(int(value))
+    except (ValueError, TypeError, OverflowError):
+        raise ValidationError(f"OTLP timestamp is not unix-nanos: {value!r:.80}") from None
 
 
 def _parse_status(raw: Any) -> Status:
@@ -77,8 +92,8 @@ def _parse_status(raw: Any) -> Status:
     return Status(code=mapping.get(code, StatusCode.UNSET), message=raw.get("message") or None)
 
 
-def _parse_span(raw: dict[str, Any], trace_id_hint: str | None, provenance: Provenance) -> Span:
-    trace_id = raw.get("traceId") or trace_id_hint
+def _parse_span(raw: dict[str, Any], provenance: Provenance) -> Span:
+    trace_id = raw.get("traceId")
     span_id = raw.get("spanId")
     if not trace_id or not span_id:
         raise ValidationError(f"OTLP span missing traceId/spanId: {raw!r:.200}")
@@ -130,11 +145,16 @@ def normalize_otlp_request(
     *,
     project_id: str = "default",
     provenance: Provenance = Provenance.OBSERVED,
+    errors: list[str] | None = None,
 ) -> list[Trace]:
     """Convert an ExportTraceServiceRequest dict into internal Traces.
 
     Spans are grouped per (resource, trace_id); a single request may
     legitimately carry spans from several traces and several resources.
+
+    When ``errors`` is provided, malformed spans are quarantined — the
+    reason is appended to ``errors`` and parsing continues. When
+    ``errors`` is ``None`` the first malformed span raises (strict mode).
     """
     resource_spans = payload.get("resourceSpans") or payload.get("resource_spans") or []
     if not isinstance(resource_spans, list):
@@ -155,7 +175,15 @@ def normalize_otlp_request(
             for raw_span in ss.get("spans", []):
                 if not isinstance(raw_span, dict):
                     continue
-                span = _parse_span(raw_span, None, provenance)
+                try:
+                    span = _parse_span(raw_span, provenance)
+                except (ValidationError, PydanticValidationError) as exc:
+                    if errors is None:
+                        raise
+                    errors.append(
+                        f"span {raw_span.get('spanId', '?')!r} quarantined: {exc}"
+                    )
+                    continue
                 key = (rs_idx, span.trace_id)
                 trace = grouped.get(key)
                 if trace is None:

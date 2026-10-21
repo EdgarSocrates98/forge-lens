@@ -19,6 +19,11 @@ longas — o store faz merge determinístico entre flushes parciais.
 - Leitura típica = árvore completa num único ingest.
 - Traces muito longas podem `flush()` no meio — merge já implementado e
   testado (started=min/ended=max, status precedence).
+- **Falha de export não destrói o lote**: spans ficam em `_pending` até
+  `export()` ter sucesso; auto-flush nunca propaga erro ao código
+  instrumentado (contado em `export_errors`, callback `on_export_error`).
+  Reenvio cria re-entrega no servidor — coberta pelo merge por
+  `span_hash` (idêntica → `duplicate`, alterada → `updated`).
 - Limite: um agente "infinito" sem flush cresce em memória do SDK —
   documentado; mitigável com flush periódico ou caps futuros.
 

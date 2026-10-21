@@ -28,6 +28,7 @@ from forge_lens.contracts.v1.trace import (
     Trace,
     TraceSource,
 )
+from forge_lens.contracts.v1.usage import MeasurementSource, TokenUsage
 from forge_lens.core.ids import is_valid_trace_id
 from forge_lens.sdk.context import (
     SpanContext,
@@ -40,10 +41,17 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 FlushCallback = Callable[[Trace], None]
+ExportErrorCallback = Callable[[Exception, "Trace"], None]
 
 
 class LensTracer:
-    """Build traces and spans; flush to an exporter or a callback."""
+    """Build traces and spans; flush to an exporter or a callback.
+
+    Observability must never change the observed program's behavior:
+    auto-flush export failures are swallowed (counted on
+    ``export_errors`` and reported via ``on_export_error``), and failed
+    batches stay in ``_pending`` so a later ``flush()`` retries them.
+    """
 
     def __init__(
         self,
@@ -51,6 +59,7 @@ class LensTracer:
         service_name: str = "forge-lens-app",
         exporter: Any | None = None,
         on_flush: FlushCallback | None = None,
+        on_export_error: ExportErrorCallback | None = None,
         auto_flush: bool = True,
         session_id: str | None = None,
     ) -> None:
@@ -65,8 +74,10 @@ class LensTracer:
 
         self.exporter = exporter or InMemoryExporter()
         self.on_flush = on_flush
+        self.on_export_error = on_export_error
         self.auto_flush = auto_flush
         self.session_id = session_id
+        self.export_errors = 0
         self._pending: dict[str, Trace] = {}
         self._root_ctx: dict[str, SpanContext] = {}
 
@@ -85,7 +96,13 @@ class LensTracer:
         """Start a span; parent comes from context stack (or remote_parent)."""
         parent = remote_parent or current_span()
         tid = trace_id or (parent.trace_id if parent else None)
-        ctx = SpanContext.create(tid if (tid and is_valid_trace_id(tid)) else None)
+        attrs = dict(attributes) if attributes else {}
+        if tid and not is_valid_trace_id(tid):
+            # flag, don't silently fix: record the discarded producer id
+            attrs["forge_lens.trace_id_regenerated"] = True
+            attrs["forge_lens.invalid_trace_id_supplied"] = str(tid)[:200]
+            tid = None
+        ctx = SpanContext.create(tid)
         span_obj = Span(
             trace_id=ctx.trace_id,
             span_id=ctx.span_id,
@@ -93,7 +110,7 @@ class LensTracer:
             name=name,
             kind=kind,
             start_time=datetime.now(tz=UTC),
-            attributes=attributes or {},
+            attributes=attrs,
         )
         trace = self._trace_for(ctx, parent is None or remote_parent is not None)
         trace.spans.append(span_obj)
@@ -156,11 +173,13 @@ class LensTracer:
         total_tokens: int | None = None,
         model: str | None = None,
         provider: str | None = None,
-        source: str = "provider",
+        source: MeasurementSource | str = MeasurementSource.PROVIDER,
     ) -> None:
-        """Attach provider-reported (or estimated) token counters to a span."""
-        from forge_lens.contracts.v1.usage import MeasurementSource, TokenUsage
+        """Attach provider-reported (or estimated) token counters to a span.
 
+        ``source`` accepts a ``MeasurementSource`` or its string value
+        (``"provider"``, ``"estimated"``, ``"unknown"``).
+        """
         usage = TokenUsage(
             provider=provider,
             model=model,
@@ -169,9 +188,7 @@ class LensTracer:
             cached_input_tokens=cached_input_tokens,
             reasoning_tokens=reasoning_tokens,
             total_tokens=total_tokens,
-            measurement_source=(
-                MeasurementSource.PROVIDER if source == "provider" else MeasurementSource.ESTIMATED
-            ),
+            measurement_source=MeasurementSource(source),
         )
         span_obj.attributes["forge_lens.token_usage"] = usage.model_dump(
             mode="json", exclude_none=True
@@ -218,22 +235,35 @@ class LensTracer:
     def _maybe_flush(self, trace: Trace, ctx: SpanContext) -> None:
         root = self._root_ctx.get(ctx.trace_id)
         if self.auto_flush and root is not None and root.span_id == ctx.span_id:
-            self.flush(ctx.trace_id)
+            try:
+                self.flush(ctx.trace_id)
+            except Exception as exc:  # never let export break the host
+                self.export_errors += 1
+                if self.on_export_error is not None:
+                    try:
+                        self.on_export_error(exc, trace)
+                    except Exception:
+                        self.export_errors += 1
 
     def flush(self, trace_id: str | None = None) -> dict[str, Any] | None:
+        """Export pending traces. Failed batches stay pending for retry.
+
+        Raises the exporter's error to the *explicit* caller — only the
+        auto-flush path swallows it.
+        """
         ids = [trace_id] if trace_id else list(self._pending.keys())
-        if not ids:
-            return None
         batch: list[Trace] = []
         for tid in ids:
-            trace = self._pending.pop(tid, None)
-            self._root_ctx.pop(tid, None)
+            trace = self._pending.get(tid)
             if trace is not None:
                 _finalize(trace)
                 batch.append(trace)
         if not batch:
             return None
         result = self.exporter.export(batch, source=self.source)
+        for trace in batch:
+            self._pending.pop(trace.trace_id, None)
+            self._root_ctx.pop(trace.trace_id, None)
         if self.on_flush:
             for trace in batch:
                 self.on_flush(trace)

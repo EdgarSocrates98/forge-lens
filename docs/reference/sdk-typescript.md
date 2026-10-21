@@ -13,6 +13,7 @@ const tracer = new LensTracer({
   sessionId: "sess-1",
   projectId: "default",
   onFlush: (trace) => {},
+  onExportError: (err, trace) => {}, // falha de auto-flush
 });
 ```
 
@@ -31,6 +32,17 @@ await tracer.flush(traceId?);
   `trace_id`/`parent_span_id` do contexto.
 - `remoteParent: SpanContext` continua uma trace vinda de headers W3C.
 - Exceção no callback → `status=error` + evento `exception`; o erro propaga.
+
+Semântica de falha (observabilidade nunca quebra o observado):
+
+- `flush()` **preserva o lote** em `pending` quando `export()` rejeita —
+  retry manual reenvia; o erro propaga só para o chamador explícito.
+- Auto-flush é fire-and-forget **com `.catch()`**: rejeição é contada em
+  `tracer.exportErrors` e reportada via `onExportError` — nunca vira
+  *unhandled promise rejection* no processo hospedeiro.
+- `traceId` inválido no contexto não é corrigido silenciosamente: o span
+  ganha `forge_lens.trace_id_regenerated` +
+  `forge_lens.invalid_trace_id_supplied` e um id novo é gerado.
 
 ## `HTTPExporter`
 

@@ -25,27 +25,31 @@ from forge_lens.core.config import CaptureLevel
 from forge_lens.core.metrics import M_ATTRS_REDACTED, M_ATTRS_TRUNCATED, METRICS
 from forge_lens.otlp.openinference import CONTENT_ATTRIBUTES
 
-# Explicit credential-key patterns. Deliberately *not* a bare "token" match:
-# observability keys like ``llm.token_count.prompt``, ``gen_ai.usage.input_tokens``
-# and ``forge_lens.token_usage`` are metrics, not secrets. Token-type keys are
-# enumerated (access/refresh/id/session/auth/api/bearer/csrf).
+# Explicit credential-key patterns. Token-bearing *metric* keys are safe:
+# ``llm.token_count.*``, ``gen_ai.usage.*_tokens`` and ``forge_lens.token_usage``
+# never end in a bare ``.token``/``_token``/``-token`` — so the ``(^|[-_.])token$``
+# suffix rule catches ``github.token``, ``npm_token`` etc. without touching
+# counters. Prefixes (access/refresh/id/...) are also enumerated explicitly.
 SENSITIVE_KEY_RE = re.compile(
     r"(?i)(api[-_.]?key|secret|password|passwd|pwd|authorization|"
     r"auth[-_.]?header|credential|private[-_.]?key|client[-_.]?secret|"
-    r"access[-_.]?key|session[-_.]?token|access[-_.]?token|"
-    r"refresh[-_.]?token|id[-_.]?token|auth[-_.]?token|api[-_.]?token|"
-    r"bearer[-_.]?token|csrf[-_.]?token|xsrf[-_.]?token|cookie|set-cookie|"
-    r"ssn|credit[-_.]?card|bearer$|x-api-key|private-key)"
+    r"access[-_.]?key|(^|[-_.])token$|bearer$|x-api-key|private-key|"
+    r"cookie|set-cookie|ssn|credit[-_.]?card)"
 )
 
 VALUE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"sk-ant-[A-Za-z0-9\-_]{20,}"), "[REDACTED:anthropic-key]"),
-    (re.compile(r"sk-[A-Za-z0-9]{20,}"), "[REDACTED:openai-key]"),
+    (re.compile(r"sk-[A-Za-z0-9\-_]{20,}"), "[REDACTED:api-key]"),
     (re.compile(r"AIza[0-9A-Za-z\-_]{20,}"), "[REDACTED:gcp-key]"),
     (re.compile(r"AKIA[0-9A-Z]{16}"), "[REDACTED:aws-access-key]"),
-    (re.compile(r"ghp_[A-Za-z0-9]{20,}"), "[REDACTED:github-pat]"),
+    (re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"), "[REDACTED:github-token]"),
     (re.compile(r"github_pat_[A-Za-z0-9_]{20,}"), "[REDACTED:github-pat]"),
+    (re.compile(r"glpat-[A-Za-z0-9\-_]{20,}"), "[REDACTED:gitlab-pat]"),
+    (re.compile(r"npm_[A-Za-z0-9]{30,}"), "[REDACTED:npm-token]"),
+    (re.compile(r"pypi-[A-Za-z0-9\-_]{30,}"), "[REDACTED:pypi-token]"),
+    (re.compile(r"hf_[A-Za-z0-9]{30,}"), "[REDACTED:huggingface-token]"),
     (re.compile(r"xox[baprs]-[A-Za-z0-9\-]{10,}"), "[REDACTED:slack-token]"),
+    (re.compile(r"xapp-[A-Za-z0-9\-]{10,}"), "[REDACTED:slack-token]"),
     (
         re.compile(
             r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S
@@ -60,6 +64,7 @@ EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 
 TRUNCATION_MARKER = "...[TRUNCATED]"
 DROPPED_MARKER = "_forge_lens.dropped"
+MAX_LIST_ITEMS = 10_000
 
 
 @dataclass
@@ -117,13 +122,17 @@ def _sanitize_value(
                 )
         return out
     if isinstance(value, list):
-        return [
+        items = [
             _sanitize_value(
                 v, report, capture=capture, max_chars=max_chars,
                 mask_emails=mask_emails, depth=depth + 1,
             )
-            for v in value[:10_000]
+            for v in value[:MAX_LIST_ITEMS]
         ]
+        if len(value) > MAX_LIST_ITEMS:
+            report.truncated_values += 1
+            items.append(f"[TRUNCATED: {len(value) - MAX_LIST_ITEMS} items dropped]")
+        return items
     return value
 
 
@@ -167,6 +176,10 @@ def sanitize_trace(
         for event in span.events:
             event.attributes = sanitize_attributes(
                 event.attributes, report, capture=capture, max_chars=max_chars
+            )
+        for link in span.links:
+            link.attributes = sanitize_attributes(
+                link.attributes, report, capture=capture, max_chars=max_chars
             )
     trace.resource_attributes = sanitize_attributes(
         trace.resource_attributes, report, capture=capture, max_chars=max_chars

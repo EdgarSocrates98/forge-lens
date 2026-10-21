@@ -96,15 +96,20 @@ export interface LensTracerOptions {
   sessionId?: string;
   projectId?: string;
   onFlush?: (trace: Trace) => void;
+  /** Called when an auto-flush export fails (batch stays pending). */
+  onExportError?: (err: unknown, trace: Trace) => void;
 }
 
 export class LensTracer {
   readonly source: TraceSource;
   readonly projectId: string;
+  /** Failed auto-flush exports — observability never breaks the host. */
+  exportErrors = 0;
   private readonly exporter: Exporter;
   private readonly autoFlush: boolean;
   private readonly sessionId?: string;
   private readonly onFlush?: (trace: Trace) => void;
+  private readonly onExportError?: (err: unknown, trace: Trace) => void;
   private readonly pending = new Map<string, Trace>();
   private readonly roots = new Map<string, string>();
 
@@ -121,6 +126,7 @@ export class LensTracer {
     this.sessionId = opts.sessionId;
     this.projectId = opts.projectId ?? "default";
     this.onFlush = opts.onFlush;
+    this.onExportError = opts.onExportError;
   }
 
   /** Run `fn` inside a new span. Sync or async `fn` both supported. */
@@ -130,9 +136,19 @@ export class LensTracer {
     opts: { kind?: SpanKind; attributes?: Record<string, unknown>; remoteParent?: SpanContext } = {},
   ): T {
     const parent = opts.remoteParent ?? currentSpan();
-    const traceId =
-      parent && isValidTraceId(parent.traceId) ? parent.traceId : newTraceId();
-    const ctx: SpanContext = { traceId, spanId: newSpanId(), sampled: true };
+    const attributes: Record<string, unknown> = { ...(opts.attributes ?? {}) };
+    let traceId = parent?.traceId;
+    if (traceId !== undefined && !isValidTraceId(traceId)) {
+      // flag, don't silently fix: record the discarded producer id
+      attributes["forge_lens.trace_id_regenerated"] = true;
+      attributes["forge_lens.invalid_trace_id_supplied"] = String(traceId).slice(0, 200);
+      traceId = undefined;
+    }
+    const ctx: SpanContext = {
+      traceId: traceId ?? newTraceId(),
+      spanId: newSpanId(),
+      sampled: true,
+    };
     const span: Span = {
       schema_version: "1.0.0",
       trace_id: ctx.traceId,
@@ -142,7 +158,7 @@ export class LensTracer {
       kind: opts.kind ?? "internal",
       start_time: new Date().toISOString(),
       end_time: null,
-      attributes: opts.attributes ?? {},
+      attributes,
       events: [],
       links: [],
       status: { code: "unset" },
@@ -254,24 +270,39 @@ export class LensTracer {
 
   private maybeFlush(trace: Trace, ctx: SpanContext): void {
     if (this.autoFlush && this.roots.get(ctx.traceId) === ctx.spanId) {
-      void this.flush(ctx.traceId);
+      // fire-and-forget with a catch: a rejected export must never become
+      // an unhandled rejection inside the host process
+      void this.flush(ctx.traceId).catch((err: unknown) => {
+        this.exportErrors += 1;
+        if (this.onExportError) {
+          try {
+            this.onExportError(err, trace);
+          } catch {
+            this.exportErrors += 1;
+          }
+        }
+      });
     }
   }
 
+  /** Export pending traces. Failed batches stay pending for retry —
+   *  the error propagates to the *explicit* caller only. */
   async flush(traceId?: string): Promise<unknown> {
     const ids = traceId ? [traceId] : [...this.pending.keys()];
     const batch: Trace[] = [];
     for (const id of ids) {
       const t = this.pending.get(id);
       if (t) {
-        this.pending.delete(id);
-        this.roots.delete(id);
         finalize(t);
         batch.push(t);
       }
     }
     if (batch.length === 0) return undefined;
     const result = await this.exporter.export(batch, this.source);
+    for (const t of batch) {
+      this.pending.delete(t.trace_id);
+      this.roots.delete(t.trace_id);
+    }
     if (this.onFlush) for (const t of batch) this.onFlush(t);
     return result;
   }

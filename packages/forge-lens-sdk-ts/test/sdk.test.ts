@@ -12,7 +12,7 @@ import {
   newTraceId,
   parseTraceparent,
 } from "../src/index.js";
-import type { TraceIngest } from "../src/index.js";
+import type { Trace, TraceIngest } from "../src/index.js";
 
 describe("ids", () => {
   it("generates W3C-shaped ids", () => {
@@ -29,6 +29,15 @@ describe("ids", () => {
     const parsed = parseTraceparent(formatTraceparent(ctx));
     assert.deepEqual(parsed, ctx);
     assert.equal(parseTraceparent("garbage"), null);
+  });
+
+  it("sampled is bit 0x01, not the last hex char", () => {
+    const tid = newTraceId();
+    const sid = newSpanId();
+    assert.equal(parseTraceparent(`00-${tid}-${sid}-03`)!.sampled, true);
+    assert.equal(parseTraceparent(`00-${tid}-${sid}-ff`)!.sampled, true);
+    assert.equal(parseTraceparent(`00-${tid}-${sid}-02`)!.sampled, false);
+    assert.equal(parseTraceparent(`00-${tid}-${sid}-f0`)!.sampled, false);
   });
 });
 
@@ -90,6 +99,59 @@ describe("LensTracer", () => {
     const trace = exporter.traces[0];
     assert.equal(trace.trace_id, remote.traceId);
     assert.equal(trace.spans[0].parent_span_id, remote.spanId);
+  });
+
+  it("keeps the batch pending when export fails, retry succeeds", async () => {
+    let calls = 0;
+    const exporter = {
+      async export(traces: Trace[]) {
+        calls += 1;
+        if (calls === 1) throw new Error("endpoint down");
+        return { accepted_spans: traces.length };
+      },
+    };
+    const tracer = new LensTracer({ serviceName: "t", exporter, autoFlush: false });
+    tracer.span("s", () => {});
+    await assert.rejects(() => tracer.flush(), /endpoint down/);
+    const ok = await tracer.flush(); // retry — batch was retained
+    assert.deepEqual(ok, { accepted_spans: 1 });
+  });
+
+  it("auto-flush rejection is caught, counted and reported — never unhandled", async () => {
+    const seen: unknown[] = [];
+    const exporter = {
+      async export(): Promise<never> {
+        throw new Error("endpoint down");
+      },
+    };
+    const tracer = new LensTracer({
+      serviceName: "t",
+      exporter,
+      onExportError: (err) => seen.push(err),
+    });
+    tracer.agent("root", () => {}); // fire-and-forget flush rejects inside
+    await new Promise((r) => setTimeout(r, 10)); // let the rejection settle
+    assert.equal(tracer.exportErrors, 1);
+    assert.equal(seen.length, 1);
+    assert.equal((seen[0] as Error).message, "endpoint down");
+  });
+
+  it("auto-flush failure does not mask an app exception", async () => {
+    const exporter = {
+      async export(): Promise<never> {
+        throw new Error("endpoint down");
+      },
+    };
+    const tracer = new LensTracer({ serviceName: "t", exporter });
+    assert.throws(
+      () =>
+        tracer.span("root", () => {
+          throw new Error("app-bug");
+        }),
+      /app-bug/,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(tracer.exportErrors, 1);
   });
 });
 

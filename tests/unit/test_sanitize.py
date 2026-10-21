@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from forge_lens.contracts.v1.trace import Trace
+from forge_lens.contracts.v1.trace import SpanEvent, SpanLink, Trace
 from forge_lens.core.config import CaptureLevel
 from forge_lens.sanitize.redact import (
     TRUNCATION_MARKER,
@@ -90,11 +90,99 @@ def test_credential_values_redacted_inline() -> None:
 def test_sanitize_trace_covers_events(synthetic_trace: Trace) -> None:
     synthetic_trace.spans[0].attributes["input.value"] = "prompt body"
     synthetic_trace.spans[0].events.append(
-        # event with sensitive attr
-        __import__("forge_lens.contracts.v1.trace", fromlist=["SpanEvent"]).SpanEvent(
-            name="evt", time=datetime.now(UTC), attributes={"api_secret": "x"}
-        )
+        SpanEvent(name="evt", time=datetime.now(UTC), attributes={"api_secret": "x"})
     )
     report = sanitize_trace(synthetic_trace)
     assert report.dropped_content >= 1
     assert synthetic_trace.spans[0].events[0].attributes["api_secret"] == "[REDACTED:key]"
+
+
+def test_sanitize_trace_covers_link_attributes(synthetic_trace: Trace) -> None:
+    """Regression: secrets in span.links[*].attributes must not persist."""
+    synthetic_trace.spans[0].links.append(
+        SpanLink(
+            trace_id="c" * 32,
+            span_id="f" * 16,
+            attributes={"api_key": "secret123", "safe": "ok"},
+        )
+    )
+    report = sanitize_trace(synthetic_trace)
+    link = synthetic_trace.spans[0].links[0]
+    assert link.attributes["api_key"] == "[REDACTED:key]"
+    assert link.attributes["safe"] == "ok"
+    assert report.redacted_keys >= 1
+
+
+def test_generic_token_keys_redacted() -> None:
+    """github.token / npm_token / *_token are credential keys, not metrics."""
+    report = SanitizeReport()
+    out = sanitize_attributes(
+        {
+            "github.token": "ghp_abc123",
+            "npm_token": "npm_abc",
+            "gitlab_token": "glpat-x",
+            "bot_token": "slack-ish",
+            "deploy_token": "deploy-ish",
+            "auth.token": "auth-ish",
+        },
+        report,
+        capture=CaptureLevel.FULL,
+        max_chars=4096,
+    )
+    assert all(v == "[REDACTED:key]" for v in out.values())
+    assert report.redacted_keys == 6
+
+
+def test_credential_value_patterns() -> None:
+    report = SanitizeReport()
+    out = sanitize_attributes(
+        {
+            "gl": "use glpat-aBcD1234567890xYz_aB here",
+            "npm": "npm_aBcD1234567890xYzAbcD1234567890",
+            "pypi": "pypi-aBcD1234567890xYzAbcD1234567890aB",
+            "hf": "hf_aBcD1234567890xYzAbcD1234567890aB",
+            "gho": "gho_1234567890abcdefghij",
+        },
+        report,
+        capture=CaptureLevel.FULL,
+        max_chars=4096,
+    )
+    assert "[REDACTED:gitlab-pat]" in out["gl"]
+    assert "[REDACTED:npm-token]" in out["npm"]
+    assert "[REDACTED:pypi-token]" in out["pypi"]
+    assert "[REDACTED:huggingface-token]" in out["hf"]
+    assert "[REDACTED:github-token]" in out["gho"]
+
+
+def test_list_truncation_leaves_marker() -> None:
+    """Lists > MAX_LIST_ITEMS keep an explicit truncation marker — no silent drop."""
+    report = SanitizeReport()
+    out = sanitize_attributes(
+        {"big": list(range(10_001))},
+        report,
+        capture=CaptureLevel.FULL,
+        max_chars=4096,
+    )
+    assert len(out["big"]) == 10_001  # 10_000 items + marker
+    assert out["big"][-1] == "[TRUNCATED: 1 items dropped]"
+    assert report.truncated_values == 1
+
+
+def test_mime_type_survives_metadata_capture() -> None:
+    """input.mime_type/output.mime_type are metadata — must not be content-dropped."""
+    report = SanitizeReport()
+    out = sanitize_attributes(
+        {
+            "input.value": "the prompt body",
+            "input.mime_type": "text/plain",
+            "output.value": "the answer body",
+            "output.mime_type": "application/json",
+        },
+        report,
+        capture=CaptureLevel.METADATA,
+        max_chars=4096,
+    )
+    assert out["input.value"]["_forge_lens.dropped"] is True
+    assert out["output.value"]["_forge_lens.dropped"] is True
+    assert out["input.mime_type"] == "text/plain"
+    assert out["output.mime_type"] == "application/json"

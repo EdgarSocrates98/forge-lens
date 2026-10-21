@@ -13,8 +13,9 @@ from dataclasses import dataclass, field
 
 from forge_lens.contracts.v1.trace import IntegrityFlag, Trace
 from forge_lens.core.config import LensConfig
-from forge_lens.core.errors import PayloadTooLargeError, RateLimitedError
+from forge_lens.core.errors import PayloadTooLargeError, RateLimitedError, ValidationError
 from forge_lens.core.metrics import (
+    M_EVENTS_INGESTED,
     M_INGEST_DUPLICATES,
     M_INGEST_LATENCY,
     M_INGEST_REJECTED,
@@ -50,6 +51,7 @@ class RateLimiter:
 @dataclass
 class IngestResult:
     accepted_spans: int = 0
+    updated_spans: int = 0
     duplicate_spans: int = 0
     traces: list[str] = field(default_factory=list)
     sanitize: dict[str, int] = field(default_factory=dict)
@@ -77,11 +79,13 @@ def flag_integrity(trace: Trace) -> list[str]:
             and IntegrityFlag.CLOCK_SKEW not in span.integrity_flags
         ):
             span.integrity_flags.append(IntegrityFlag.CLOCK_SKEW)
+    if not trace.spans:
+        warnings.append("trace contains no spans")
+    elif missing_end == len(trace.spans):
+        warnings.append("trace has no span end times — possibly still running")
     if missing_parents:
         warnings.append(f"{missing_parents} span(s) reference parents not present in this trace")
-    if missing_end == len(trace.spans):
-        warnings.append("trace has no span end times — possibly still running")
-    if trace.ended_at is None:
+    if trace.ended_at is None and trace.spans:
         warnings.append("trace is partial (no ended_at)")
     return warnings
 
@@ -118,6 +122,18 @@ class IngestPipeline:
                 self.config.max_spans_per_request,
             )
 
+        # Contract consistency is checked for the whole batch before any
+        # write: a span naming a different trace_id than its enclosing
+        # Trace would otherwise be stored under a key nothing can query.
+        for trace in traces:
+            bad = [s.span_id for s in trace.spans if s.trace_id != trace.trace_id]
+            if bad:
+                METRICS.inc(M_INGEST_REJECTED)
+                raise ValidationError(
+                    f"trace {trace.trace_id}: {len(bad)} span(s) declare a different "
+                    f"trace_id ({bad[:5]}) — envelope is inconsistent"
+                )
+
         result = IngestResult()
         with METRICS.timer(M_INGEST_LATENCY):
             for trace in traces:
@@ -135,8 +151,9 @@ class IngestPipeline:
                 warnings = flag_integrity(trace)
                 result.warnings.extend(f"{trace.trace_id}: {w}" for w in warnings)
 
-                inserted, duplicates = self.store.upsert_trace(trace)
+                inserted, updated, duplicates = self.store.upsert_trace(trace)
                 result.accepted_spans += inserted
+                result.updated_spans += updated
                 result.duplicate_spans += duplicates
                 result.traces.append(trace.trace_id)
                 for key in (
@@ -150,5 +167,9 @@ class IngestPipeline:
 
         METRICS.inc(M_TRACES_INGESTED, len(traces))
         METRICS.inc(M_SPANS_INGESTED, result.accepted_spans)
+        METRICS.inc(
+            M_EVENTS_INGESTED,
+            sum(len(s.events) for t in traces for s in t.spans),
+        )
         METRICS.inc(M_INGEST_DUPLICATES, result.duplicate_spans)
         return result

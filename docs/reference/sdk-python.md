@@ -7,6 +7,7 @@ LensTracer(
     service_name="meu-agente",     # obrigatório → TraceSource.system
     exporter=HTTPExporter(...)|InMemoryExporter()|duck-type,
     on_flush=lambda trace: ...,    # callback por trace flushada
+    on_export_error=lambda exc, trace: ...,  # falha de auto-flush
     auto_flush=True,               # flush quando o span raiz fecha
     session_id=None,
 )
@@ -32,6 +33,20 @@ o erro **propaga** (não engolimos).
 `tracer.flush(trace_id=None)` — envia pendências ao exporter; retorna o
 resultado do export ou `None` se vazio. `auto_flush` dispara ao fechar o
 span raiz da trace.
+
+Semântica de falha (observabilidade nunca quebra o observado):
+
+- **Lote preservado**: se `export()` falha, a trace volta para
+  `_pending` — o próximo `flush()` reenvia (nada é perdido).
+- **Auto-flush nunca propaga**: exceção do exporter é engolida, contada em
+  `tracer.export_errors` e reportada via `on_export_error` — jamais
+  mascara a exceção da aplicação instrumentada.
+- **`flush()` explícito propaga** o erro do exporter ao chamador
+  (mas ainda preserva o lote para retry).
+
+`trace_id` inválido passado a `start_span` não é corrigido
+silenciosamente: o span ganha `forge_lens.trace_id_regenerated=true` +
+`forge_lens.invalid_trace_id_supplied` e um id novo é gerado.
 
 ### Decoradores
 

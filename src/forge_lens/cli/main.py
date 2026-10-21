@@ -114,9 +114,12 @@ def ingest(
 
     store = _store(cfg)
     pipeline = IngestPipeline(store, cfg)
+    quarantine: list[str] = []
     try:
         if fmt == "otlp" or (fmt == "auto" and "resourceSpans" in payload):
-            traces = normalize_otlp_request(payload, project_id=cfg.project_id)
+            traces = normalize_otlp_request(
+                payload, project_id=cfg.project_id, errors=quarantine
+            )
         else:
             envelope = TraceIngest.model_validate(payload)
             # --project overrides the envelope; otherwise the envelope wins
@@ -125,13 +128,17 @@ def ingest(
             for t in traces:
                 t.project_id = target
         result = pipeline.ingest(traces)
+    except Exception as exc:
+        typer.echo(f"ingest failed: {exc}", err=True)
+        raise typer.Exit(1) from None
     finally:
         store.close()
     typer.echo(
         f"ingested {result.accepted_spans} spans "
-        f"({result.duplicate_spans} duplicates) across {len(result.traces)} trace(s)"
+        f"({result.updated_spans} updated, {result.duplicate_spans} duplicates) "
+        f"across {len(result.traces)} trace(s)"
     )
-    for warning in result.warnings:
+    for warning in [*result.warnings, *quarantine]:
         typer.echo(f"  warning: {warning}")
 
 
@@ -196,12 +203,7 @@ def traces_show(
     for children in by_parent.values():
         children.sort(key=lambda s: s.start_time)
 
-    rendered: set[str] = set()
-
-    def render_tree(s: Span, depth: int) -> None:
-        if s.span_id in rendered:
-            return
-        rendered.add(s.span_id)
+    def emit(s: Span, depth: int) -> None:
         dur = f"{s.duration_ms:.1f}ms" if s.duration_ms is not None else "running"
         mark = "!" if s.status.code.value == "error" else " "
         typer.echo(f"  {'  ' * depth}{mark}{s.name} [{s.kind.value}] {dur}")
@@ -216,15 +218,28 @@ def traces_show(
             ]
             if parts:
                 typer.echo(f"  {'  ' * depth}  ~ tokens: {', '.join(parts)}")
-        for child in by_parent.get(s.span_id, []):
-            render_tree(child, depth + 1)
 
-    for root in by_parent.get(None, []):
-        render_tree(root, 0)
-    # orphan spans whose parents are missing
-    for s in trace.spans:
-        if s.span_id not in rendered:
-            render_tree(s, 0)
+    # iterative DFS — deep trees must not hit the recursion limit
+    rendered: set[str] = set()
+    span_ids = {s.span_id for s in trace.spans}
+    seeds = [
+        *by_parent.get(None, []),
+        *(s for s in trace.spans if s.parent_span_id and s.parent_span_id not in span_ids),
+    ]
+    unrendered = {s.span_id: s for s in trace.spans}
+    stack: list[tuple[Span, int]] = [(s, 0) for s in reversed(seeds)]
+    while stack or unrendered:
+        if not stack:
+            # span trapped in a parent cycle — start a fresh tree at depth 0
+            stack.append((next(iter(unrendered.values())), 0))
+        node, depth = stack.pop()
+        if node.span_id in rendered:
+            continue
+        rendered.add(node.span_id)
+        unrendered.pop(node.span_id, None)
+        emit(node, depth)
+        for child in reversed(by_parent.get(node.span_id, [])):
+            stack.append((child, depth + 1))
 
 
 @app.command()

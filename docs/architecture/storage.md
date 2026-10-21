@@ -23,10 +23,23 @@ portável, leitura concorrente com escrita (WAL).
 ### Decisões
 
 - **Transação por `upsert_trace`**: lote de spans + linha de trace é
-  atômico — nunca meia-trace escrita.
-- **Dedupe por PK**: re-ingestão idêntica = `duplicate`, não erro.
-- **Merge determinístico**: `started=min`, `ended=max`, status com
-  precedência `error>ok>unset`, contagens recomputadas por SELECT.
+  atômico — nunca meia-trace escrita (isolation level default;
+  `with conn:` abre transação real, rollback em qualquer falha).
+- **Dedupe por `span_hash`**: re-ingestão *idêntica* = `duplicate`
+  (e o span guarda `IntegrityFlag.DUPLICATE` como evidência da reentrega).
+  Re-entrega com conteúdo **alterado** (ex.: `end_time` tardio, novo
+  status, eventos/links adicionados) é **merge**, não duplicata —
+  spans parciais podem completar e retentativas pós-crash não viram
+  falsos duplicados.
+- **Merge determinístico**: por span, `end_time`/`parent` preenchem o que
+  faltava, attributes unem (incoming vence), eventos/links unem por
+  identidade, status mantém a maior severidade observada
+  (`error>ok>unset` — monotônico, um `ok` tardio não apaga um erro
+  observado). Na trace: `started=min`, `ended=max`, status e contagens
+  recomputados por SELECT sobre os spans persistidos.
+- **Flags resolvidas**: `MISSING_END`/`MISSING_PARENT` são removidas
+  quando a linha persistida passa a ter `ended_ns`/parent presente —
+  flags refletem o estado armazenado, não o histórico.
 - **JSON em colunas**: atributos preservam shape exato; consultáveis via
   `json_extract` quando necessário (queries estruturadas ficam nas colunas).
 - **`busy_timeout` + `synchronous=NORMAL`**: equilíbrio durabilidade/latência
@@ -34,9 +47,13 @@ portável, leitura concorrente com escrita (WAL).
 
 ## Protocolo `TraceStore`
 
-`init_schema`, `upsert_trace→(inserted,duplicates)`, `get_trace`,
+`init_schema`, `upsert_trace→(inserted,updated,duplicates)`, `get_trace`,
 `list_traces`, `stats`, `close` — costura estreita para backends futuros
 (Parquet export, outro engine) sem tocar o pipeline.
+
+Tempos armazenados como unix-nanos inteiros (`INTEGER NOT NULL` onde o
+contrato exige) — conversão por aritmética inteira, sem floats; o store
+não lê relógio (`first_seen`/`last_seen` derivam dos dados da trace).
 
 ## Retenção
 
