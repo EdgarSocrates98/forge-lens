@@ -226,3 +226,29 @@ def test_otlp_event_drop_recorded_in_strict_mode_too() -> None:
     )[0]
     assert trace.spans[0].events == []
     assert trace.spans[0].attributes["_otlp.events_dropped"] == 1
+
+
+def test_otlp_kvlist_nonstring_key_quarantined() -> None:
+    """A kvlistValue entry whose `key` is an array/object is unhashable —
+    it must not crash normalization (was a 500), malformed pairs skip."""
+    payload = _span_payload(
+        attributes=[
+            {
+                "key": "nested",
+                "value": {
+                    "kvlistValue": {
+                        "values": [
+                            {"key": [1, 2], "value": {"stringValue": "x"}},
+                            {"key": {"a": 1}, "value": {"stringValue": "y"}},
+                            {"key": "real", "value": {"stringValue": "ok"}},
+                        ]
+                    }
+                },
+            }
+        ]
+    )
+    trace = normalize_otlp_request(payload)[0]
+    assert trace.spans[0].attributes["nested"] == {
+        "real": "ok",
+        "_otlp.dropped_kv_pairs": 2,  # evidence — the drop is not silent
+    }

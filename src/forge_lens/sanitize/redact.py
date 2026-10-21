@@ -27,13 +27,13 @@ from forge_lens.otlp.openinference import CONTENT_ATTRIBUTES
 
 # Explicit credential-key patterns. Token-bearing *metric* keys are safe:
 # ``llm.token_count.*``, ``gen_ai.usage.*_tokens`` and ``forge_lens.token_usage``
-# never end in a bare ``.token``/``_token``/``-token`` — so the ``(^|[-_.])token$``
-# suffix rule catches ``github.token``, ``npm_token`` etc. without touching
-# counters. Prefixes (access/refresh/id/...) are also enumerated explicitly.
+# never end in a bare ``token`` — so the ``token$`` suffix rule catches
+# ``github.token``, ``npm_token`` *and* camelCase ``accessToken``/``idToken``
+# without touching counters. Prefixes are also enumerated explicitly.
 SENSITIVE_KEY_RE = re.compile(
     r"(?i)(api[-_.]?key|secret|password|passwd|pwd|authorization|"
     r"auth[-_.]?header|credential|private[-_.]?key|client[-_.]?secret|"
-    r"access[-_.]?key|(^|[-_.])token$|bearer$|x-api-key|private-key|"
+    r"access[-_.]?key|token$|bearer$|x-api-key|private-key|"
     r"cookie|set-cookie|ssn|credit[-_.]?card)"
 )
 
@@ -86,6 +86,22 @@ def _redact_string(value: str, report: SanitizeReport) -> str:
     for pattern, replacement in VALUE_PATTERNS:
         out, n = pattern.subn(replacement, out)
         report.redacted_values += n
+    return out
+
+
+def _scrub_text(
+    value: str, report: SanitizeReport, *, mask_emails: bool
+) -> str:
+    """Value-pattern scrub for free-text contract fields.
+
+    ``status.message`` routinely carries exception text with embedded
+    credentials, and names/source fields are arbitrary producer strings —
+    same exposure class as attribute values, same policy.
+    """
+    out = _redact_string(value, report)
+    if mask_emails:
+        out, n = EMAIL_RE.subn("[MASKED:email]", out)
+        report.emails_masked += n
     return out
 
 
@@ -167,16 +183,31 @@ def sanitize_trace(
     capture: CaptureLevel = CaptureLevel.METADATA,
     max_chars: int = 4_096,
 ) -> SanitizeReport:
-    """Sanitize all spans of a trace in place. Returns what was touched."""
+    """Sanitize a trace in place. Returns what was touched.
+
+    Attributes carry the obvious risk, but credentials also leak through
+    free-text fields — ``status.message`` embeds exception text, span
+    names are producer-controlled. Identity fields (trace/span ids) are
+    never touched: they are join keys, and ``session_id`` gets credential
+    patterns only (it is a legitimate lookup key — e-mail masking would
+    silently collapse sessions).
+    """
     report = SanitizeReport()
+    mask = capture == CaptureLevel.METADATA
     for span in trace.spans:
         span.attributes = sanitize_attributes(
             span.attributes, report, capture=capture, max_chars=max_chars
         )
+        span.name = _scrub_text(span.name, report, mask_emails=mask)
+        if span.status.message is not None:
+            span.status.message = _scrub_text(
+                span.status.message, report, mask_emails=mask
+            )
         for event in span.events:
             event.attributes = sanitize_attributes(
                 event.attributes, report, capture=capture, max_chars=max_chars
             )
+            event.name = _scrub_text(event.name, report, mask_emails=mask)
         for link in span.links:
             link.attributes = sanitize_attributes(
                 link.attributes, report, capture=capture, max_chars=max_chars
@@ -184,6 +215,22 @@ def sanitize_trace(
     trace.resource_attributes = sanitize_attributes(
         trace.resource_attributes, report, capture=capture, max_chars=max_chars
     )
+    if trace.status.message is not None:
+        trace.status.message = _scrub_text(
+            trace.status.message, report, mask_emails=mask
+        )
+    if trace.session_id is not None:
+        trace.session_id = _scrub_text(
+            trace.session_id, report, mask_emails=False
+        )
+    for field_name in ("system", "sdk_name", "sdk_version", "runtime", "language"):
+        value = getattr(trace.source, field_name)
+        if value is not None:
+            setattr(
+                trace.source,
+                field_name,
+                _scrub_text(value, report, mask_emails=mask),
+            )
     METRICS.inc(M_ATTRS_REDACTED, report.redacted_keys + report.redacted_values)
     METRICS.inc(M_ATTRS_TRUNCATED, report.truncated_values)
     return report

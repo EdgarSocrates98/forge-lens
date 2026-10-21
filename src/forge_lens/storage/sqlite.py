@@ -195,11 +195,10 @@ class SQLiteTraceStore:
             )
         inserted = updated = duplicates = 0
         # Deterministic seen-markers derived from trace data — no wall clock.
-        started_ns = _ns(trace.started_at)
+        # ``started_at`` is required by the contract, so it is never None.
+        started_ns = to_unix_nano(trace.started_at)
         ended_ns = _ns(trace.ended_at)
-        seen_ns = max(v for v in (started_ns, ended_ns) if v is not None) if (
-            started_ns is not None or ended_ns is not None
-        ) else 0
+        seen_ns = max(started_ns, ended_ns) if ended_ns is not None else started_ns
         with self._lock, self._conn:
             for span in trace.spans:
                 row = self._conn.execute(
@@ -215,13 +214,19 @@ class SQLiteTraceStore:
                     self._union_flags(row, span)
                     duplicates += 1
                     continue
-                merged = self._merge_span(row, span, trace.project_id)
+                stored_span = self._span_from_row(row)
+                conflict = self._identity_differs(stored_span, span)
+                merged = self._merge_span(stored_span, span, trace.project_id)
                 if merged is None:
-                    # content merged to identical — still a duplicate
-                    # delivery, and incoming-only flags still count
-                    self._union_flags(row, span)
+                    # content merged to identical — still a re-delivery,
+                    # but a name/kind/start mismatch is a CONFLICT, not a
+                    # duplicate (the stored row was *not* replayed verbatim)
+                    self._union_flags(row, span, conflict=conflict)
                     duplicates += 1
                     continue
+                if conflict:
+                    flags = set(merged.integrity_flags) | {IntegrityFlag.CONFLICT}
+                    merged.integrity_flags = sorted(flags, key=lambda f: f.value)
                 self._update_span(trace, merged)
                 updated += 1
 
@@ -294,7 +299,7 @@ class SQLiteTraceStore:
                     trace.project_id,
                     trace.session_id,
                     trace.root_span_id,
-                    started_ns if started_ns is not None else seen_ns,
+                    started_ns,
                     ended_ns,
                     trace.status.code.value,
                     trace.status.message,
@@ -303,7 +308,7 @@ class SQLiteTraceStore:
                     trace.provenance.value,
                     len(trace.spans),
                     sum(1 for s in trace.spans if s.status.code == StatusCode.ERROR),
-                    started_ns if started_ns is not None else seen_ns,
+                    started_ns,
                     seen_ns,
                 ),
             )
@@ -382,7 +387,23 @@ class SQLiteTraceStore:
             ),
         )
 
-    def _merge_span(self, row: sqlite3.Row, incoming: Span, project_id: str) -> Span | None:
+    @staticmethod
+    def _identity_differs(stored: Span, incoming: Span) -> bool:
+        """True when merge-untouched fields disagree between deliveries.
+
+        ``name``/``kind``/``start_time`` are never merged (first-observed
+        wins), so a difference means the same ``(project, trace, span)``
+        key carried *different* telemetry — a conflict, not a retry.
+        """
+        return (
+            incoming.name != stored.name
+            or incoming.kind != stored.kind
+            or incoming.start_time != stored.start_time
+        )
+
+    def _merge_span(
+        self, stored: Span, incoming: Span, project_id: str
+    ) -> Span | None:
         """Merge a re-delivered span into the stored row.
 
         Returns the merged ``Span`` when it adds information, ``None``
@@ -390,7 +411,6 @@ class SQLiteTraceStore:
         Mutable fields merge; identity fields (name/kind/start) stay
         first-observed.
         """
-        stored = self._span_from_row(row)
         merged = stored.model_copy(
             update={
                 "parent_span_id": stored.parent_span_id or incoming.parent_span_id,
@@ -417,16 +437,20 @@ class SQLiteTraceStore:
             return None
         return merged
 
-    def _union_flags(self, row: sqlite3.Row, span: Span) -> None:
+    def _union_flags(
+        self, row: sqlite3.Row, span: Span, *, conflict: bool = False
+    ) -> None:
         """Union incoming integrity flags into the stored row.
 
-        Every re-delivery is ``DUPLICATE`` evidence, and flags the
-        incoming span carried that we lack are still observations —
-        recorded even when the payload itself changed nothing.
+        Every re-delivery leaves evidence: ``DUPLICATE`` for a replay,
+        ``CONFLICT`` when the same key carried different telemetry
+        (merge-untouched fields disagree). Flags the incoming span
+        carried that we lack are still observations — recorded even when
+        the payload itself changed nothing.
         """
         stored = set(json.loads(row["integrity_flags_json"] or "[]"))
         merged = stored | {f.value for f in span.integrity_flags} | {
-            IntegrityFlag.DUPLICATE.value
+            (IntegrityFlag.CONFLICT if conflict else IntegrityFlag.DUPLICATE).value
         }
         if merged != stored:
             self._conn.execute(
@@ -599,7 +623,16 @@ class SQLiteTraceStore:
             errors = self._conn.execute(
                 "SELECT COUNT(*) c FROM spans WHERE status_code='error'"
             ).fetchone()["c"]
-            db_size = self.path.stat().st_size if self.path.exists() else 0
+            # WAL mode: live data also sits in -wal/-shm sidecars.
+            db_size = sum(
+                p.stat().st_size
+                for p in (
+                    self.path,
+                    self.path.with_name(self.path.name + "-wal"),
+                    self.path.with_name(self.path.name + "-shm"),
+                )
+                if p.exists()
+            )
             schema = self._conn.execute(
                 "SELECT value FROM lens_meta WHERE key='schema_version'"
             ).fetchone()

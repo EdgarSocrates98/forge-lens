@@ -336,3 +336,63 @@ def test_duplicate_merge_identical_content_still_records_flags(
     # MISSING_END from the running view was unioned then correctly
     # cleared by the refresh pass — stored data has an end_time
     assert IntegrityFlag.MISSING_END not in flags2
+
+
+def test_conflicting_redelivery_flags_conflict_not_duplicate(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """Same (project, trace, span) key carrying a different name/kind/
+    start is a CONFLICT — the stored row was not replayed verbatim, so
+    it must not be labeled DUPLICATE."""
+    tmp_store.upsert_trace(synthetic_trace)
+
+    lie = synthetic_trace.model_copy(deep=True)
+    lie.spans = [lie.spans[0]]
+    lie.spans[0].name = "completely.different.name"
+    tmp_store.upsert_trace(lie)
+
+    loaded = tmp_store.get_trace(synthetic_trace.trace_id)
+    assert loaded is not None
+    flags = loaded.spans[0].integrity_flags
+    assert IntegrityFlag.CONFLICT in flags
+    assert IntegrityFlag.DUPLICATE not in flags
+    # first-observed identity wins — the conflicting name was NOT applied
+    assert loaded.spans[0].name == synthetic_trace.spans[0].name
+
+
+def test_conflicting_update_merge_marks_conflict(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """A re-delivery that both merges new data AND conflicts on identity
+    still records the conflict on the updated row."""
+    tmp_store.upsert_trace(synthetic_trace)
+
+    conflicted = synthetic_trace.model_copy(deep=True)
+    conflicted.spans = [conflicted.spans[1]]
+    conflicted.spans[0].name = "renamed.span"          # identity conflict
+    conflicted.spans[0].attributes = {"extra": "new"}  # mergeable change
+    tmp_store.upsert_trace(conflicted)
+
+    loaded = tmp_store.get_trace(synthetic_trace.trace_id)
+    assert loaded is not None
+    span = loaded.spans[1]
+    assert IntegrityFlag.CONFLICT in span.integrity_flags
+    assert span.name == synthetic_trace.spans[1].name  # identity kept
+    assert span.attributes["extra"] == "new"           # merge still applied
+
+
+def test_db_size_includes_wal_sidecars(
+    tmp_path, tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """db_size_bytes must count -wal/-shm sidecars, not just the main
+    file — WAL mode holds most live data there between checkpoints."""
+    tmp_store.upsert_trace(synthetic_trace)
+    wal = tmp_path / "lens.db-wal"
+    assert wal.exists()  # uncheckpointed write stays in the wal
+    assert wal.stat().st_size > 0
+    expected = sum(
+        f.stat().st_size for f in tmp_path.iterdir() if f.name.startswith("lens.db")
+    )
+    assert tmp_store.stats()["db_size_bytes"] == expected
+    # the wal dominates here — main file alone would undercount badly
+    assert expected > (tmp_path / "lens.db").stat().st_size

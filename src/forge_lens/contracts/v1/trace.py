@@ -63,6 +63,7 @@ class IntegrityFlag(StrEnum):
     DUPLICATE = "duplicate"
     PARTIAL_TRACE = "partial_trace"
     CLOCK_SKEW = "clock_skew"
+    CONFLICT = "conflict"
     TRUNCATED = "truncated"
     UNKNOWN_TOKENS = "unknown_tokens"
     MISSING_END = "missing_end"

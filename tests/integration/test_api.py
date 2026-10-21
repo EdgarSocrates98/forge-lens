@@ -306,3 +306,29 @@ def test_import_has_no_db_side_effect(tmp_path, monkeypatch) -> None:
             del sys.modules[mod]
     importlib.import_module("forge_lens.api.app")
     assert not (tmp_path / ".forge-lens").exists()
+
+
+def test_otlp_protobuf_content_type_rejected_415(client: TestClient) -> None:
+    """The docstring claims explicit protobuf rejection — it is real."""
+    r = client.post(
+        "/v1/otlp/traces",
+        content=b"\x0a\x00",
+        headers={"Content-Type": "application/x-protobuf"},
+    )
+    assert r.status_code == 415
+
+
+def test_ingest_rejections_count_as_ingest_errors(
+    client: TestClient, synthetic_trace: Trace
+) -> None:
+    """413/422 rejections must show up in lens.ingest.errors, not only
+    in lens.api.errors — metric accounting is consistent."""
+    from forge_lens.core.metrics import METRICS
+
+    before = METRICS.snapshot()["counters"].get("lens.ingest.errors", 0)
+    client.post(
+        "/v1/otlp/traces", content=b"[1,2]",
+        headers={"Content-Type": "application/json"},
+    )
+    after = METRICS.snapshot()["counters"].get("lens.ingest.errors", 0)
+    assert after == before + 1

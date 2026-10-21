@@ -135,3 +135,35 @@ def test_serve_warns_on_exposed_bind(capsys) -> None:
     # non-loopback with a key configured: no warning
     _warn_if_exposed("0.0.0.0", LensConfig(api_key="k"))  # noqa: S104
     assert capsys.readouterr().err == ""
+
+
+def test_ingest_rejects_unknown_format(tmp_path: Path) -> None:
+    """--format garbage must fail loudly, not silently take the native path."""
+    f = tmp_path / "t.json"
+    f.write_text(json.dumps({"traces": []}))
+    result = CliRunner().invoke(
+        app, ["ingest", str(f), "--db", str(tmp_path / "x.db"), "--format", "yaml"]
+    )
+    assert result.exit_code == 2
+    assert "unknown --format" in result.output
+
+
+def test_cli_otlp_import_marks_provenance_imported(
+    tmp_path: Path, otlp_payload: dict
+) -> None:
+    """File imports carry IMPORTED provenance — the store didn't observe
+    the execution itself."""
+    from forge_lens.contracts.provenance import Provenance
+    from forge_lens.storage.sqlite import SQLiteTraceStore
+
+    f = tmp_path / "otlp.json"
+    f.write_text(json.dumps(otlp_payload))
+    db = tmp_path / "cli.db"
+    result = CliRunner().invoke(app, ["ingest", str(f), "--db", str(db)])
+    assert result.exit_code == 0, result.output
+    store = SQLiteTraceStore(db)
+    trace = store.get_trace("b" * 32)
+    assert trace is not None
+    assert trace.provenance == Provenance.IMPORTED
+    assert all(s.provenance == Provenance.IMPORTED for s in trace.spans)
+    store.close()

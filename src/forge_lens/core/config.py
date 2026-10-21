@@ -105,14 +105,17 @@ def load_config(project_dir: Path | None = None) -> LensConfig:
         raw = os.environ.get(env)
         if raw is None:
             continue
-        if field_name == "db_path":
-            overrides[field_name] = Path(raw).expanduser()
-        elif field_name == "capture":
-            overrides[field_name] = CaptureLevel(raw)
-        elif field_name in {"rate_limit_per_minute", "max_traces_per_request"}:
-            overrides[field_name] = int(raw)
-        else:
-            overrides[field_name] = raw
+        try:
+            if field_name == "db_path":
+                overrides[field_name] = Path(raw).expanduser()
+            elif field_name == "capture":
+                overrides[field_name] = CaptureLevel(raw)
+            elif field_name in {"rate_limit_per_minute", "max_traces_per_request"}:
+                overrides[field_name] = int(raw)
+            else:
+                overrides[field_name] = raw
+        except ValueError as exc:
+            raise ValueError(f"invalid env {env}={raw!r}: {exc}") from exc
     if overrides:
         base = LensConfig(**{**base.__dict__, **overrides})
     return base

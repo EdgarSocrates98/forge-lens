@@ -20,7 +20,9 @@ stderr — leituras de `/v1/traces*` são abertas por design local.
 
 Ingere um JSON local (envelope `TraceIngest` ou `ExportTraceServiceRequest`
 OTLP) direto no store — sem servidor. `--format auto` detecta OTLP pela
-presença de `resourceSpans`.
+presença de `resourceSpans`; valor fora de `native|otlp|auto` → exit 2.
+Import de arquivo marca as traces `provenance=imported` (vs `observed`
+da ingestão viva) — `--format native` honra a provenance do envelope.
 
 ## `forge-lens traces list [--db] [--project] [--status ok|error|unset] [--limit N] [--json]`
 

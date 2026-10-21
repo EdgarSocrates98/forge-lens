@@ -37,10 +37,15 @@ payload ──► limites de tamanho/spans ──► rate limiter ──►
 - Chave de span: `(project_id, trace_id, span_id)` — re-ingestão é idempotente.
 - Antes de qualquer escrita, spans cujo `trace_id` difere do `Trace`
   envelope são rejeitados (422) — nada é armazenado sob chave errada.
-- Re-entrega idêntica (`span_hash` igual) → `duplicate` + flag
-  `DUPLICATE` no span (evidência de retentativa).
+- Re-entrega idêntica (`span_hash` igual, ou merge→conteúdo idêntico) →
+  `duplicate` + flag `DUPLICATE` no span (evidência de retentativa).
 - Re-entrega alterada → `updated`: `end_time` tardio, status, atributos,
   eventos e links são mesclados. Spans que "rodavam" podem completar.
+- Re-entrega com **identidade divergente** (`name`/`kind`/`start_time`
+  diferentes sob a mesma chave) → `CONFLICT`, nunca `DUPLICATE`: o
+  primeiro valor observado é mantido (first-observed wins) e a
+  divergência fica registrada no flag — sem falsificar evidência de
+  "replay idêntico" nem descartar o conflito em silêncio.
 - Trace é mesclada em múltiplas flushes: `started_ns=min`, `ended_ns=max`,
   status agrega `error > ok > unset`, `span_count`/`error_count` recomputados.
 - Isso suporta exportadores que enviam spans em lotes sem gerar duplicatas.
@@ -54,6 +59,8 @@ Anexadas no span, visíveis em `traces show` e na API:
 - `clock_skew` — `end_time < start_time`
 - `truncated` — eventos cortados pelo cap
 - `duplicate` — span re-entregue com conteúdo idêntico (evidência de retry)
+- `conflict` — mesma chave, campos de identidade (`name`/`kind`/
+  `start_time`) divergentes — first-observed mantido, divergência registrada
 - `partial_trace`/`orphan`/`out_of_order`/`unknown_tokens` —
   reservados no enum para regras futuras
 

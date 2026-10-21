@@ -199,3 +199,76 @@ e não foram afetados por esta rodada).
 123 testes py + 17 ts + smoke de pacote — verdes; `ruff` limpo;
 `mypy --strict` 0 erros; schemas sem drift; `uv build` ok;
 `pip-audit` 0 vulns; `examples/quickstart.py` executado com sucesso.
+
+## Rodada 4 — achados → correções
+
+### Warnings
+
+- **`kvlistValue` malformado → HTTP 500**: `kv.get("key","")` virava chave
+  de dict sem guarda; `key` array/objeto → `TypeError: unhashable` → 500.
+  `_attr_value` agora só aceita entradas `dict` com `key` `str` —
+  `test_otlp_kvlist_nonstring_key_quarantined`.
+- **Chaves `*Token` camelCase fora da redação**: `(^|[-_.])token$` não
+  casava `accessToken`/`refreshToken`/`idToken`/`bearerToken`/… → token
+  opaco persistia no default `capture=metadata`. Suffix virou `token$`
+  (métricas `*.prompt`/`_usage`/`_tokens` seguem fora — terminam em
+  `prompt`/`usage`/`tokens`, não `token`) —
+  `test_camelcase_token_keys_redacted` +
+  `test_generic_token_keys_redacted` (regressão das métricas).
+- **Sanitização não varria campos de texto livre**: `status.message`
+  (span+trace), `span.name`, `event.name`, `session_id` e `source.*`
+  (`system`/`sdk_name`/`sdk_version`/`runtime`/`language`) persistiam
+  credenciais — `status.message=str(exc)` rotineiramente embute segredos.
+  `_scrub_text` aplica os padrões de valor (sk-*/ghp_*/glpat-*/… +
+  mascaramento de e-mail, exceto `session_id` — chave de lookup,
+  e-mail-mask quebraria a identidade de join) —
+  `test_status_message_and_names_scrubbed`.
+- **Reentrega conflitante rotulada `DUPLICATE`**: mesmo
+  `(project,trace,span)` com `name`/`kind`/`start_time` diferentes
+  mergeava→`None` e levava `DUPLICATE` — evidência de "replay idêntico"
+  falsa, conteúdo conflitante descartado sem registro. Novo
+  `IntegrityFlag.CONFLICT`: identidade divergente → `CONFLICT` (merge
+  preserva first-observed; a divergência fica registrada); hash
+  idêntico ou merge→idêntico com mesma identidade → `DUPLICATE` —
+  `test_conflicting_redelivery_flags_conflict_not_duplicate` +
+  `test_conflicting_update_merge_marks_conflict`.
+- **Imports de arquivo com `provenance=observed`**: `ingest file.json`
+  agora passa `Provenance.IMPORTED` a `normalize_otlp_request`
+  (enum já definia `imported` = "received from an external source
+  (file import…)") — `test_cli_otlp_import_marks_provenance_imported`.
+
+### Menores
+
+- **`load_config` crashava com `ValueError` cru** em env malformado
+  (`FORGE_LENS_CAPTURE=bogus`, `FORGE_LENS_MAX_TRACES_PER_REQUEST=abc`)
+  → agora `ValueError("invalid env FORGE_LENS_*=…")` contextual —
+  `test_load_config_bad_env_reports_variable_name`.
+- **`ingest --format` aceitava string arbitrária**: valor fora de
+  `native|otlp|auto` → exit 2 explícito em vez de cair no caminho
+  native — `test_ingest_rejects_unknown_format`.
+- **Lazy init de `get_store`/`get_pipeline` raceável**: `threading.RLock`
+  em torno da criação (RLock porque `get_pipeline` chama `get_store`
+  sob o mesmo lock — Lock simples deadlockearia, reproduzido em teste).
+- **`stats()["db_size_bytes"]` ignorava sidecars**: agora soma
+  `lens.db` + `lens.db-wal` + `lens.db-shm` —
+  `test_db_size_includes_wal_sidecars`.
+- **Docstring OTLP afirmava rejeição de protobuf que não existia**:
+  `ingest_otlp` agora retorna 415 para `Content-Type` protobuf/
+  octet-stream antes de tentar parse —
+  `test_otlp_protobuf_content_type_rejected_415`.
+- **Métricas de erro inconsistentes**: `_reject_ingest` centraliza —
+  413/415/422/429/400 incrementam `M_API_ERRORS` + `M_INGEST_ERRORS`
+  uniformemente — `test_ingest_rejections_count_as_ingest_errors`.
+
+## Estado pós-fix (rodada 4)
+
+134 testes py + 17 ts + smoke de pacote — verdes; `ruff` limpo;
+`mypy --strict` 0 erros; schemas regeneradas (`CONFLICT` no enum) sem
+drift extra; `uv build` ok; `pip-audit` 0 vulns; `examples/quickstart.py`
+executado com sucesso.
+
+Nota honesta: `CONFLICT` registra a divergência nos flags do span
+persistido — o primeiro `name`/`kind`/`start_time` observado continua
+sendo a verdade mantida (first-observed wins), e a entrega conflitante
+fica evidenciada pelo flag. Não há `warnings` no `IngestResult` para
+conflito porque a dedupe acontece no store, abaixo do pipeline.

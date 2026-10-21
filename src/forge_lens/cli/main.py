@@ -118,9 +118,16 @@ def ingest(
     project: Annotated[str | None, typer.Option("--project")] = None,
 ) -> None:
     """Ingest traces from a JSON file into the local store."""
+    from forge_lens.contracts.provenance import Provenance
     from forge_lens.contracts.v1.trace import TraceIngest
     from forge_lens.ingest.pipeline import IngestPipeline
     from forge_lens.otlp.normalize import normalize_otlp_request
+
+    if fmt not in {"native", "otlp", "auto"}:
+        typer.echo(
+            f"ingest failed: unknown --format {fmt!r} (native|otlp|auto)", err=True
+        )
+        raise typer.Exit(2)
 
     cfg = _config(db)
     if project:
@@ -132,8 +139,12 @@ def ingest(
     quarantine: list[str] = []
     try:
         if fmt == "otlp" or (fmt == "auto" and "resourceSpans" in payload):
+            # file import — weaker provenance than a live OTLP push
             traces = normalize_otlp_request(
-                payload, project_id=cfg.project_id, errors=quarantine
+                payload,
+                project_id=cfg.project_id,
+                provenance=Provenance.IMPORTED,
+                errors=quarantine,
             )
         else:
             envelope = TraceIngest.model_validate(payload)

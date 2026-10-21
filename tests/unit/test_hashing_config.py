@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from forge_lens.core.config import LensConfig, init_project, load_config
 from forge_lens.core.hashing import canonical_json, sha256_bytes, sha256_json
 
@@ -46,3 +48,17 @@ def test_default_config_values() -> None:
     cfg = LensConfig()
     assert cfg.capture.value == "metadata"
     assert cfg.resolved_db_path.name == "lens.db"
+
+
+def test_load_config_bad_env_reports_variable_name(monkeypatch) -> None:
+    """Malformed env values raise with the variable name, not a bare traceback."""
+    from forge_lens.core.config import load_config
+
+    monkeypatch.setenv("FORGE_LENS_CAPTURE", "bogus")
+    with pytest.raises(ValueError, match="FORGE_LENS_CAPTURE"):
+        load_config()
+
+    monkeypatch.delenv("FORGE_LENS_CAPTURE")
+    monkeypatch.setenv("FORGE_LENS_MAX_TRACES_PER_REQUEST", "abc")
+    with pytest.raises(ValueError, match="FORGE_LENS_MAX_TRACES_PER_REQUEST"):
+        load_config()

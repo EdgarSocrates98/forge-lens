@@ -4,8 +4,9 @@ The parser is deliberately tolerant: OTLP allows unix-nanos as strings
 or ints, attribute values in several shapes, and missing sections. What
 cannot be interpreted is never dropped silently — unrecoverable spans go
 to quarantine (``errors`` list or strict ``ValidationError``), and data
-that can't be stored (e.g. events without ``timeUnixNano``) leaves
-evidence on the span (``attributes["_otlp.events_dropped"]``).
+that can't be stored leaves evidence: events without ``timeUnixNano``
+count in ``attributes["_otlp.events_dropped"]``, and kvlist entries
+with a non-string key count in ``"_otlp.dropped_kv_pairs"``.
 """
 
 from __future__ import annotations
@@ -49,11 +50,19 @@ def _attr_value(raw: Any) -> Any:
         kvl = raw["kvlistValue"]
         if not isinstance(kvl, dict):
             return raw
-        return {
-            kv.get("key", ""): _attr_value(kv.get("value"))
-            for kv in kvl.get("values", [])
-            if isinstance(kv, dict)
-        }
+        out: dict[Any, Any] = {}
+        dropped = 0
+        for kv in kvl.get("values", []):
+            # key must be a string — an array/object key is unhashable
+            # and would crash dict insertion (→ HTTP 500)
+            if isinstance(kv, dict) and isinstance(kv.get("key"), str):
+                out[kv["key"]] = _attr_value(kv.get("value"))
+            else:
+                dropped += 1
+        if dropped:
+            # same contract as "[TRUNCATED: N items dropped]" — never silent
+            out["_otlp.dropped_kv_pairs"] = dropped
+        return out
     if "bytesValue" in raw:
         return {"_bytes": len(str(raw["bytesValue"]))}
     return raw

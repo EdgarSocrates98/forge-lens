@@ -11,12 +11,18 @@
 
 ## Pipeline de sanitização (pré-persistência, sempre ativa)
 
-1. **Chaves sensíveis** (api_key, secret, *token* de acesso/refresh/id/
-   session/auth/api/bearer/csrf, password, authorization, cookie, PEM, …)
-   → `[REDACTED:key]`. *Contadores* (`llm.token_count.*`, `*.usage.*tokens`)
-   não são redigidos — são métricas, não segredos.
+1. **Chaves sensíveis** (api_key, secret, *token* — snake e camelCase:
+   `access_token`, `accessToken`, `refreshToken`, `idToken`, …, password,
+   authorization, cookie, PEM, …) → `[REDACTED:key]`. *Contadores*
+   (`llm.token_count.*`, `*.usage.*tokens`) não são redigidos — são
+   métricas, não segredos (terminam em `count`/`usage`/`tokens`).
 2. **Padrões em valores** (sk-ant-*, sk-*, AIza*, AKIA*, ghp_*, github_pat_*,
-   xox*, blocos PEM, `Bearer x`, JWT) → `[REDACTED:…]` inline.
+   xox*, blocos PEM, `Bearer x`, JWT) → `[REDACTED:…]` inline — em
+   atributos *e* em campos de texto livre do contrato: `status.message`
+   (span+trace — carrega texto de exceção), `span.name`, `event.name`,
+   `session_id` (sem e-mail-mask: é chave de lookup), `source.*`
+   (`system`, `sdk_name`, `sdk_version`, `runtime`, `language`).
+   IDs de join (`trace_id`, `span_id`) nunca são tocados.
 3. **`capture=metadata`**: atributos de conteúdo (`input.value`,
    `output.value`, `llm.*_messages`, `tool.parameters`,
    `retrieval.documents`) → `{"_forge_lens.dropped": true, _approx_bytes}`;
@@ -26,10 +32,11 @@
 
 ## Limites e abuso
 
-- `max_payload_bytes`, `max_spans_per_request` → 413.
+- `max_payload_bytes`, `max_spans_per_request`, `max_traces_per_request`
+  → 413.
 - `max_events_per_span` → trunca com flag `TRUNCATED`.
 - `rate_limit_per_minute` (off por default local) → 429.
-- OTLP protobuf não aceito — superfície de parsing reduzida a JSON.
+- OTLP protobuf → 415 explícito — superfície de parsing = JSON apenas.
 
 ## O que está fora do escopo (honesto)
 

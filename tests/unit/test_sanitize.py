@@ -186,3 +186,58 @@ def test_mime_type_survives_metadata_capture() -> None:
     assert out["output.value"]["_forge_lens.dropped"] is True
     assert out["input.mime_type"] == "text/plain"
     assert out["output.mime_type"] == "application/json"
+
+
+def test_camelcase_token_keys_redacted() -> None:
+    """accessToken/refreshToken/idToken & friends — camelCase credential
+    keys must not bypass key redaction (metric keys stay untouched)."""
+    report = SanitizeReport()
+    out = sanitize_attributes(
+        {
+            "accessToken": "eyJhbGciOi.supersecret",
+            "refreshToken": "rt_abcdef123456",
+            "idToken": "idtok",
+            "sessionToken": "st",
+            "privateToken": "pt",
+            # metric keys must survive — they end in tokens/count/usage
+            "llm.token_count.input": 100,
+            "gen_ai.usage.output_tokens": 42,
+            "forge_lens.token_usage": {"input_tokens": 1},
+        },
+        report,
+        capture=CaptureLevel.METADATA,
+        max_chars=4096,
+    )
+    for key in ("accessToken", "refreshToken", "idToken", "sessionToken", "privateToken"):
+        assert out[key] == "[REDACTED:key]", key
+    assert out["llm.token_count.input"] == 100
+    assert out["gen_ai.usage.output_tokens"] == 42
+    assert out["forge_lens.token_usage"] == {"input_tokens": 1}
+    assert report.redacted_keys == 5
+
+
+def test_status_message_and_names_scrubbed(synthetic_trace: Trace) -> None:
+    """status.message carries exception text — credentials there must
+    not persist. Span/event names and source fields get the same scrub."""
+    trace = synthetic_trace.model_copy(deep=True)
+    key = "sk-ant-" + "a" * 30
+    trace.spans[0].status.message = f"auth failed: key {key} rejected"
+    trace.spans[0].name = f"call {key}"
+    trace.spans[0].events = [
+        SpanEvent(name=f"failed with {key}", time=datetime.now(tz=UTC))
+    ]
+    trace.status.message = f"top-level: {key}"
+    trace.session_id = f"sess-{key}"
+    trace.source.system = f"svc-{key}"
+    trace.source.sdk_name = f"sdk {key}"
+
+    report = sanitize_trace(trace)
+    blob = repr(trace)
+    assert key not in blob
+    assert "[REDACTED:anthropic-key]" in trace.spans[0].status.message  # type: ignore[operator]
+    assert "[REDACTED:anthropic-key]" in trace.spans[0].name
+    assert "[REDACTED:anthropic-key]" in trace.spans[0].events[0].name
+    assert "[REDACTED:anthropic-key]" in trace.status.message  # type: ignore[operator]
+    assert "[REDACTED:anthropic-key]" in trace.session_id  # type: ignore[operator]
+    assert "[REDACTED:anthropic-key]" in trace.source.system  # type: ignore[operator]
+    assert report.redacted_values >= 6

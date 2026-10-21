@@ -8,6 +8,7 @@ place where HTTP is handled.
 from __future__ import annotations
 
 import secrets
+import threading
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -38,14 +39,19 @@ from forge_lens.storage.sqlite import SQLiteTraceStore
 API_VERSION = "v1"
 
 
-def _ingest_error(exc: Exception) -> HTTPException:
+def _reject_ingest(status_code: int, detail: str) -> HTTPException:
+    """Every ingest rejection counts on both API and ingest error metrics."""
     METRICS.inc(M_API_ERRORS)
-    if isinstance(exc, PayloadTooLargeError):
-        return HTTPException(status_code=413, detail=str(exc))
-    if isinstance(exc, RateLimitedError):
-        return HTTPException(status_code=429, detail=str(exc))
     METRICS.inc(M_INGEST_ERRORS)
-    return HTTPException(status_code=422, detail=str(exc))
+    return HTTPException(status_code=status_code, detail=detail)
+
+
+def _ingest_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, PayloadTooLargeError):
+        return _reject_ingest(413, str(exc))
+    if isinstance(exc, RateLimitedError):
+        return _reject_ingest(429, str(exc))
+    return _reject_ingest(422, str(exc))
 
 
 def create_app(
@@ -55,19 +61,28 @@ def create_app(
     cfg: LensConfig = config or LensConfig()
     # Store/pipeline are created lazily on first use — importing this
     # module must not create .forge-lens/ or open a DB (importers ≠ servers).
+    # The lock prevents two first requests racing into duplicate connections.
+    # RLock: get_pipeline calls get_store while holding the same lock.
+    _init_lock = threading.RLock()
     _store_holder: dict[str, TraceStore] = {}
     _pipeline_holder: dict[str, IngestPipeline] = {}
 
     def get_store() -> TraceStore:
         if "db" not in _store_holder:
-            _store_holder["db"] = (
-                store if store is not None else SQLiteTraceStore(cfg.resolved_db_path)
-            )
+            with _init_lock:
+                if "db" not in _store_holder:
+                    _store_holder["db"] = (
+                        store
+                        if store is not None
+                        else SQLiteTraceStore(cfg.resolved_db_path)
+                    )
         return _store_holder["db"]
 
     def get_pipeline() -> IngestPipeline:
         if "pipeline" not in _pipeline_holder:
-            _pipeline_holder["pipeline"] = IngestPipeline(get_store(), cfg)
+            with _init_lock:
+                if "pipeline" not in _pipeline_holder:
+                    _pipeline_holder["pipeline"] = IngestPipeline(get_store(), cfg)
         return _pipeline_holder["pipeline"]
 
     app = FastAPI(
@@ -101,13 +116,11 @@ def create_app(
         """Native ingest endpoint — accepts the versioned TraceIngest contract."""
         raw = await request.body()
         if len(raw) > cfg.max_payload_bytes:
-            METRICS.inc(M_API_ERRORS)
-            raise HTTPException(status_code=413, detail="payload too large")
+            raise _reject_ingest(413, "payload too large")
         try:
             body = TraceIngest.model_validate_json(raw)
         except PydanticValidationError as exc:
-            METRICS.inc(M_API_ERRORS)
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise _reject_ingest(422, str(exc)) from exc
 
         for trace in body.traces:
             # The envelope project fills traces that didn't name one;
@@ -147,20 +160,21 @@ def create_app(
         we don't claim a codec we don't ship). Malformed spans are
         quarantined and reported as warnings instead of rejecting the batch.
         """
+        content_type = request.headers.get("content-type", "")
+        if "protobuf" in content_type or "application/octet-stream" in content_type:
+            raise _reject_ingest(
+                415, "OTLP/protobuf is not supported — POST application/json"
+            )
         body = await request.body()
         if len(body) > cfg.max_payload_bytes:
-            METRICS.inc(M_API_ERRORS)
-            raise HTTPException(status_code=413, detail="payload too large")
+            raise _reject_ingest(413, "payload too large")
         try:
             payload = await request.json()
         except Exception as exc:
-            METRICS.inc(M_API_ERRORS)
-            raise HTTPException(status_code=400, detail=f"invalid JSON: {exc}") from exc
+            raise _reject_ingest(400, f"invalid JSON: {exc}") from exc
         if not isinstance(payload, dict):
-            METRICS.inc(M_API_ERRORS)
-            raise HTTPException(
-                status_code=422,
-                detail="OTLP body must be a JSON object (ExportTraceServiceRequest)",
+            raise _reject_ingest(
+                422, "OTLP body must be a JSON object (ExportTraceServiceRequest)"
             )
         quarantine: list[str] = []
         try:
@@ -168,8 +182,7 @@ def create_app(
                 payload, project_id=cfg.project_id, errors=quarantine
             )
         except (ValidationError, PydanticValidationError) as exc:
-            METRICS.inc(M_API_ERRORS)
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise _reject_ingest(422, str(exc)) from exc
         try:
             result = get_pipeline().ingest(traces, payload_bytes=len(body))
         except (PayloadTooLargeError, RateLimitedError, ValidationError) as exc:

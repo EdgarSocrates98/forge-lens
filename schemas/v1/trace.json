@@ -9,6 +9,7 @@
         "duplicate",
         "partial_trace",
         "clock_skew",
+        "conflict",
         "truncated",
         "unknown_tokens",
         "missing_end"
