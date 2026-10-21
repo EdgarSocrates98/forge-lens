@@ -27,19 +27,26 @@ export class InMemoryExporter implements Exporter {
   /** Overflow past `maxTraces` — counted, never silently dropped. */
   tracesDropped = 0;
   constructor(readonly maxTraces = 1000) {
-    this.maxTraces = Math.max(0, maxTraces);
+    this.maxTraces = Math.max(0, Math.trunc(maxTraces));
   }
   export(
     traces: Trace[],
-  ): { accepted_spans: number; traces: string[]; traces_dropped: number } {
+  ): {
+    accepted_spans: number;
+    traces: string[];
+    submitted_traces: number;
+    traces_dropped: number;
+  } {
     const room = this.maxTraces - this.traces.length;
     const kept = traces.slice(0, Math.max(0, room));
     this.traces.push(...kept);
     const dropped = traces.length - kept.length;
     this.tracesDropped += dropped;
+    // accepted = actually retained — same convention as the ingest pipeline
     return {
-      accepted_spans: traces.reduce((n, t) => n + t.spans.length, 0),
-      traces: traces.map((t) => t.trace_id),
+      accepted_spans: kept.reduce((n, t) => n + t.spans.length, 0),
+      traces: kept.map((t) => t.trace_id),
+      submitted_traces: traces.length,
       traces_dropped: dropped,
     };
   }

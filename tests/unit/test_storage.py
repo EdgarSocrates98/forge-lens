@@ -603,3 +603,27 @@ def test_non_finite_attribute_stored_as_null_not_invalid_json(
     stored = tmp_store.get_trace(t.trace_id)
     assert stored.spans[0].attributes["temperature"] is None
     assert stored.resource_attributes["threshold"] is None
+
+
+def test_list_traces_deterministic_tiebreak_on_same_instant(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """Paginated ORDER BY started_ns DESC needs a total order — same
+    instant must fall back to trace_id or pages can interleave."""
+    t0 = synthetic_trace.started_at
+    a = synthetic_trace.model_copy(deep=True)
+    a.trace_id = "a" * 32
+    for s in a.spans:
+        s.trace_id = a.trace_id
+    a.started_at = t0
+    b = synthetic_trace.model_copy(deep=True)
+    b.trace_id = "b" * 32
+    for s in b.spans:
+        s.trace_id = b.trace_id
+    b.started_at = t0
+    tmp_store.upsert_trace(b)  # inserted second, same instant
+    tmp_store.upsert_trace(a)
+    items = tmp_store.list_traces()
+    ids = [i["trace_id"] for i in items]
+    assert ids == sorted(ids)  # trace_id ASC within equal started_ns
+    assert items == tmp_store.list_traces()  # stable across calls

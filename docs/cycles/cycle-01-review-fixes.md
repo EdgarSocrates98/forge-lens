@@ -885,3 +885,36 @@ Testes: a lista de falsos-positivos cobre todos os contraexemplos do
 reviewer (metric `*_tokens` lookalikes, OTel `*key`, pin/otp counters,
 card/security lookalikes); os dois SDKs testam `dropped == 0` sob
 capacidade.
+
+## Round 21 — accepted≠retained, stale ok, camelCase tokens (revisão cadeec4)
+
+- **`InMemoryExporter.export` não pode mais fabricar aceite** (os dois
+  SDKs): `accepted_spans`/`traces` passam a cobrir apenas `kept` —
+  convenção `IngestResult.accepted_spans` (aceite = retido). O payload
+  ganha `submitted_traces`; `traces_dropped` segue separado. Docstring
+  documenta a diferença proposital de shape vs `HTTPExporter` (que
+  devolve a resposta do servidor — aceite do servidor, não retenção).
+- **`_finalize` reseta status** (Py SDK): `else → StatusCode.UNSET`, o
+  terceiro ramo que o TS já tinha — flush mid-flight após um all-ok
+  seguido de span unset não carrega mais um `ok` obsoleto no payload.
+- **Denylist camelCase plural**: `(access|refresh|id)[-_.]?tokens$` —
+  `accessTokens`/`refreshTokens`/`idTokens` redigem; a âncora esquerda
+  mantém `validTokens`/`paidTokens`/`xaccessTokens` limpos. Gaps
+  residuais fechados na mesma classe: `otp_number`/`otp.number`,
+  `cvv22`/`cvc123` (`[0-9]*`), `card_no`, `social_security[_number]`,
+  `aws_key`/`kms_key` + plural `*keys` na enumeração (`routing_keys`,
+  `primary_keys`, `monkeys`, `xaws.key`, `awaken` limpos).
+- **`max_traces`/`maxTraces` coerção**: `int()`/`Math.trunc` — `1.5`
+  não derruba mais o slice (paridade com o slice tolerante do TS).
+- **`_children` ordena por instante**: chave `(missing, unix_nano, id)`
+  — `+12:00` vs `Z` ordenam pelo instante real, não pela string local;
+  targets dangling ordenam por id, sem comparação de tipos mistos.
+- **`list_traces` tiebreak**: `ORDER BY started_ns DESC, trace_id` —
+  paginação determinística sob instantes iguais (mesma classe do fix
+  `started_ns, span_id` do round 19).
+
+Testes: payload kept-only nos dois SDKs (`max=1`: 1 id aceito, 1
+dropped, `submitted=2`); re-finalize `ok → unset`; `dropped == 0` sob
+capacidade preservado; denylist com todos os novos padrões +
+lookalikes camelCase/cardano/awaken/monkeys; `_children` instant-order;
+`list_traces` com mesmo `started_ns`.

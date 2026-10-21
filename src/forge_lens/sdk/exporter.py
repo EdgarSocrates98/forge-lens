@@ -26,11 +26,17 @@ class InMemoryExporter:
     not accumulate telemetry forever. ``max_traces`` caps retention;
     overflow is counted in ``traces_dropped`` (same convention as the
     dead-letter queue), never silent.
+
+    Return shape: ``accepted_spans``/``traces`` cover only *retained*
+    telemetry; ``submitted_traces``/``traces_dropped`` report what was
+    sent but not kept. ``HTTPExporter.export`` instead returns the
+    server's ingest response — the shapes are intentionally different
+    (server acceptance vs local retention).
     """
 
     def __init__(self, max_traces: int = 1000) -> None:
         self.traces: list[Trace] = []
-        self.max_traces = max(0, max_traces)
+        self.max_traces = max(0, int(max_traces))
         self.traces_dropped = 0
 
     def export(
@@ -41,9 +47,12 @@ class InMemoryExporter:
         self.traces.extend(kept)
         dropped = len(traces) - len(kept)
         self.traces_dropped += dropped
+        # accepted = actually retained — the same convention as
+        # IngestResult.accepted_spans (stored, not submitted)
         return {
-            "accepted_spans": sum(len(t.spans) for t in traces),
-            "traces": [t.trace_id for t in traces],
+            "accepted_spans": sum(len(t.spans) for t in kept),
+            "traces": [t.trace_id for t in kept],
+            "submitted_traces": len(traces),
             "traces_dropped": dropped,
         }
 

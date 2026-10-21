@@ -471,6 +471,11 @@ def _finalize(trace: Trace) -> None:
         # all([]) is True — an empty trace observed nothing, so it must
         # stay unset rather than flush as ok (matches the TS SDK)
         trace.status = Status(code=StatusCode.OK)
+    else:
+        # reset every finalize: a mid-flight flush can stamp ok, then a
+        # new unset span lands — the next finalize must not keep the stale
+        # verdict (the TS SDK's else-branch does the same)
+        trace.status = Status(code=StatusCode.UNSET)
 
 
 _default: LensTracer | None = None

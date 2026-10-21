@@ -281,10 +281,16 @@ def test_sensitive_key_denylist_covers_credential_families() -> None:
         "passphrase", "my_passphrase", "wallet.pass-phrase",
         "pin", "user_pin", "card.pin", "pin_code", "pin.code",
         "otp", "login_otp", "otp.code", "otp_code", "otp.secret",
+        "otp_number", "otp.number",
         "cvv", "cvv2", "card_cvc", "payment.cvc", "cvc3",
+        "cvv22", "cvc123",
         "card_number", "cardNumber", "card.num", "card_numbers",
+        "card_no",
         "security_code", "security.code",
+        "social_security_number", "social_security",
+        "aws_key", "aws_keys", "kms_key", "signing_keys",
         "access_tokens", "refresh.tokens", "id_tokens",
+        "accessTokens", "refreshTokens", "idTokens",
     ]
     for key in sensitive:
         assert _is_sensitive_key(key), f"{key!r} must redact"
@@ -301,6 +307,8 @@ def test_sensitive_key_denylist_false_positives_stay_clear() -> None:
         # metric-counter lookalikes of the plural-token pair pattern
         "valid_tokens", "invalid_tokens", "paid_tokens", "rapid_tokens",
         "xaccess_tokens", "reaccess.tokens",
+        # camelCase lookalikes — the left anchor still applies
+        "validTokens", "paidTokens", "xaccessTokens",
         # legitimate telemetry `*key` names — OTel semconv included
         "messaging.kafka.message.key",
         "messaging.rabbitmq.message.routing_key",
@@ -312,7 +320,10 @@ def test_sensitive_key_denylist_false_positives_stay_clear() -> None:
         "otp_count", "auth.otp_attempts", "cvv_count",
         # card/security lookalikes
         "discard_number", "wildcard.number", "card_number_count",
-        "security_code_review", "mysecurity_code",
+        "security_code_review", "mysecurity_code", "cardano",
+        "social_security_reform",
+        # `aws`/`kms` inside a longer word, or non-credential `*key`
+        "xaws.key", "awaken", "monkeys",
     ]
     for key in harmless:
         assert not _is_sensitive_key(key), f"{key!r} must stay clear"

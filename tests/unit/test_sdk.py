@@ -573,6 +573,41 @@ def test_finalize_empty_trace_stays_unset_not_ok() -> None:
     assert t.status.code == StatusCode.UNSET
 
 
+def test_finalize_refinalize_resets_stale_ok() -> None:
+    """flush() mutates the live trace mid-flight: once all-ok stamps OK,
+    a later finalize over a mixed set must reset to unset — the TS SDK's
+    else-branch, not a stale verdict on the exported payload."""
+    from datetime import UTC, datetime, timedelta
+
+    from forge_lens.contracts.v1.trace import Span, SpanKind, Status, Trace
+    from forge_lens.sdk.tracer import _finalize
+
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def span(sid: str, code: StatusCode) -> Span:
+        return Span(
+            trace_id="f" * 32,
+            span_id=sid.ljust(16, "0")[:16],
+            name=f"s-{sid}",
+            kind=SpanKind.INTERNAL,
+            start_time=t0,
+            end_time=t0 + timedelta(milliseconds=100),
+            status=Status(code=code),
+        )
+
+    t = Trace(
+        trace_id="f" * 32,
+        started_at=t0,
+        spans=[span("a", StatusCode.OK)],
+    )
+    _finalize(t)  # flush #1: all-ok
+    assert t.status.code == StatusCode.OK
+
+    t.spans.append(span("b", StatusCode.UNSET))  # new in-flight span
+    _finalize(t)  # flush #2: must not keep the stale ok
+    assert t.status.code == StatusCode.UNSET
+
+
 def test_in_memory_exporter_is_bounded() -> None:
     """The default exporter must not accumulate telemetry forever —
     overflow is counted, never silent, never negative."""
@@ -592,6 +627,9 @@ def test_in_memory_exporter_is_bounded() -> None:
     assert len(exp.traces) == 3
     assert exp.traces_dropped == 0
     assert res["traces_dropped"] == 0
+    assert res["traces"] == ["1" * 32, "2" * 32, "3" * 32]
+    assert res["accepted_spans"] == 0  # the constructed traces carry no spans
+    assert res["submitted_traces"] == 3
 
     exp2 = InMemoryExporter(max_traces=2)
     r = exp2.export([t(1), t(2)])
@@ -600,3 +638,19 @@ def test_in_memory_exporter_is_bounded() -> None:
     assert len(exp2.traces) == 2
     assert exp2.traces_dropped == 3
     assert r["traces_dropped"] == 3
+    assert r["traces"] == []  # buffer was full — nothing new retained
+    assert r["submitted_traces"] == 3
+
+    # accepted = retained: a partially-accepted batch claims only kept ids
+    exp1 = InMemoryExporter(max_traces=1)
+    r1 = exp1.export([t(8), t(9)])
+    assert len(exp1.traces) == 1
+    assert r1["traces"] == ["8" * 32]
+    assert r1["submitted_traces"] == 2
+    assert r1["traces_dropped"] == 1
+
+    # non-int capacity is coerced, not left to crash the slice
+    expf = InMemoryExporter(max_traces=1.5)
+    rf = expf.export([t(6), t(7)])
+    assert len(expf.traces) == 1
+    assert rf["traces_dropped"] == 1

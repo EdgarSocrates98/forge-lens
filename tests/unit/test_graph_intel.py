@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 from forge_lens.contracts.v1.trace import (
     IntegrityFlag,
@@ -806,3 +806,44 @@ def test_model_price_rejects_non_finite() -> None:
         ModelPrice(input_per_mtok=float("inf"), output_per_mtok=1.0)
     with pytest.raises(ValueError, match="finite"):
         ModelPrice(input_per_mtok=1.0, output_per_mtok=float("nan"))
+
+
+def test_children_order_by_instant_not_offset_string() -> None:
+    """Aware datetimes with different offsets must order by instant:
+    '12:00+12:00' (== 00:00Z) precedes '01:00Z' even though its lexical
+    string sorts later — child order feeds traversal/cycle evidence."""
+    from forge_lens.graph.algorithms import _children
+    from forge_lens.graph.models import (
+        EdgeKind,
+        ExecutionGraph,
+        GraphEdge,
+        GraphNode,
+    )
+
+    early_instant = GraphNode(
+        id="nz", name="nz", kind="span",
+        start_time=datetime(2026, 1, 1, 12, 0, 0,
+                            tzinfo=timezone(timedelta(hours=12))),
+        duration_ms=1.0,
+    )
+    later_z = GraphNode(
+        id="zz", name="zz", kind="span",
+        start_time=datetime(2026, 1, 1, 1, 0, 0, tzinfo=UTC),
+        duration_ms=1.0,
+    )
+    parent = GraphNode(
+        id="pp", name="pp", kind="span",
+        start_time=datetime(2025, 12, 31, 23, 0, 0, tzinfo=UTC),
+        duration_ms=10.0,
+    )
+    g = ExecutionGraph(
+        graph_id="g", subject_id=TRACE_ID, project_id="p1",
+        nodes=[parent, later_z, early_instant],
+        edges=[
+            GraphEdge(source="pp", target="zz", kind=EdgeKind.PARENT),
+            GraphEdge(source="pp", target="nz", kind=EdgeKind.PARENT),
+        ],
+    )
+    # instant order: 'nz' (00:00Z) before 'zz' (01:00Z) — lexical str
+    # ordering would put "01:00:00+00:00" first
+    assert _children(g)["pp"] == ["nz", "zz"]

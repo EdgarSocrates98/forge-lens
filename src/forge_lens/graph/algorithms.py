@@ -5,6 +5,7 @@ All functions are pure — they take the built graph, return evidence.
 
 from __future__ import annotations
 
+from forge_lens.core.time import ensure_aware, to_unix_nano
 from forge_lens.graph.models import EdgeKind, ExecutionGraph
 
 WHITE, GRAY, BLACK = 0, 1, 2
@@ -18,10 +19,20 @@ def _children(graph: ExecutionGraph) -> dict[str, list[str]]:
             kids.setdefault(e.source, []).append(e.target)
     node_order = {n.id: n.start_time for n in graph.nodes}
     for group in kids.values():
-        # uniform str key — a dangling target (or None start_time) falls
-        # back to the id itself, and str() keeps datetime and str from
-        # ever meeting in a comparison on hand-built graphs
-        group.sort(key=lambda i: (str(node_order.get(i) or i), i))
+        # (missing?, instant, id): dangling targets sort last by id —
+        # never a mixed-type comparison, and aware datetimes order by
+        # instant, not by their lexical offset string
+        group.sort(
+            key=lambda i: (
+                i not in node_order,
+                (
+                    to_unix_nano(ensure_aware(t))
+                    if (t := node_order.get(i)) is not None
+                    else 0
+                ),
+                i,
+            )
+        )
     return kids
 
 

@@ -374,9 +374,24 @@ describe("InMemoryExporter bound", () => {
       trace_id: `${i}`.repeat(32), spans: [] as never[],
     });
     exp.export([mk(1), mk(2)] as never[]);
-    exp.export([mk(3), mk(4), mk(5)] as never[]);
+    const res = exp.export([mk(3), mk(4), mk(5)] as never[]);
     assert.equal(exp.traces.length, 2);
     assert.equal(exp.tracesDropped, 3);
+    // accepted = retained: full buffer claims nothing new
+    assert.deepEqual(res.traces, []);
+    assert.equal(res.submitted_traces, 3);
+  });
+
+  it("reports only kept ids as accepted — never claims dropped traces", () => {
+    const exp = new InMemoryExporter(1);
+    const mk = (i: number) => ({
+      trace_id: `${i}`.repeat(32), spans: [] as never[],
+    });
+    const res = exp.export([mk(8), mk(9)] as never[]);
+    assert.equal(exp.traces.length, 1);
+    assert.deepEqual(res.traces, ["8".repeat(32)]);
+    assert.equal(res.submitted_traces, 2);
+    assert.equal(res.traces_dropped, 1);
   });
 
   it("never reports drops under capacity — counter stays 0", () => {
