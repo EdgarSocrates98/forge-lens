@@ -115,6 +115,45 @@ binary=True)` — elegíveis ao z-test de `eval/compare`. Trace sem
   fluxo da rota OTLP (bound `max_payload_bytes`, quarentena → warnings,
   `provenance=imported`, `IngestPipeline`); admin/audit/alerts/eval-POST
   ficam fora de propósito (superfície admin / já coberto por `eval`).
+- `docs/reference/api.md` — sync completa pós-auditoria: a claim
+  "`api.md` sincronizados" estava furada (o arquivo parava em
+  `GET /v1/metrics`, ~25 rotas sem doc). Reescrita cobrindo as 46
+  rotas `/v1` — datasets CRUD (6), `traces/{id}/security|stream|loops|
+  efficiency|recommendations`, `graph/.../analysis`, `intel/efficiency|
+  regress`, `analyze/specialists` + `analyze/{s}/{id}`, `alerts/*` (3),
+  `ops/summary`, `capabilities`, `admin/keys|audit|prune` (5) — com
+  auth por rota (reader/writer/admin), bounds de query params e shape
+  de resposta verificados contra `api/app.py`. README: corrigida a
+  redação que vendia demais o Studio ("evidence tabs"/"ops dashboard"
+  → painel evidence com blocos JSON + tabelas de eval/replay; ops =
+  resumo em JSON). Drift flagrado na auditoria, corrigido aqui.
+- Entidade `Experiment` persistida (audit gap 06.3): contrato
+  `contracts/v1/experiment.py` (+ `schemas/v1/experiment.json`),
+  tabelas `experiments` + `experiment_results` (append-only) e rotas
+  `PUT/GET /v1/experiments{,/{id}}` + `POST /v1/experiments/{id}/run`
+  que executa o MESMO caminho de `/v1/eval/compare` (evaluate_traces →
+  compare_runs → gate opcional) e grava o report — runs imutáveis,
+  status `open→completed`, escopo por projeto como datasets.
+  `docs/reference/experiments.md` + 7 testes em
+  `tests/unit/test_experiments.py`.
+- `eval/compare` statistics (gap 06.6): intervalos de Wilson a 95%
+  (`ci_a`/`ci_b`) nas pass rates binárias — descritivos mesmo abaixo do
+  piso — e Mann-Whitney U (aprox. normal com correções de continuidade
+  e de empates, n≥10/lado, amostras brutas por resultado) para métricas
+  contínuas, que deixam de ser `not_tested`; `test` nomeia o teste por
+  métrica, `not_tested` agora cobre só avaliadores fora do registry, e
+  `multiple_comparisons` avisa quando >1 teste roda sem correção.
+  Gate inalterado — regressões contínuas significativas (MWU +
+  `delta` < 0) agora alcançam `fail_on_significant_regression`.
+  16 testes em `tests/unit/test_eval_compare.py`.
+- Golden-scenario corpus (gap 05.1): `tests/golden/` — 47 cenários
+  declarativos (`input`/`expected`/`forbidden`/`evidence`/`provenance`)
+  executados por um único runner genérico contra store em memória,
+  `IngestPipeline`, `TestClient` e o servidor MCP real; o corpus se
+  auto-valida (schema estrito, `MIN_SCENARIOS`) e documenta
+  comportamento real verificado — incluindo `partial_trace` persistindo
+  após merge tardio e colisão in-batch de `span_id` virando merge +
+  `conflict`. Formato em `docs/reference/golden-scenarios.md`.
 
 ## Residuals — DOCUMENTED_ONLY
 

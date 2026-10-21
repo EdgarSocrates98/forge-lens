@@ -38,6 +38,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 - Docs: `guides/operations-runbook.md`, `guides/troubleshooting.md`;
   referências `cli.md`/`mcp.md` e `security/retention.md` sincronizadas
   com o código.
+- Golden-scenario corpus (`tests/golden/`): 47 cenários declarativos
+  em 16 categorias sobre comportamento real (ingest/dedupe/sanitize/
+  integridade/limites/tenancy/roles/roll-ups/ops/eval/datasets/
+  retenção/audit/MCP/replay/grafo), um único runner com validação de
+  schema do próprio corpus e doc de formato em
+  `docs/reference/golden-scenarios.md`.
 - Camada de benchmark smoke (`tests/bench`, marker `benchmark`):
   timings de parede reais sobre ingest via `IngestPipeline`, filtros de
   `list_traces`, roll-ups `list_sessions`/`list_tools`, `get_trace`,
@@ -59,6 +65,22 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
   `POST /v1/otlp/traces`) — bound `max_payload_bytes`, quarentena de
   spans malformados como warnings, `provenance=imported`, via
   `IngestPipeline`.
+- Entidade `Experiment` persistida (audit gap 06.3): contrato
+  `contracts/v1/experiment.py` + `schemas/v1/experiment.json`, tabelas
+  `experiments`/`experiment_results` (runs append-only) e rotas
+  `PUT /v1/experiments/{id}`, `GET /v1/experiments` (envelope),
+  `GET /v1/experiments/{id}` (com `runs` paginado) e
+  `POST /v1/experiments/{id}/run` — executa o mesmo caminho de
+  `/v1/eval/compare` sobre os cohorts declarados, grava o report e
+  avança `status: open→completed`; escopo por projeto como datasets.
+  Doc: `docs/reference/experiments.md`.
+- `eval/compare`: intervalos de Wilson (95%) em `ci_a`/`ci_b` para
+  métricas binárias, Mann-Whitney U (aprox. normal + correções de
+  continuidade/empates, n≥10/lado) para métricas contínuas — campo
+  `test` nomeia o teste, `not_tested` agora significa avaliador fora do
+  registry — e nota `multiple_comparisons` quando >1 teste roda (α=0.05
+  sem correção); `fail_on_significant_regression` passa a alcançar
+  regressões contínuas significativas.
 
 ### Added — cycles 06–12
 
