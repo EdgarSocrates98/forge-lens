@@ -342,12 +342,22 @@ def traces_list(
                 err=True,
             )
             raise typer.Exit(2)
-        return int(value * 1_000_000)
+        ns = int(value * 1_000_000)
+        if ns > 2**63 - 1:  # finite floats still overflow the sqlite bind
+            typer.echo(f"invalid {opt} {value!r}: out of int64 range",
+                       err=True)
+            raise typer.Exit(2)
+        return ns
 
     store = _store(cfg)
-    if min_tokens is not None and min_tokens < 0:
-        typer.echo("invalid --min-tokens: non-negative integer expected",
+    if min_tokens is not None and (
+        min_tokens < 0 or min_tokens > 2**63 - 1  # sqlite int64 bound
+    ):
+        typer.echo("invalid --min-tokens: integer in 0..2**63-1 expected",
                    err=True)
+        raise typer.Exit(2)
+    if limit > 2**63 - 1:
+        typer.echo("invalid --limit: out of int64 range", err=True)
         raise typer.Exit(2)
     try:
         items = store.list_traces(

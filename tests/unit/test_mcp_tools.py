@@ -383,7 +383,8 @@ def test_capabilities_matrix(
 def test_malformed_args_error_never_kills_loop(
     seeded_db: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Every bad-typed arg → JSON-RPC -32603; the loop keeps serving."""
+    """Wrong-typed/shaped args are -32602 invalid params; a genuine
+    internal fault is -32603. Either way the loop keeps serving."""
     by_id = _serve(
         seeded_db,
         [
@@ -401,9 +402,48 @@ def test_malformed_args_error_never_kills_loop(
         ],
         capsys,
     )
-    for rid in range(1, 7):
-        assert by_id[rid]["error"]["code"] == -32603, rid
+    for rid in range(1, 6):
+        assert by_id[rid]["error"]["code"] == -32602, rid
+    # "lots" passes the type check then fails int() — a real internal
+    # ValueError, i.e. -32603, not invalid-params
+    assert by_id[6]["error"]["code"] == -32603
     assert "tools" in by_id[7]["result"]
+
+
+def test_ping_allowed_before_initialize(
+    seeded_db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """MCP lifecycle: ping is legal during the handshake — the client
+    'SHOULD NOT send requests other than pings' before initialize."""
+    stdin = io.StringIO(json.dumps(_rpc("ping", 42)) + "\n")
+    old = sys.stdin
+    sys.stdin = stdin
+    try:
+        serve(str(seeded_db))
+    finally:
+        sys.stdin = old
+    out = [json.loads(line)
+           for line in capsys.readouterr().out.splitlines() if line]
+    assert out == [{"jsonrpc": "2.0", "id": 42, "result": {}}]
+
+
+def test_internal_error_is_opaque_on_the_wire(
+    seeded_db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """-32603 carries the exception TYPE only — exception text can
+    embed payload fragments/paths/secrets and never crosses."""
+    secret = "sk-ant-oat01-SECRET-VALUE-9f8e7d6c"
+    by_id = _serve(
+        seeded_db,
+        # a str limit passes the arg type check, then int() raises
+        # ValueError whose message embeds the literal — the secret
+        [_call_tool(1, "lens.list_traces", {"limit": secret})],
+        capsys,
+    )
+    resp = by_id[1]
+    assert resp["error"]["code"] == -32603
+    assert resp["error"]["message"] == "internal tool error: ValueError"
+    assert secret not in json.dumps(resp)
 
 
 def test_unknown_tool_is_data_not_death(
@@ -476,8 +516,10 @@ def test_sessions_tools_offset_pages(
     t1 = _payload(by_id[4])["tools"]
     if t1:
         assert t0[0]["tool"] != t1[0]["tool"]
+    # "x" fails int() — a real ValueError → -32603; a bool trips the
+    # authored arg-type check → -32602 invalid params
     assert by_id[5]["error"]["code"] == -32603
-    assert by_id[6]["error"]["code"] == -32603
+    assert by_id[6]["error"]["code"] == -32602
 
 
 def test_tools_tool_rolls_up(

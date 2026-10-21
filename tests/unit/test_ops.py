@@ -213,8 +213,10 @@ def test_mcp_server_survives_bad_call(tmp_path: Path, capsys) -> None:
     out = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
     by_id = {o["id"]: o for o in out}
     assert "result" in by_id[1]
-    assert by_id[2]["error"]["code"] == -32603
-    assert by_id[3]["error"]["code"] == -32603
+    # malformed arguments → -32602 invalid params (opaque, static msg);
+    # internal faults would be -32603 — neither kills the loop
+    assert by_id[2]["error"]["code"] == -32602
+    assert by_id[3]["error"]["code"] == -32602
     assert "tools" in by_id[4]["result"]
     assert by_id[5]["error"]["code"] == -32601
 

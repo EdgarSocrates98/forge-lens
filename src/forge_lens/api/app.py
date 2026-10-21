@@ -59,6 +59,9 @@ def _reject_request(status_code: int, detail: str) -> HTTPException:
     return HTTPException(status_code=status_code, detail=detail)
 
 
+_I64_MAX = 2**63 - 1
+
+
 def _check_declared_size(
     request: Request,
     max_bytes: int,
@@ -424,7 +427,18 @@ def create_app(
             raise _reject_request(
                 422, f"{field}: non-negative finite number required"
             )
-        return int(value * 1_000_000)
+        ns = int(value * 1_000_000)
+        if ns > _I64_MAX:  # finite floats can still overflow the bind
+            raise _reject_request(422, f"{field}: out of int64 range")
+        return ns
+
+    def _query_i64(value: int, field: str) -> int:
+        """Int query param bounded to sqlite int64 — FastAPI parses
+        arbitrary-precision ints, so the driver would see an
+        OverflowError → 500 without this."""
+        if value > _I64_MAX:
+            raise _reject_request(422, f"{field}: out of int64 range")
+        return value
 
     @app.get(f"/{API_VERSION}/traces", dependencies=read_deps)
     async def list_traces(
@@ -446,7 +460,8 @@ def create_app(
         offset: int = 0,
     ) -> dict[str, Any]:
         limit = max(1, min(limit, 500))
-        offset = max(0, offset)  # symmetric with limit — clamp, don't reject
+        offset = _query_i64(max(0, offset), "offset")  # clamped low,
+        # bounded high — a huge offset is malformed, not "empty page"
         # validation before any store call — malformed input is a 422
         # here, never a sqlite bind or an unhandled driver error
         if status is not None and status not in _TRACE_STATUSES:
@@ -467,6 +482,9 @@ def create_app(
             raise _reject_request(
                 422, "min_total_tokens: non-negative integer required"
             )
+        if min_total_tokens is not None:
+            min_total_tokens = _query_i64(
+                min_total_tokens, "min_total_tokens")
         since_ns = _query_dt_ns(since, "since")
         until_ns = _query_dt_ns(until, "until")
         min_ns = _query_duration_ns(min_duration_ms, "min_duration_ms")
@@ -502,7 +520,7 @@ def create_app(
         """Session roll-up — one row per observed session_id, newest
         activity first (see ``SQLiteTraceStore.list_sessions``)."""
         limit = max(1, min(limit, 500))
-        offset = max(0, offset)
+        offset = _query_i64(max(0, offset), "offset")
         pid = _resolve_pid(request, project_id)
         with METRICS.timer(M_QUERY_LATENCY):
             items = get_store().list_sessions(pid, limit=limit, offset=offset)
@@ -518,7 +536,7 @@ def create_app(
         """Fleet-wide tool roll-up — calls/traces/errors/avg duration
         per ``tool.name`` (see ``SQLiteTraceStore.list_tools``)."""
         limit = max(1, min(limit, 500))
-        offset = max(0, offset)
+        offset = _query_i64(max(0, offset), "offset")
         pid = _resolve_pid(request, project_id)
         with METRICS.timer(M_QUERY_LATENCY):
             items = get_store().list_tools(pid, limit=limit, offset=offset)
@@ -677,6 +695,7 @@ def create_app(
             "redacted_keys": rep.redacted_keys,
             "redacted_values": rep.redacted_values,
             "emails_masked": rep.emails_masked,
+            "dropped_content": rep.dropped_content,
         }
         return bundle
 
@@ -1327,7 +1346,7 @@ def create_app(
         offset: int = 0,
     ) -> dict[str, Any]:
         limit = max(1, min(limit, 500))
-        offset = max(0, offset)
+        offset = _query_i64(max(0, offset), "offset")
         pid = _resolve_pid(request, project_id)
         with METRICS.timer(M_QUERY_LATENCY):
             items = get_store().list_experiments(
@@ -1351,7 +1370,7 @@ def create_app(
         ``limit``/``offset`` page the embedded ``runs`` list (bounded at
         500 like every other collection)."""
         limit = max(1, min(limit, 500))
-        offset = max(0, offset)
+        offset = _query_i64(max(0, offset), "offset")
         pid = _resolve_pid(request, project_id)
         store = get_store()
         exp = store.get_experiment(experiment_id, pid)
@@ -1555,6 +1574,7 @@ def create_app(
                 403, "audit trail requires an unscoped admin key")
         if limit > 500 or limit < 0:
             raise _reject_request(422, "limit: 0..500")
+        offset = _query_i64(max(0, offset), "offset")
         return get_store().list_audit(
             action=action, actor=actor, limit=limit, offset=offset
         )

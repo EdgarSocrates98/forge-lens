@@ -1,6 +1,6 @@
 {
   "scenario_id": "mcp-tool-argument-error",
-  "title": "A tools/call with bad arguments reports the argument error verbatim",
+  "title": "A tools/call with bad arguments reports invalid-params, never internal text",
   "category": "mcp",
   "input": {
     "op": "mcp",
@@ -23,15 +23,17 @@
   "expected": {
     "output": {
       "1": {"result": {"serverInfo": {"name": "forge-lens"}}},
-      "2": {"error": {"code": -32603}},
-      "3": {"error": {"code": -32603}},
+      "2": {"error": {"code": -32602}},
+      "3": {"error": {"code": -32602}},
       "_rc": 0
     },
     "output_contains": {
-      "2.error.message": ["tool error:", "trace_id must be a non-empty string"],
-      "3.error.message": ["trace_id must be a non-empty string"]
+      "2.error.message": ["invalid params"],
+      "3.error.message": ["invalid params"]
     }
   },
-  "forbidden": {},
-  "notes": "A malformed call never kills the stdio loop and never degrades to a generic fault: the TypeError text ('trace_id must be a non-empty string') rides through as the -32603 message, and the server keeps serving (rc=0)."
+  "forbidden": {
+    "output_not_contains": ["tool error:", "must be a non-empty string", "trace_id must"]
+  },
+  "notes": "A malformed call never kills the stdio loop and never leaks internals: argument-validation TypeErrors map to -32602 with the static 'invalid params' message — exception/argument detail stays off the wire because it can embed payload fragments, and the server keeps serving (rc=0)."
 }

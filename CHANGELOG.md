@@ -5,6 +5,38 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 
 ## [Unreleased]
 
+### Fixed — review hardening (round on `542c0a3`)
+
+- **Overflow int64 → 500 eliminado**: `min_total_tokens`/`offset`/
+  `min|max_duration_ms` acima de `2^63−1` (ou finitos que estouram na
+  conversão ms→ns) agora são `422`/exit 2/`ValueError` — nunca um
+  `OverflowError` do bind SQLite. Guarda `_check_i64` aplicada em
+  todos os binds `LIMIT/OFFSET` do store (`list_traces`,
+  `list_sessions`, `list_tools`, `list_experiments`,
+  `list_experiment_results`, `list_audit`).
+- **Filtros de dimensão viraram field-scoped**: `model`/`agent`/`host`/
+  `tool` passam de `LIKE` sobre o blob JSON serializado (podia casar
+  texto de chaves não relacionadas) para `json_each`/`json_extract`
+  sobre o valor da chave exata — `gen_ai.*`, `source.system`,
+  `service.name`, `source.host`, `host.name`.
+- **`min_total_tokens=0` honesto**: exige pelo menos um span com
+  observação de uso — ausência de evidência ≠ zero observado.
+- **MCP `-32603` realmente opaco**: a mensagem carrega só o tipo da
+  exceção (`internal tool error: ValueError`); `str(exc)` — que pode
+  embutir payload/paths/segredos — não cruza mais o canal.
+- **MCP lifecycle correto**: `ping` é aceito antes de `initialize`
+  (permitido durante o handshake); demais métodos seguem gated.
+- **Args malformados → `-32602`**: `TypeError` de validação de
+  argumento e `arguments` não-objeto viram invalid-params; falhas
+  internas seguem `-32603`.
+- **`redact_export` robusto**: depth cap 8 (marcador
+  `[DROPPED:depth-limit]` contado, nunca `RecursionError`) + valores
+  sob chaves identidade (`*_id`, `actor`) pulam máscara de e-mail —
+  mascarar join key quebrava correlação; credential patterns ainda
+  se aplicam ao valor. `export_sanitize` divulga `dropped_content`.
+- Store rejeita `min_total_tokens` negativo (`ValueError`) —
+  alinhado ao 422 da API em vez de clampar silenciosamente.
+
 ### Added — improvement wave (post-review)
 
 - `GET /v1/traces` server-side filters: `status`, `session_id`, `tool`,
@@ -200,13 +232,16 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
   `forge-lens correlate`, MCP `lens.correlate`, SDKs
   `trace_correlate`/`fleet_correlate` + `traceCorrelate`/
   `fleetCorrelate`.
-- MCP hardening: `tools/call` exige `initialize` (pré-init → `-32602`),
-  falhas de dados pós-init viram `result.isError`, exceções viram
-  `-32603` sem vazar `str(exc)` no canal.
+- MCP hardening: `tools/call` e demais requests exigem `initialize`
+  (pré-init → `-32602`; `ping` permanece permitido durante o
+  handshake), falhas de dados pós-init viram `result.isError`,
+  exceções viram `-32603` com mensagem estática + tipo — nenhum
+  `str(exc)` no canal.
 - `/v1/traces/{id}/incident`: export-boundary re-sanitize
   (`redact_export`) — findings derivados não podem ecoar segredos
   capturados sob `capture=full`; resposta ganha `export_sanitize`
-  `{redacted_keys, redacted_values, emails_masked}`. Regressão em
+  `{redacted_keys, redacted_values, emails_masked, dropped_content}`.
+  Regressão em
   `test_security.py`.
 - Studio: replay playback controls (step/play/pause/velocidade/jump-to
   error·tool·event + teclado; `Date.parse` por row por CD →

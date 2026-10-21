@@ -238,6 +238,18 @@ def _json_finite(value: Any) -> Any:
     return value
 
 
+_INT64_MAX = 2**63 - 1
+
+
+def _check_i64(name: str, value: int) -> int:
+    """SQLite binds raise ``OverflowError`` outside int64 — validate at
+    the store boundary so every caller (API/CLI/MCP) gets a loud,
+    typed failure instead of a driver error."""
+    if value > _INT64_MAX or value < -_INT64_MAX - 1:
+        raise ValueError(f"{name}: out of int64 range")
+    return value
+
+
 def _like_escape(value: str) -> str:
     """Literal-ize LIKE metacharacters in a user-supplied substring.
 
@@ -862,13 +874,30 @@ class SQLiteTraceStore:
         ``source.system``/``service.name`` producer identity; ``host``
         matches ``source.host``/``host.name`` resource attrs.
         ``min_total_tokens`` compares the summed
-        ``gen_ai.usage.total_tokens`` across a trace's spans — traces
-        without usage evidence never match (sum stays 0). ``cost`` is
+        ``gen_ai.usage.total_tokens`` across a trace's spans — a trace
+        needs at least one span OBSERVING usage to match at all (no
+        evidence ≠ observed zero, even at bound 0). ``cost`` is
         deliberately NOT a filter: it derives from the pricing registry
         at read time and isn't a stored column — post-computing it over
         unbounded sets would be dishonest about scope.
         ``project_id=None`` stays the all-projects wildcard.
+        All int binds are int64-checked — an out-of-range value is a
+        ``ValueError``, never the driver's ``OverflowError``.
         """
+        _check_i64("limit", limit)
+        _check_i64("offset", offset)
+        for name, v in (
+            ("since_ns", since_ns),
+            ("until_ns", until_ns),
+            ("min_duration_ns", min_duration_ns),
+            ("max_duration_ns", max_duration_ns),
+        ):
+            if v is not None:
+                _check_i64(name, v)
+        if min_total_tokens is not None:
+            if min_total_tokens < 0:
+                raise ValueError("min_total_tokens: non-negative required")
+            _check_i64("min_total_tokens", min_total_tokens)
         clauses: list[str] = []
         params: list[Any] = []
         if project_id is not None:
@@ -906,60 +935,70 @@ class SQLiteTraceStore:
             pat = f"%{_like_escape(q)}%"
             params.extend([pat, pat])
         if tool:
+            # Field-scoped: the substring must live inside the
+            # `tool.name` VALUE — a JSON-fragment LIKE would let pat
+            # match text in any later key of the same blob.
             clauses.append(
-                "EXISTS (SELECT 1 FROM spans s "
+                "EXISTS (SELECT 1 FROM spans s, "
+                "json_each(s.attributes_json) j "
                 "WHERE s.project_id = traces.project_id "
                 "AND s.trace_id = traces.trace_id "
-                "AND s.attributes_json LIKE ? ESCAPE '\\')"
+                "AND j.key = 'tool.name' "
+                "AND j.value LIKE ? ESCAPE '\\')"
             )
-            params.append(f'%"tool.name": "%{_like_escape(tool)}%"%')
+            params.append(f"%{_like_escape(tool)}%")
         if model:
             pat = _like_escape(model)
             clauses.append(
-                "EXISTS (SELECT 1 FROM spans s "
+                "EXISTS (SELECT 1 FROM spans s, "
+                "json_each(s.attributes_json) j "
                 "WHERE s.project_id = traces.project_id "
                 "AND s.trace_id = traces.trace_id "
-                "AND (s.attributes_json LIKE ? ESCAPE '\\' "
-                "OR s.attributes_json LIKE ? ESCAPE '\\'))"
+                "AND j.key IN ('gen_ai.request.model', "
+                "'gen_ai.response.model') "
+                "AND j.value LIKE ? ESCAPE '\\')"
             )
-            params.extend([
-                f'%"gen_ai.request.model": "%{pat}%"%',
-                f'%"gen_ai.response.model": "%{pat}%"%',
-            ])
+            params.append(f"%{pat}%")
         if agent:
             pat = _like_escape(agent)
+            clauses.append(
+                "(EXISTS (SELECT 1 FROM spans s, "
+                "json_each(s.attributes_json) j "
+                "WHERE s.project_id = traces.project_id "
+                "AND s.trace_id = traces.trace_id "
+                "AND j.key = 'gen_ai.agent.name' "
+                "AND j.value LIKE ? ESCAPE '\\') "
+                "OR json_extract(traces.source_json, '$.system') "
+                "LIKE ? ESCAPE '\\' "
+                "OR json_extract(traces.resource_attributes_json, "
+                "'$.\"service.name\"') LIKE ? ESCAPE '\\')"
+            )
+            params.extend([f"%{pat}%", f"%{pat}%", f"%{pat}%"])
+        if host:
+            pat = _like_escape(host)
+            clauses.append(
+                "(json_extract(traces.source_json, '$.host') "
+                "LIKE ? ESCAPE '\\' "
+                "OR json_extract(traces.resource_attributes_json, "
+                "'$.\"host.name\"') LIKE ? ESCAPE '\\')"
+            )
+            params.extend([f"%{pat}%", f"%{pat}%"])
+        if min_total_tokens is not None:
+            # >= bound AND at least one span must actually observe
+            # usage — traces with no token evidence never match, even
+            # at bound 0.
             clauses.append(
                 "(EXISTS (SELECT 1 FROM spans s "
                 "WHERE s.project_id = traces.project_id "
                 "AND s.trace_id = traces.trace_id "
-                "AND s.attributes_json LIKE ? ESCAPE '\\') "
-                "OR source_json LIKE ? ESCAPE '\\' "
-                "OR resource_attributes_json LIKE ? ESCAPE '\\')"
-            )
-            params.extend([
-                f'%"gen_ai.agent.name": "%{pat}%"%',
-                # source_json serializes compact (model_dump_json).
-                f'%"system":"%{pat}%"%',
-                f'%"service.name": "%{pat}%"%',
-            ])
-        if host:
-            pat = _like_escape(host)
-            clauses.append(
-                "(source_json LIKE ? ESCAPE '\\' "
-                "OR resource_attributes_json LIKE ? ESCAPE '\\')"
-            )
-            params.extend([
-                f'%"host":"%{pat}%"%',
-                f'%"host.name": "%{pat}%"%',
-            ])
-        if min_total_tokens is not None:
-            clauses.append(
-                "(SELECT COALESCE(SUM(json_extract(s.attributes_json, "
+                "AND json_extract(s.attributes_json, "
+                "'$.\"gen_ai.usage.total_tokens\"') IS NOT NULL) "
+                "AND (SELECT COALESCE(SUM(json_extract(s.attributes_json, "
                 "'$.\"gen_ai.usage.total_tokens\"')), 0) FROM spans s "
                 "WHERE s.project_id = traces.project_id "
-                "AND s.trace_id = traces.trace_id) >= ?"
+                "AND s.trace_id = traces.trace_id) >= ?)"
             )
-            params.append(max(0, min_total_tokens))
+            params.append(min_total_tokens)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._lock:
             rows = self._conn.execute(
@@ -1001,6 +1040,8 @@ class SQLiteTraceStore:
         on ``session_id`` ASC. ``project_id=None`` is the same
         all-projects wildcard as ``list_traces``.
         """
+        _check_i64("limit", limit)
+        _check_i64("offset", offset)
         clauses = ["session_id IS NOT NULL"]
         params: list[Any] = []
         if project_id is not None:
@@ -1047,6 +1088,8 @@ class SQLiteTraceStore:
         reconcile with the span table. ``project_id=None`` is the
         all-projects wildcard. Deterministic order: busiest first,
         ties on name ASC."""
+        _check_i64("limit", limit)
+        _check_i64("offset", offset)
         clauses = ["kind = 'tool'"]
         params: list[Any] = []
         if project_id is not None:
@@ -1423,6 +1466,8 @@ class SQLiteTraceStore:
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        _check_i64("limit", limit)
+        _check_i64("offset", offset)
         with self._lock:
             if project_id is not None:
                 rows = self._conn.execute(
@@ -1516,6 +1561,8 @@ class SQLiteTraceStore:
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        _check_i64("limit", limit)
+        _check_i64("offset", offset)
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM experiment_results WHERE project_id=? "
@@ -1647,6 +1694,8 @@ class SQLiteTraceStore:
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        _check_i64("limit", limit)
+        _check_i64("offset", offset)
         clauses, params = [], []
         if action:
             clauses.append("action = ?")

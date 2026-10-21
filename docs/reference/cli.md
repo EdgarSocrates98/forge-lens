@@ -30,9 +30,11 @@ Lista traces mais recentes com status, span_count e error_count.
 `--tool`/`--q`/`--model`/`--agent`/`--host` são substring (`--model` casa
 `gen_ai.request|response.model`; `--agent` casa `gen_ai.agent.name` ou a
 identidade do produtor; `--host` casa `source.host`/`host.name`);
-`--min-tokens` exige soma de `gen_ai.usage.total_tokens` ≥ N;
-`--since`/`--until` limitam `started_at`; filtros de duração excluem
-traces sem `ended_at`.
+`--min-tokens` exige soma de `gen_ai.usage.total_tokens` ≥ N (inteiro
+`0..2^63−1`; traces sem observação de uso nunca casam, inclusive em
+`N=0`); `--since`/`--until` limitam `started_at`; filtros de duração
+excluem traces sem `ended_at`. `--limit`/`--min-tokens`/`--*-duration-ms`
+fora do int64 ou negativos → exit 2, nunca um bind no driver.
 
 ## `forge-lens traces show <trace_id> [--db] [--project] [--json]`
 

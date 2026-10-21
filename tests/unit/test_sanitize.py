@@ -378,3 +378,53 @@ def test_non_str_attribute_keys_are_normalized_counted() -> None:
     )
     assert out == {"1": "a", "('t', 1)": "b", "nested": {"9": "deep"}}
     assert report.normalized_keys == 3
+
+
+def test_redact_export_depth_cap_and_identity_values() -> None:
+    """Pathological nesting degrades to a marker (never RecursionError),
+    and identity/lookup values skip e-mail masking — masking a join key
+    would silently break correlation in a shared bundle."""
+    from forge_lens.sanitize.redact import redact_export
+
+    # depth cap: 12-deep nesting hits the same depth-8 wall as
+    # _sanitize_value, counted as dropped — not a crash
+    deep: dict = {"leaf": "x"}
+    for _ in range(12):
+        deep = {"n": deep}
+    rep = SanitizeReport()
+    out = redact_export({"bundle": deep}, rep)
+    assert "[DROPPED:depth-limit]" in repr(out)
+    assert rep.dropped_content > 0
+
+    # identity values: credential scrub still applies, e-mail masking
+    # does not — a join key masked to [MASKED:email] is unfindable
+    rep = SanitizeReport()
+    out = redact_export(
+        {
+            "trace_id": "a" * 32,
+            "session_id": "user-42@tenant.example.com",
+            "project_id": "proj",
+            "note": "ping john.doe@example.com",
+            "trace_ids": ["id@one.example.com", "id@two.example.com"],
+            "actor": "deployer@ci.example.com",
+            "api_key": "sk-ant-oat01-SECRET-VALUE-9f8e7d6c5b4a",
+        },
+        rep,
+    )
+    assert out["session_id"] == "user-42@tenant.example.com"
+    assert out["actor"] == "deployer@ci.example.com"
+    assert out["trace_ids"] == ["id@one.example.com", "id@two.example.com"]
+    assert out["trace_id"] == "a" * 32
+    # non-identity strings still mask; sensitive keys still redact
+    assert out["note"] == "ping [MASKED:email]"
+    assert out["api_key"] == "[REDACTED:key]"
+    assert rep.emails_masked == 1
+    assert rep.redacted_keys == 1
+
+    # an identity KEY holding a credential still loses it — the
+    # exemption covers e-mail masking only, not the value patterns
+    out = redact_export(
+        {"request_id": "req sk-ant-oat01-SECRET-VALUE-9f8e7d6c5b4a"}
+    )
+    assert "sk-ant" not in out["request_id"]
+    assert "[REDACTED:anthropic-key]" in out["request_id"]

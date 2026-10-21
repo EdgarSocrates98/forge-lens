@@ -214,6 +214,10 @@ def serve(db_path: str) -> int:
                     raise TypeError(f"{name_} must be a number")
             lim = default_limit if lim_raw is None else int(lim_raw)
             off = 0 if off_raw is None else int(off_raw)
+            if off > 2**63 - 1:
+                # out of sqlite int64 — same 422-class input error the
+                # API rejects; authored TypeError → -32602 on the wire
+                raise TypeError("offset out of range")
             return min(500, max(0, lim)), max(0, off)
 
         if name == "lens.sessions":
@@ -245,7 +249,9 @@ def serve(db_path: str) -> int:
         rid = req.get("id")
         if method in ("notifications/initialized",) or rid is None:
             continue  # notifications need no reply
-        if method != "initialize" and not initialized:
+        # MCP lifecycle: pings are allowed during the handshake —
+        # everything else waits for initialize.
+        if not initialized and method not in ("initialize", "ping"):
             out = {"jsonrpc": "2.0", "id": rid,
                    "error": {"code": -32602,
                              "message": "expected 'initialize' first"}}
@@ -268,26 +274,42 @@ def serve(db_path: str) -> int:
                     "code": -32602, "message": "params must be an object"}}
                 print(json.dumps(out), flush=True)
                 continue
+            args = p.get("arguments") or {}
+            if not isinstance(args, dict):
+                out = {"jsonrpc": "2.0", "id": rid, "error": {
+                    "code": -32602,
+                    "message": "arguments must be an object"}}
+                print(json.dumps(out), flush=True)
+                continue
             try:
-                args = p.get("arguments") or {}
-                if not isinstance(args, dict):
-                    raise TypeError("arguments must be an object")
                 payload = _call(str(p.get("name")), args)
                 content: list[dict[str, str]] = [{
                     "type": "text", "text": json.dumps(payload)}]
                 # Tool-level failure is a successful call carrying
-                # isError content — distinct from a protocol fault.
+                # isError content — contract: any payload with a
+                # top-level "error" key is flagged isError here.
                 result = {"content": content}
                 if isinstance(payload, dict) and "error" in payload:
                     result["isError"] = True
+            except TypeError:
+                # authored arg-validation raises (bad/mistyped fields)
+                # are invalid-params, not internal faults; an impl bug
+                # raising TypeError lands here too — the message stays
+                # static either way since arg detail can embed payloads
+                out = {"jsonrpc": "2.0", "id": rid,
+                       "error": {"code": -32602,
+                                 "message": "invalid params"}}
+                print(json.dumps(out), flush=True)
+                continue
             except Exception as exc:  # observer loop: a bad call never kills it
                 # one malformed call must not kill the stdio loop; the
-                # message is bounded so exception text stays opaque
+                # wire message is opaque — exception text can embed
+                # payload fragments or paths, so only the type name
+                # crosses the boundary.
                 out = {"jsonrpc": "2.0", "id": rid,
                        "error": {"code": -32603,
-                                 "message": "tool error: "
-                                    f"{type(exc).__name__}: "
-                                    f"{str(exc)[:180]}"}}
+                                 "message": "internal tool error: "
+                                    f"{type(exc).__name__}"}}
                 print(json.dumps(out), flush=True)
                 continue
         else:

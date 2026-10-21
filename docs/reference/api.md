@@ -46,7 +46,9 @@ desligado — não se aplica a consultas).
 
 Convenções de resposta: as listas paginadas `traces`/`sessions`/`tools`
 retornam envelope `{items, limit, offset}` (`limit` clampa a 1..500,
-`offset` a ≥0 — nunca 422); `datasets`, dataset versions, `admin/keys`
+`offset` clampa a ≥0 — e todo parâmetro inteiro é limitado a int64:
+`offset`/`min_total_tokens` > `2^63−1` → `422`, nunca um bind no
+driver); `datasets`, dataset versions, `admin/keys`
 e `admin/audit` retornam **array puro**; `graph/.../bottlenecks`
 retorna `{items}` sem envelope; o restante retorna objeto.
 
@@ -105,9 +107,11 @@ Todos os filtros combinam com `AND`; parâmetros malformados → `422`:
   recurso `service.name`).
 - `host`: substring literal sobre `source.host` ou o atributo de recurso
   `host.name`.
-- `min_total_tokens`: inteiro ≥ 0 — soma de `gen_ai.usage.total_tokens`
-  sobre todos os spans da trace ≥ limite. Traces sem uso observado
-  **nunca** casam. Não existe filtro `cost` — custo é derivado do
+- `min_total_tokens`: inteiro em `0..2^63−1` — soma de
+  `gen_ai.usage.total_tokens` sobre todos os spans da trace ≥ limite.
+  Traces sem **nenhum** span com observação de uso nunca casam —
+  inclusive no limite `0` (ausência de evidência ≠ zero observado).
+  Não existe filtro `cost` — custo é derivado do
   pricing registry na leitura, nunca um predicado persistido (§02.6:
   filtrar SQL por custo exigiria materializar um valor derivado).
 
@@ -315,8 +319,11 @@ Um call, todo o evidence — feito para handoff/export.
 O bundle passa por um **segundo boundary de sanitização no export**
 (`redact_export`): dados já foram sanitizados na ingestão, mas findings
 derivados podem ecoar corpos capturados verbatim sob `capture=full`.
-`export_sanitize: {redacted_keys, redacted_values, emails_masked}` na
-resposta declara exatamente o que o scrub tocou.
+Nesting é depth-capped (8) com marcador contado; valores sob chaves
+identidade (`*_id`, `actor`) pulam máscara de e-mail — mascarar join
+key quebraria correlação — mas credential patterns ainda se aplicam.
+`export_sanitize: {redacted_keys, redacted_values, emails_masked,
+dropped_content}` na resposta declara exatamente o que o scrub tocou.
 
 ### `GET /v1/traces/{trace_id}/security?project_id`
 Observações de segurança MCP/tool-call (Cycle 08 — modo **observer**,

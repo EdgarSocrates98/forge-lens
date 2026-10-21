@@ -310,18 +310,33 @@ def sanitize_trace(
 
 
 def redact_export(
-    obj: Any, report: SanitizeReport | None = None
+    obj: Any,
+    report: SanitizeReport | None = None,
+    *,
+    depth: int = 0,
+    mask_emails: bool = True,
 ) -> Any:
     """Export-time scrub for derived payloads (e.g. incident bundles).
 
     Stored data was sanitized at ingest, but derived findings can echo
     captured bodies verbatim when ``capture=full``. Re-apply the value
     scrub at the export boundary so a leak removed at ingest cannot
-    re-enter through a report. Identity/lookup keys are untouched.
+    re-enter through a report.
+
+    Identity/lookup values (``*_id`` keys — trace/span/session/project/
+    experiment ids, ``actor``) keep the credential-pattern scrub but
+    skip e-mail masking: masking a join key would silently break
+    correlation, the same rule ``sanitize_trace`` applies to
+    ``session_id``/``project_id``. Nesting is depth-capped like
+    ``_sanitize_value`` — a pathological or cyclic payload degrades to
+    a marker, never a ``RecursionError``.
     """
     rep = report if report is not None else SanitizeReport()
+    if depth > 8:
+        rep.dropped_content += 1  # never a silent drop
+        return "[DROPPED:depth-limit]"
     if isinstance(obj, str):
-        return _scrub_text(obj, rep, mask_emails=True)
+        return _scrub_text(obj, rep, mask_emails=mask_emails)
     if isinstance(obj, dict):
         out: dict[str, Any] = {}
         for key, value in obj.items():
@@ -332,8 +347,29 @@ def redact_export(
                 rep.redacted_keys += 1
                 out[ks] = "[REDACTED:key]"
                 continue
-            out[ks] = redact_export(value, rep)
+            out[ks] = redact_export(
+                value,
+                rep,
+                depth=depth + 1,
+                mask_emails=mask_emails and not _is_identity_key(ks),
+            )
         return out
     if isinstance(obj, (list, tuple)):
-        return [redact_export(v, rep) for v in obj]
+        return [
+            redact_export(
+                v, rep, depth=depth + 1, mask_emails=mask_emails
+            )
+            for v in obj[:MAX_LIST_ITEMS]
+        ]
     return obj
+
+
+_IDENTITY_KEY_RE = re.compile(r"(?i)(^|[-_.])([a-z0-9]+[-_.])*ids?$|(^|[-_.])actor$")
+
+
+def _is_identity_key(key: str) -> bool:
+    """Lookup/join-key heuristic — ``trace_id``, ``session_id``,
+    ``project_id``, ``experiment_id``, ``parent_span_id``, ``actor``…
+    Credential patterns still apply to the *value*; only e-mail masking
+    is skipped (masking a join key would break correlation)."""
+    return bool(_IDENTITY_KEY_RE.search(key))

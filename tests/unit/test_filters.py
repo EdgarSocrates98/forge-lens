@@ -766,3 +766,128 @@ def test_dimension_filters_store_api_cli(
         "traces", "list", "--db", str(tmp_path / "dim.db"),
         "--min-tokens", "9999"])
     assert "9" * 32 not in r.output
+
+
+def _decoy_trace() -> Trace:
+    """All 'zzz-*' text lives in keys the filters do NOT read — the
+    review-verified false-positive shape for serialized-blob LIKE."""
+    from forge_lens.contracts.v1.trace import TraceSource
+
+    span = Span(
+        trace_id="8" * 32,
+        span_id="3" * 16,
+        name="op",
+        kind=SpanKind.TOOL,
+        start_time=T0,
+        end_time=T0 + timedelta(milliseconds=10),
+        attributes={
+            "gen_ai.agent.name": "real-agent",
+            "gen_ai.request.model": "real-model",
+            "tool.name": "real-tool",
+            "unrelated.note": "zzz-agent zzz-model zzz-tool zzz-host",
+        },
+        status=Status(code=StatusCode.OK),
+    )
+    return Trace(
+        trace_id="8" * 32,
+        project_id="default",
+        started_at=T0,
+        ended_at=T0 + timedelta(milliseconds=10),
+        status=Status(code=StatusCode.OK),
+        source=TraceSource(system="real-sdk", host="real-host"),
+        resource_attributes={
+            "service.name": "svc",
+            "host.name": "real-host",
+            "custom.label": "zzz-agent",
+        },
+        spans=[span],
+    )
+
+
+def test_dimension_filters_are_field_scoped(
+    store: SQLiteTraceStore,
+) -> None:
+    """Substring filters read the VALUE of specific JSON keys only —
+    decoy text in unrelated keys must not satisfy them (a LIKE over
+    the serialized blob could match anywhere in it)."""
+    store.upsert_trace(_decoy_trace())
+
+    # decoys: 'zzz-*' exists in the JSON blobs but under the wrong keys
+    assert store.list_traces(project_id="default", agent="zzz-agent") == []
+    assert store.list_traces(project_id="default", model="zzz-model") == []
+    assert store.list_traces(project_id="default", tool="zzz-tool") == []
+    assert store.list_traces(project_id="default", host="zzz-host") == []
+
+    # and the real keys still match their own values
+    assert _ids(store.list_traces(project_id="default", agent="real-agent")) == {"8" * 32}
+    assert _ids(store.list_traces(project_id="default", agent="svc")) == {"8" * 32}
+    assert _ids(store.list_traces(project_id="default", agent="real-sdk")) == {"8" * 32}
+    assert _ids(store.list_traces(project_id="default", model="real-model")) == {"8" * 32}
+    assert _ids(store.list_traces(project_id="default", tool="real-tool")) == {"8" * 32}
+    assert _ids(store.list_traces(project_id="default", host="real-host")) == {"8" * 32}
+
+
+def test_min_total_tokens_requires_usage_evidence(
+    store: SQLiteTraceStore,
+) -> None:
+    """Bound 0 still requires observed usage — a usage-less trace has
+    NO evidence (distinct from 'observed zero'); the seeded fixtures
+    carry none, so bound 0 matches nothing."""
+    assert store.list_traces(min_total_tokens=0) == []
+
+    store.upsert_trace(_dimension_trace())  # '9'*32: 1500 observed tokens
+    assert _ids(store.list_traces(min_total_tokens=0)) == {"9" * 32}
+
+    # an explicit zero observation IS evidence — it matches bound 0
+    zero = _trace(
+        "7" * 32, attributes={"gen_ai.usage.total_tokens": 0}
+    )
+    store.upsert_trace(zero)
+    ids0 = _ids(store.list_traces(min_total_tokens=0))
+    assert {"9" * 32, "7" * 32} <= ids0
+    # but observed-zero stays below any positive bound
+    ids1 = _ids(store.list_traces(min_total_tokens=1))
+    assert "7" * 32 not in ids1
+    assert "9" * 32 in ids1
+
+
+def test_int64_bounds_are_typed_failures_not_driver_errors(
+    store: SQLiteTraceStore, tmp_path: Path
+) -> None:
+    """> int64 must never reach a sqlite bind (OverflowError → 500):
+    the store raises ValueError, the API answers 422."""
+    I64 = 2**63 - 1
+
+    # store boundary — every paginated list method is typed
+    for call in (
+        lambda: store.list_traces(offset=I64 + 1),
+        lambda: store.list_traces(limit=I64 + 1),
+        lambda: store.list_traces(min_total_tokens=I64 + 1),
+        lambda: store.list_sessions(offset=I64 + 1),
+        lambda: store.list_tools("default", offset=I64 + 1),
+        lambda: store.list_experiments("default", offset=I64 + 1),
+        lambda: store.list_experiment_results("x", offset=I64 + 1),
+        lambda: store.list_audit(offset=I64 + 1),
+    ):
+        with pytest.raises(ValueError, match="int64"):
+            call()
+    with pytest.raises(ValueError, match="non-negative"):
+        store.list_traces(min_total_tokens=-1)
+
+    # API boundary — the same values are 422s over the wire
+    cfg = LensConfig(data_dir=tmp_path, db_path=tmp_path / "filters.db")
+    with TestClient(create_app(store=store, config=cfg)) as c:
+        for params in (
+            {"min_total_tokens": str(I64 + 1)},
+            {"offset": str(I64 + 1)},
+            # finite float, but int(1e300*1e6) overflows the bind
+            {"min_duration_ms": "1e300"},
+        ):
+            r = c.get("/v1/traces", params=params)
+            assert r.status_code == 422, f"{params} → {r.status_code}"
+        for route in ("/v1/sessions", "/v1/tools", "/v1/experiments"):
+            r = c.get(route, params={"offset": str(I64 + 1)})
+            assert r.status_code == 422, f"{route} → {r.status_code}"
+        # the boundary value itself still works (valid, empty page)
+        r = c.get("/v1/traces", params={"offset": str(I64)})
+        assert r.status_code == 200, r.text
