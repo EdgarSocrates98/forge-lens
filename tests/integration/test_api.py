@@ -226,6 +226,75 @@ def test_default_envelope_preserves_explicit_trace_project(
     assert stored["project_id"] == "proj-claimed"
 
 
+def test_otlp_non_object_body_returns_422(client: TestClient) -> None:
+    """Valid JSON but wrong top-level type → 4xx, never a 500."""
+    for bad in ("[1,2,3]", '"hello"', "42", "null"):
+        r = client.post(
+            "/v1/otlp/traces", content=bad,
+            headers={"Content-Type": "application/json"},
+        )
+        assert r.status_code == 422, (bad, r.status_code, r.text)
+
+
+def test_native_mixed_naive_aware_times_not_500(
+    client: TestClient, synthetic_trace: Trace
+) -> None:
+    """A schema-valid trace mixing naive and aware timestamps must not
+    crash flag_integrity — naive is read as UTC at the boundary."""
+    mixed = synthetic_trace.model_copy(deep=True)
+    # span 1 keeps aware times; span 2 gets a naive end_time that
+    # compares against its aware start_time → TypeError without
+    # boundary normalization
+    end = mixed.spans[1].end_time
+    assert end is not None
+    mixed.spans[1].end_time = end.replace(tzinfo=None)
+    envelope = TraceIngest(traces=[mixed]).model_dump(mode="json")
+    r = client.post("/v1/traces", json=envelope)
+    assert r.status_code == 200, r.text
+
+    stored = client.get(f"/v1/traces/{mixed.trace_id}").json()
+    # naive end was coerced to UTC-aware, not dropped
+    assert stored["spans"][1]["end_time"].endswith("Z") or "+" in stored["spans"][1]["end_time"]
+
+
+def test_native_naive_sent_at_not_500(
+    client: TestClient, synthetic_trace: Trace
+) -> None:
+    """Envelope sent_at naive vs aware trace.started_at — same hazard,
+    same fix path."""
+    envelope = TraceIngest(traces=[synthetic_trace]).model_dump(mode="json")
+    envelope["sent_at"] = "2026-01-01T11:59:00"  # naive, predates start
+    r = client.post("/v1/traces", json=envelope)
+    assert r.status_code == 200, r.text
+    assert any("sent_at" in w for w in r.json()["warnings"])
+
+
+def test_max_traces_per_request_limit(
+    tmp_path, synthetic_trace: Trace
+) -> None:
+    """An under-byte-limit payload carrying N empty traces is bounded."""
+    store = SQLiteTraceStore(tmp_path / "many.db")
+    cfg = LensConfig(
+        data_dir=tmp_path,
+        db_path=tmp_path / "many.db",
+        max_traces_per_request=5,
+    )
+    app = create_app(store=store, config=cfg)
+    with TestClient(app) as c:
+        empty = synthetic_trace.model_copy(deep=True)
+        empty.spans = []
+        traces = [
+            empty.model_copy(update={"trace_id": f"{i:032x}"}, deep=True)
+            for i in range(10)
+        ]
+        r = c.post(
+            "/v1/traces",
+            json=TraceIngest(traces=traces).model_dump(mode="json"),
+        )
+        assert r.status_code == 413
+    store.close()
+
+
 def test_import_has_no_db_side_effect(tmp_path, monkeypatch) -> None:
     """importing api.app must not create .forge-lens/ or open a DB."""
     import importlib

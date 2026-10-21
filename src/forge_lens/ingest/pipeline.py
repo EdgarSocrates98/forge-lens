@@ -24,6 +24,7 @@ from forge_lens.core.metrics import (
     M_TRACES_INGESTED,
     METRICS,
 )
+from forge_lens.core.time import ensure_aware
 from forge_lens.sanitize.redact import SanitizeReport, sanitize_trace
 from forge_lens.storage.base import TraceStore
 
@@ -101,6 +102,24 @@ def flag_integrity(trace: Trace) -> list[str]:
     return warnings
 
 
+def _normalize_times(trace: Trace) -> None:
+    """Coerce every naive datetime in the trace to UTC-aware.
+
+    Mixed naive/aware input would crash comparisons in ``flag_integrity``
+    and skew event-dedupe keys downstream. Naive-as-UTC matches
+    ``to_unix_nano`` — same convention, applied once at the boundary.
+    """
+    trace.started_at = ensure_aware(trace.started_at)
+    if trace.ended_at is not None:
+        trace.ended_at = ensure_aware(trace.ended_at)
+    for span in trace.spans:
+        span.start_time = ensure_aware(span.start_time)
+        if span.end_time is not None:
+            span.end_time = ensure_aware(span.end_time)
+        for ev in span.events:
+            ev.time = ensure_aware(ev.time)
+
+
 class IngestPipeline:
     """End-to-end ingestion for already-normalized Traces."""
 
@@ -131,6 +150,13 @@ class IngestPipeline:
                 self.config.max_payload_bytes,
             )
 
+        if len(traces) > self.config.max_traces_per_request:
+            METRICS.inc(M_INGEST_REJECTED)
+            raise PayloadTooLargeError(
+                f"{len(traces)} traces exceeds limit {self.config.max_traces_per_request}",
+                self.config.max_traces_per_request,
+            )
+
         total_spans = sum(len(t.spans) for t in traces)
         if total_spans > self.config.max_spans_per_request:
             METRICS.inc(M_INGEST_REJECTED)
@@ -154,6 +180,7 @@ class IngestPipeline:
         result = IngestResult()
         with METRICS.timer(M_INGEST_LATENCY):
             for trace in traces:
+                _normalize_times(trace)
                 for span in trace.spans:
                     if len(span.events) > self.config.max_events_per_span:
                         span.events = span.events[: self.config.max_events_per_span]

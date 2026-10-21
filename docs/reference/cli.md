@@ -13,6 +13,8 @@ Cria `.forge-lens/` com `config.toml` e `artifacts/` no diretório.
 
 Sobe a API (FastAPI+uvicorn). Requer o extra `server`
 (`uv sync --extra server`). Endpoints em `docs/reference/api.md`.
+Bind fora de loopback sem `api_key` configurada emite um aviso no
+stderr — leituras de `/v1/traces*` são abertas por design local.
 
 ## `forge-lens ingest <file> [--db] [--project] [--format native|otlp|auto]`
 

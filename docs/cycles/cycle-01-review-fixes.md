@@ -135,3 +135,67 @@ todos verdes; `ruff` limpo; `mypy --strict` 0 erros; schemas sem drift;
   perfil local-first; exporters devem ter timeout próprio).
 - `atexit`/`beforeExit` são best-effort — não há garantia de flush em
   `SIGKILL`/crash; `shutdown()` explícito é o caminho garantido.
+
+## Addendum 3 — Terceira rodada de review
+
+Fixes aplicados sobre os achados da terceira revisão (o item "roadmap
+incompleto" é decisão de escopo: o prompt manda começar pelo Cycle 00 e
+veda PR gigantesco único — os Cycles 02–12 permanecem `DOCUMENTED_ONLY`
+e não foram afetados por esta rodada).
+
+### Críticos
+
+- **`POST /v1/otlp/traces` com body JSON não-objeto → 500**: arrays,
+  strings e números válidos-JSON caíam em `payload.get` →
+  `AttributeError`. Agora `isinstance(payload, dict)` no endpoint → 422;
+  `normalize_otlp_request` também guarda (assinatura `payload: Any`) —
+  `test_otlp_non_object_body_returns_422` + `test_otlp_non_dict_payload_rejected`.
+- **500 em datetimes mistas naive/aware**: span `end_time` naive vs
+  `start_time` aware quebrava `flag_integrity`; `sent_at` naive idem em
+  `app.py`. Novo `ensure_aware()` (`core/time.py`, naive-as-UTC —
+  mesma convenção de `to_unix_nano`) aplicado a todos os tempos da
+  trace no pipeline (`_normalize_times`) e ao `sent_at` do envelope;
+  `_finalize` do SDK Python recebeu a mesma defesa —
+  `test_native_mixed_naive_aware_times_not_500`,
+  `test_native_naive_sent_at_not_500`, `test_naive_times_normalized_to_utc`.
+
+### Warnings
+
+- **Colunas de trace estagnadas no upsert**: `status_message` agora faz
+  `COALESCE(excluded, stored)` (a mais recente não-nula vence);
+  `resource_attributes_json` une por chave (`json_patch`); `source_json`
+  cede a `system` identificado (nunca regride a `"unknown"`);
+  `provenance` mantém a mais forte observada (nunca promove) —
+  `test_upsert_merges_trace_level_columns`, doc `storage.md` atualizada.
+- **Sem bound de traces por request**: `max_traces_per_request`
+  (default 10 000; `LensConfig` + toml + `FORGE_LENS_MAX_TRACES_PER_REQUEST`)
+  → 413 antes de qualquer escrita —
+  `test_max_traces_per_request_limit` (API) + `_bounded` (pipeline).
+- **Evidência de duplicata inconsistente**: o caminho merge→None não
+  registrava `DUPLICATE` nem flags incoming-only. Novo `_union_flags`:
+  união de flags + `DUPLICATE` em *ambos* os caminhos de duplicata —
+  `test_duplicate_merge_identical_content_still_records_flags`.
+- **Eventos OTLP sem `timeUnixNano` descartados em silêncio**: a contagem
+  viaja no span (`attributes["_otlp.events_dropped"]`) e em quarantine
+  entra na lista `errors` — `test_otlp_event_without_time_is_evidence_not_silent`
+  + `test_otlp_event_drop_recorded_in_strict_mode_too`.
+- **Foot-gun de bind exposto**: `serve` avisa no stderr quando `--host`
+  não é loopback e `api_key` está vazia (leituras `/v1/traces*` são
+  abertas por design local) — `test_serve_warns_on_exposed_bind`,
+  doc `cli.md`/`threat-model.md`.
+
+### Sugestões
+
+- **`finalize()` TS com sort lexicográfico de ISO**: strings com offset
+  (`+HH:MM`) ordenavam errado; `cmpIso` compara via `Date.parse` com
+  fallback lexical — `finalize orders offset ISO timestamps by instant`.
+- **`examples/` ausente**: `examples/quickstart.py` — run completo
+  offline (SDK → pipeline → store → leitura), verificado executando.
+- **Contagem de testes desatualizada no final report**: anotada
+  (61 → 123 py / 17 ts após as rodadas de review).
+
+## Estado pós-fix (rodada 3)
+
+123 testes py + 17 ts + smoke de pacote — verdes; `ruff` limpo;
+`mypy --strict` 0 erros; schemas sem drift; `uv build` ok;
+`pip-audit` 0 vulns; `examples/quickstart.py` executado com sucesso.

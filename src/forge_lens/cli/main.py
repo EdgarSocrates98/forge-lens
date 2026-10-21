@@ -37,6 +37,20 @@ def _store(cfg: LensConfig) -> SQLiteTraceStore:
     return SQLiteTraceStore(cfg.resolved_db_path)
 
 
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+
+def _warn_if_exposed(host: str, cfg: LensConfig) -> None:
+    """Binding non-loopback without an API key exposes every stored trace."""
+    if host.lower() not in _LOOPBACK and not cfg.api_key:
+        typer.echo(
+            f"warning: binding {host} with no api_key — all trace data is "
+            "readable and ingest is open to anyone on the network. "
+            "Set FORGE_LENS_API_KEY or api_key in config.toml.",
+            err=True,
+        )
+
+
 def _version(value: bool) -> None:
     if value:
         typer.echo(__version__)
@@ -83,6 +97,7 @@ def serve(
 
     cfg = _config(db)
     application = create_app(config=cfg)
+    _warn_if_exposed(host, cfg)
     typer.echo(f"Forge Lens v{__version__} listening on http://{host}:{port}")
     typer.echo("  OTLP endpoint:   POST /v1/otlp/traces")
     typer.echo("  Native endpoint: POST /v1/traces")

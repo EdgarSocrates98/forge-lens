@@ -29,6 +29,7 @@ from forge_lens.core.metrics import (
     M_QUERY_LATENCY,
     METRICS,
 )
+from forge_lens.core.time import ensure_aware
 from forge_lens.ingest.pipeline import IngestPipeline
 from forge_lens.otlp.normalize import normalize_otlp_request
 from forge_lens.storage.base import TraceStore
@@ -122,8 +123,9 @@ def create_app(
         except (PayloadTooLargeError, RateLimitedError, ValidationError) as exc:
             raise _ingest_error(exc) from exc
         if body.sent_at is not None:
+            sent_at = ensure_aware(body.sent_at)
             for trace in body.traces:
-                if trace.started_at is not None and body.sent_at < trace.started_at:
+                if trace.started_at is not None and sent_at < trace.started_at:
                     result.warnings.append(
                         f"{trace.trace_id}: envelope sent_at predates trace start"
                         " — producer clock skew?"
@@ -154,6 +156,12 @@ def create_app(
         except Exception as exc:
             METRICS.inc(M_API_ERRORS)
             raise HTTPException(status_code=400, detail=f"invalid JSON: {exc}") from exc
+        if not isinstance(payload, dict):
+            METRICS.inc(M_API_ERRORS)
+            raise HTTPException(
+                status_code=422,
+                detail="OTLP body must be a JSON object (ExportTraceServiceRequest)",
+            )
         quarantine: list[str] = []
         try:
             traces = normalize_otlp_request(

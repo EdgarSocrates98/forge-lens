@@ -42,6 +42,9 @@ forge-lens traces list
 forge-lens traces show <trace-id>
 ```
 
+A runnable offline demo (SDK → pipeline → store → read-back, no server):
+`uv run python examples/quickstart.py`
+
 ## Principles
 
 - **Local-first** — SQLite WAL by default; works fully offline.

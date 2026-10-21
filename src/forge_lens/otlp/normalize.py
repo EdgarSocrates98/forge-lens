@@ -2,8 +2,10 @@
 
 The parser is deliberately tolerant: OTLP allows unix-nanos as strings
 or ints, attribute values in several shapes, and missing sections. What
-cannot be interpreted is preserved in ``attributes["_otlp.unparsed"]``
-rather than dropped.
+cannot be interpreted is never dropped silently — unrecoverable spans go
+to quarantine (``errors`` list or strict ``ValidationError``), and data
+that can't be stored (e.g. events without ``timeUnixNano``) leaves
+evidence on the span (``attributes["_otlp.events_dropped"]``).
 """
 
 from __future__ import annotations
@@ -92,7 +94,12 @@ def _parse_status(raw: Any) -> Status:
     return Status(code=mapping.get(code, StatusCode.UNSET), message=raw.get("message") or None)
 
 
-def _parse_span(raw: dict[str, Any], provenance: Provenance) -> Span:
+def _parse_span(
+    raw: dict[str, Any],
+    provenance: Provenance,
+    *,
+    errors: list[str] | None = None,
+) -> Span:
     trace_id = raw.get("traceId")
     span_id = raw.get("spanId")
     if not trace_id or not span_id:
@@ -105,15 +112,29 @@ def _parse_span(raw: dict[str, Any], provenance: Provenance) -> Span:
             mode="json", exclude_none=True
         )
 
-    events = [
-        SpanEvent(
-            name=str(ev.get("name", "")),
-            time=_parse_time(ev.get("timeUnixNano")),
-            attributes=_attrs(ev.get("attributes")),
-        )
-        for ev in raw.get("events", [])
-        if isinstance(ev, dict) and ev.get("timeUnixNano") is not None
-    ]
+    # An event without timeUnixNano cannot be stored (SpanEvent.time is
+    # required). The drop is never silent: the count travels with the
+    # span as evidence, and quarantine mode also records a warning.
+    events: list[SpanEvent] = []
+    dropped_events = 0
+    for ev in raw.get("events", []):
+        if isinstance(ev, dict) and ev.get("timeUnixNano") is not None:
+            events.append(
+                SpanEvent(
+                    name=str(ev.get("name", "")),
+                    time=_parse_time(ev.get("timeUnixNano")),
+                    attributes=_attrs(ev.get("attributes")),
+                )
+            )
+        else:
+            dropped_events += 1
+    if dropped_events:
+        attributes["_otlp.events_dropped"] = dropped_events
+        if errors is not None:
+            errors.append(
+                f"span {span_id!r}: dropped {dropped_events} event(s) "
+                "without timeUnixNano"
+            )
     links = [
         SpanLink(
             trace_id=lk.get("traceId", ""),
@@ -146,7 +167,7 @@ def _parse_span(raw: dict[str, Any], provenance: Provenance) -> Span:
 
 
 def normalize_otlp_request(
-    payload: dict[str, Any],
+    payload: Any,
     *,
     project_id: str = "default",
     provenance: Provenance = Provenance.OBSERVED,
@@ -161,6 +182,10 @@ def normalize_otlp_request(
     reason is appended to ``errors`` and parsing continues. When
     ``errors`` is ``None`` the first malformed span raises (strict mode).
     """
+    if not isinstance(payload, dict):
+        raise ValidationError(
+            f"OTLP payload must be a JSON object, got {type(payload).__name__}"
+        )
     resource_spans = payload.get("resourceSpans") or payload.get("resource_spans") or []
     if not isinstance(resource_spans, list):
         raise ValidationError("resourceSpans must be a list")
@@ -181,7 +206,7 @@ def normalize_otlp_request(
                 if not isinstance(raw_span, dict):
                     continue
                 try:
-                    span = _parse_span(raw_span, provenance)
+                    span = _parse_span(raw_span, provenance, errors=errors)
                 except (ValidationError, PydanticValidationError) as exc:
                     if errors is None:
                         raise

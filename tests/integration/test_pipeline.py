@@ -152,3 +152,40 @@ def test_late_end_time_update_counts_updated(
 
     r3 = p.ingest([completed])
     assert r3.duplicate_spans == 1  # identical re-delivery is a duplicate
+
+
+def test_max_traces_per_request_bounded(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """Trace-count bound is enforced separately from the span bound —
+    many empty traces can't flood the store."""
+    p = _pipeline(tmp_store, max_traces_per_request=3)
+    empty = synthetic_trace.model_copy(deep=True)
+    empty.spans = []
+    batch = [
+        empty.model_copy(update={"trace_id": f"{i:032x}"}, deep=True)
+        for i in range(4)
+    ]
+    with pytest.raises(PayloadTooLargeError):
+        p.ingest(batch)
+    stats = tmp_store.stats()
+    assert stats["traces"] == 0
+
+
+def test_naive_times_normalized_to_utc(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """Mixed naive/aware datetimes can't crash flag_integrity — the
+    pipeline coerces naive → UTC at the boundary (to_unix_nano parity)."""
+    mixed = synthetic_trace.model_copy(deep=True)
+    s = mixed.spans[0]
+    s.start_time = s.start_time.replace(tzinfo=None)
+    s.end_time = s.end_time.replace(tzinfo=None) if s.end_time else None
+    mixed.started_at = mixed.started_at.replace(tzinfo=None)
+    p = _pipeline(tmp_store)
+    r = p.ingest([mixed])
+    assert r.accepted_spans == 3
+    loaded = tmp_store.get_trace(mixed.trace_id)
+    assert loaded is not None
+    # naive-as-UTC: stored timestamps equal the aware originals
+    assert loaded.spans[0].start_time == synthetic_trace.spans[0].start_time

@@ -118,3 +118,20 @@ def test_ingest_invalid_payload_exits_1(tmp_path: Path) -> None:
     r = runner.invoke(app, ["ingest", str(f), "--db", str(tmp_path / "x.db")])
     assert r.exit_code == 1
     assert "ingest failed" in r.output
+
+
+def test_serve_warns_on_exposed_bind(capsys) -> None:
+    """--host 0.0.0.0 without api_key must warn before serving."""
+    from forge_lens.cli.main import _warn_if_exposed
+    from forge_lens.core.config import LensConfig
+
+    _warn_if_exposed("0.0.0.0", LensConfig())  # noqa: S104
+    assert "api_key" in capsys.readouterr().err
+
+    # loopback bind: no warning
+    _warn_if_exposed("127.0.0.1", LensConfig())
+    assert capsys.readouterr().err == ""
+
+    # non-loopback with a key configured: no warning
+    _warn_if_exposed("0.0.0.0", LensConfig(api_key="k"))  # noqa: S104
+    assert capsys.readouterr().err == ""

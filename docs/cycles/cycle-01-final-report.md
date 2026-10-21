@@ -40,6 +40,8 @@ Trace observado no smoke test: `47da2021625f82ef5414f7a72db60798`
 
 - **61 testes Python verdes**: unit (17), contract+golden (13), integration
   (11), e2e (3), CLI (6) + hashing/config (5) — `pytest -q` em 6.5s.
+  *(Contagem do commit original — os addendos de review
+  `docs/cycles/cycle-01-review-fixes.md` subiram para 123 py / 17 ts.)*
 - **7 testes TS verdes**: `npm test` (tsc + `node:test`).
 - **Cobertura total 90%** (term-missing no CI).
 - Golden fixtures: `tests/fixtures/{otlp-request,golden-normalized-trace,

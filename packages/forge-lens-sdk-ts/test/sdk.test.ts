@@ -12,7 +12,7 @@ import {
   newTraceId,
   parseTraceparent,
 } from "../src/index.js";
-import type { Trace, TraceIngest } from "../src/index.js";
+import type { Span, Trace, TraceIngest } from "../src/index.js";
 
 describe("ids", () => {
   it("generates W3C-shaped ids", () => {
@@ -245,6 +245,29 @@ describe("LensTracer", () => {
     assert.equal(dead.length, 1);
     assert.equal(dead[0].spans[0].name, "doomed");
     assert.equal(tracer.deadLetters.length, 1);
+  });
+
+  it("finalize orders offset ISO timestamps by instant, not lexically", async () => {
+    const exporter = new InMemoryExporter();
+    const tracer = new LensTracer({ serviceName: "t", exporter, autoFlush: false, shutdownHook: false });
+    let rootSpan: Span | undefined;
+    let childSpan: Span | undefined;
+    tracer.agent("root", (root) => {
+      rootSpan = root;
+      tracer.span("child", (c) => {
+        childSpan = c;
+      });
+    });
+    // earliest instant, but lexicographically the LATEST start string
+    rootSpan!.start_time = "2026-06-01T10:00:00+12:00"; // = 2026-05-31T22:00Z
+    childSpan!.start_time = "2026-06-01T01:00:00.000Z";
+    // latest instant, but lexicographically the SMALLER end string
+    rootSpan!.end_time = "2026-06-01T02:00:00.000Z";
+    childSpan!.end_time = "2026-06-01T12:00:00+12:00"; // = 2026-06-01T00:00Z
+    await tracer.flush();
+    const t = exporter.traces[0];
+    assert.equal(t.started_at, "2026-06-01T10:00:00+12:00");
+    assert.equal(t.ended_at, "2026-06-01T02:00:00.000Z");
   });
 });
 

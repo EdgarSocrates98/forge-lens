@@ -26,6 +26,7 @@ payload ──► limites de tamanho/spans ──► rate limiter ──►
 | Parâmetro | Default | Efeito ao exceder |
 |---|---|---|
 | `max_payload_bytes` | 8 MiB | 413 |
+| `max_traces_per_request` | 10 000 | 413 |
 | `max_spans_per_request` | 20 000 | 413 |
 | `max_events_per_span` | 128 | trunca + flag |
 | `max_attr_value_chars` | 4 096 | trunca + marcador |

@@ -42,3 +42,14 @@ def from_unix_nano(nanos: int) -> datetime:
 def parse_unix_nano(value: int | str) -> int:
     """OTLP sends unix nanos as a JSON string sometimes — normalize to int."""
     return int(value)
+
+
+def ensure_aware(dt: datetime) -> datetime:
+    """Coerce a naive datetime to UTC-aware (naive-as-UTC).
+
+    Same convention as :func:`to_unix_nano`: a timestamp with no offset
+    is read as UTC — never rejected, never re-interpreted as local time.
+    Call this before any cross-datetime comparison/min/max so mixed
+    naive/aware input can't raise ``TypeError``.
+    """
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)

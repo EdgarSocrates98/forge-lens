@@ -187,3 +187,42 @@ def test_otlp_all_zero_parent_span_id_is_absent() -> None:
     # a real parent id still passes through
     trace2 = normalize_otlp_request(_span_payload(parentSpanId="c" * 16))[0]
     assert trace2.spans[0].parent_span_id == "c" * 16
+
+
+def test_otlp_non_dict_payload_rejected() -> None:
+    """A JSON array/string/number body raises ValidationError — never
+    an AttributeError that would surface as HTTP 500."""
+    for bad in ([1, 2, 3], "hello", 42, None):
+        with pytest.raises(ValidationError):
+            normalize_otlp_request(bad)
+
+
+def test_otlp_event_without_time_is_evidence_not_silent() -> None:
+    """Events lacking timeUnixNano can't be stored (time is required) —
+    the drop is recorded on the span and in the quarantine list."""
+    payload = _span_payload(
+        events=[
+            {"name": "ok", "timeUnixNano": "1767264001000000000"},
+            {"name": "lost"},          # no timeUnixNano
+            "not-even-a-dict",          # malformed
+        ]
+    )
+    errors: list[str] = []
+    trace = normalize_otlp_request(payload, errors=errors)[0]
+    span = trace.spans[0]
+    assert len(span.events) == 1
+    assert span.events[0].name == "ok"
+    # evidence travels with the data itself
+    assert span.attributes["_otlp.events_dropped"] == 2
+    # and is reported when a quarantine list is provided
+    assert any("dropped 2 event" in e for e in errors)
+
+
+def test_otlp_event_drop_recorded_in_strict_mode_too() -> None:
+    """Strict mode (errors=None) still marks the span — evidence is
+    data-level, not just a warning channel."""
+    trace = normalize_otlp_request(
+        _span_payload(events=[{"name": "lost"}])
+    )[0]
+    assert trace.spans[0].events == []
+    assert trace.spans[0].attributes["_otlp.events_dropped"] == 1

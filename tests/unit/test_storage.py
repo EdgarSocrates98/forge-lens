@@ -269,3 +269,70 @@ def test_trace_status_recomputes_from_stored_spans(
     loaded = tmp_store.get_trace(synthetic_trace.trace_id)
     assert loaded is not None
     assert loaded.status.code == StatusCode.ERROR
+
+
+def test_upsert_merges_trace_level_columns(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """Re-ingest must not keep stale first-seen trace-level fields:
+    status_message fills when provided, resource attrs merge,
+    provenance keeps the strongest, a named source beats 'unknown'."""
+    from forge_lens.contracts.provenance import Provenance
+    from forge_lens.contracts.v1.trace import Status
+
+    first = synthetic_trace.model_copy(deep=True)
+    first.status = Status(code=StatusCode.ERROR)  # no message yet
+    first.resource_attributes = {"service.name": "svc"}
+    tmp_store.upsert_trace(first)
+
+    second = synthetic_trace.model_copy(deep=True)
+    second.status = Status(code=StatusCode.ERROR, message="upstream timeout")
+    second.resource_attributes = {"service.name": "svc", "cloud.region": "us-1"}
+    second.source.system = "real-producer"
+    second.provenance = Provenance.INFERRED  # weaker — must not downgrade
+    tmp_store.upsert_trace(second)
+
+    stored = tmp_store.get_trace(synthetic_trace.trace_id)
+    assert stored is not None
+    # latest non-null status_message wins
+    assert stored.status.message == "upstream timeout"
+    # resource attributes merged key-wise (incoming keys overlay stored)
+    assert stored.resource_attributes["cloud.region"] == "us-1"
+    assert stored.resource_attributes["service.name"] == "svc"
+    # identified source replaces 'unknown'; pytest source stays
+    assert stored.source.system == "real-producer"
+    # provenance keeps the strongest: stored 'observed' survives 'inferred'
+    assert stored.provenance == Provenance.OBSERVED
+
+
+def test_duplicate_merge_identical_content_still_records_flags(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """A re-delivery counted as duplicate must still record evidence:
+    the DUPLICATE flag plus any incoming-only flags — on BOTH paths
+    (identical hash, and content that merges back to identical)."""
+    tmp_store.upsert_trace(synthetic_trace)
+
+    # path 1: identical hash + an incoming-only flag
+    again = synthetic_trace.model_copy(deep=True)
+    again.spans[1].integrity_flags = [IntegrityFlag.TRUNCATED]
+    tmp_store.upsert_trace(again)
+
+    # path 2: different hash, merges to identical — a running view of a
+    # completed span (end_time=None) re-delivered with another flag
+    running_view = synthetic_trace.model_copy(deep=True)
+    running_view.spans = [running_view.spans[2]]
+    running_view.spans[0].end_time = None
+    running_view.spans[0].integrity_flags = [IntegrityFlag.MISSING_END]
+    tmp_store.upsert_trace(running_view)
+
+    loaded = tmp_store.get_trace(synthetic_trace.trace_id)
+    assert loaded is not None
+    flags1 = loaded.spans[1].integrity_flags
+    assert IntegrityFlag.TRUNCATED in flags1
+    assert IntegrityFlag.DUPLICATE in flags1
+    flags2 = loaded.spans[2].integrity_flags
+    assert IntegrityFlag.DUPLICATE in flags2
+    # MISSING_END from the running view was unioned then correctly
+    # cleared by the refresh pass — stored data has an end_time
+    assert IntegrityFlag.MISSING_END not in flags2

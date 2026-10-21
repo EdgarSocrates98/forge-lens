@@ -41,6 +41,7 @@ class LensConfig:
 
     endpoint: str = "http://127.0.0.1:7777"
     max_payload_bytes: int = 8 * 1024 * 1024
+    max_traces_per_request: int = 10_000
     max_spans_per_request: int = 20_000
     max_events_per_span: int = 128
     max_attr_value_chars: int = 4_096
@@ -69,6 +70,7 @@ def _toml_to_config(data: dict[str, object], base: LensConfig) -> LensConfig:
         kwargs["endpoint"] = v
     for key, field_name in (
         ("max_payload_bytes", "max_payload_bytes"),
+        ("max_traces_per_request", "max_traces_per_request"),
         ("max_spans_per_request", "max_spans_per_request"),
         ("max_events_per_span", "max_events_per_span"),
         ("max_attr_value_chars", "max_attr_value_chars"),
@@ -95,6 +97,7 @@ def load_config(project_dir: Path | None = None) -> LensConfig:
         "FORGE_LENS_CAPTURE": "capture",
         "FORGE_LENS_API_KEY": "api_key",
         "FORGE_LENS_ENDPOINT": "endpoint",
+        "FORGE_LENS_MAX_TRACES_PER_REQUEST": "max_traces_per_request",
         "FORGE_LENS_RATE_LIMIT_PER_MINUTE": "rate_limit_per_minute",
     }
     overrides: dict[str, object] = {}
@@ -106,7 +109,7 @@ def load_config(project_dir: Path | None = None) -> LensConfig:
             overrides[field_name] = Path(raw).expanduser()
         elif field_name == "capture":
             overrides[field_name] = CaptureLevel(raw)
-        elif field_name == "rate_limit_per_minute":
+        elif field_name in {"rate_limit_per_minute", "max_traces_per_request"}:
             overrides[field_name] = int(raw)
         else:
             overrides[field_name] = raw

@@ -11,8 +11,8 @@
 | Superfície | Ameaça | Mitigação atual |
 |---|---|---|
 | `POST /v1/traces`, `/v1/otlp/traces` | injeção de payloads malformados | validação Pydantic + parser tolerante + limites (413) |
-| mesma | flood/DoS | rate limit opcional + caps de spans/payload |
-| mesma | ingest não autorizado (porta exposta) | `api_key` + bind `127.0.0.1` default |
+| mesma | flood/DoS | rate limit opcional + caps de payload/traces/spans |
+| mesma | ingest não autorizado (porta exposta) | `api_key` + bind `127.0.0.1` default + aviso no `serve` quando o bind não é loopback sem `api_key` |
 | atributos de spans | segredos em valores | redaction de chaves + padrões em valores |
 | corpos de prompt/tool | PII/segredos persistidos | `capture=metadata` descarta por default |
 | leitura `/v1/traces*` | vazamento de traces a terceiros locais | sem auth por design local — exponha só em rede confiável |

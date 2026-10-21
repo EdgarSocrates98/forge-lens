@@ -36,7 +36,12 @@ portável, leitura concorrente com escrita (WAL).
   identidade, status mantém a maior severidade observada
   (`error>ok>unset` — monotônico, um `ok` tardio não apaga um erro
   observado). Na trace: `started=min`, `ended=max`, status e contagens
-  recomputados por SELECT sobre os spans persistidos.
+  recomputados por SELECT sobre os spans persistidos; `status_message`
+  atualiza quando o incoming traz mensagem (`COALESCE`);
+  `resource_attributes` unem por chave (`json_patch`); `source_json`
+  cede a um `system` identificado (nunca regride a `"unknown"`);
+  `provenance` mantém a mais forte observada
+  (`observed>imported>derived>inferred>unknown` — nunca promove).
 - **Flags resolvidas**: `MISSING_END`/`MISSING_PARENT` são removidas
   quando a linha persistida passa a ter `ended_ns`/parent presente —
   flags refletem o estado armazenado, não o histórico.

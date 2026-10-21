@@ -33,6 +33,7 @@ from forge_lens.contracts.v1.trace import (
 )
 from forge_lens.contracts.v1.usage import MeasurementSource, TokenUsage
 from forge_lens.core.ids import is_valid_trace_id
+from forge_lens.core.time import ensure_aware
 from forge_lens.sdk.context import (
     SpanContext,
     current_span,
@@ -404,8 +405,8 @@ class LensTracer:
 
 def _finalize(trace: Trace) -> None:
     if trace.spans:
-        trace.started_at = min(s.start_time for s in trace.spans)
-        ended = [s.end_time for s in trace.spans if s.end_time]
+        trace.started_at = min(ensure_aware(s.start_time) for s in trace.spans)
+        ended = [ensure_aware(s.end_time) for s in trace.spans if s.end_time]
         trace.ended_at = max(ended) if ended else None
     if any(s.status.code == StatusCode.ERROR for s in trace.spans):
         trace.status = Status(code=StatusCode.ERROR)

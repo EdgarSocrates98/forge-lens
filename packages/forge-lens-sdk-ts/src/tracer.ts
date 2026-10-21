@@ -434,12 +434,22 @@ export class LensTracer {
   }
 }
 
+/** ISO-8601 compare that honors offsets: "T10:00+12:00" is earlier than
+ *  "T01:00Z" even though it sorts later lexicographically. Falls back to
+ *  string order when a value can't be parsed. */
+function cmpIso(a: string, b: string): number {
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  if (!Number.isNaN(ta) && !Number.isNaN(tb)) return ta - tb;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function finalize(trace: Trace): void {
   if (trace.spans.length > 0) {
     trace.started_at = trace.spans
       .map((s) => s.start_time)
-      .sort()[0];
-    const ended = trace.spans.filter((s) => s.end_time).map((s) => s.end_time as string).sort();
+      .sort(cmpIso)[0];
+    const ended = trace.spans.filter((s) => s.end_time).map((s) => s.end_time as string).sort(cmpIso);
     trace.ended_at = ended.length > 0 ? ended[ended.length - 1] : null;
   }
   const codes = new Set<StatusCode>(trace.spans.map((s) => s.status.code));

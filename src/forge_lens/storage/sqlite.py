@@ -212,19 +212,14 @@ class SQLiteTraceStore:
                     continue
                 if row["span_hash"] == _span_digest(span):
                     # identical re-delivery → evidence that a retry happened
-                    flags = json.loads(row["integrity_flags_json"] or "[]")
-                    if IntegrityFlag.DUPLICATE.value not in flags:
-                        flags.append(IntegrityFlag.DUPLICATE.value)
-                        self._conn.execute(
-                            "UPDATE spans SET integrity_flags_json=? "
-                            "WHERE project_id=? AND trace_id=? AND span_id=?",
-                            (json.dumps(flags), trace.project_id,
-                             span.trace_id, span.span_id),
-                        )
+                    self._union_flags(row, span)
                     duplicates += 1
                     continue
                 merged = self._merge_span(row, span, trace.project_id)
                 if merged is None:
+                    # content merged to identical — still a duplicate
+                    # delivery, and incoming-only flags still count
+                    self._union_flags(row, span)
                     duplicates += 1
                     continue
                 self._update_span(trace, merged)
@@ -259,6 +254,29 @@ class SQLiteTraceStore:
                         FROM spans s
                         WHERE s.project_id=traces.project_id
                           AND s.trace_id=traces.trace_id),
+                    status_message = COALESCE(
+                        excluded.status_message, traces.status_message),
+                    source_json = CASE
+                        WHEN COALESCE(
+                            json_extract(excluded.source_json,'$.system'),'unknown')
+                            <> 'unknown'
+                        THEN excluded.source_json
+                        ELSE traces.source_json END,
+                    resource_attributes_json = json_patch(
+                        traces.resource_attributes_json,
+                        excluded.resource_attributes_json),
+                    provenance = CASE MIN(
+                        CASE traces.provenance
+                            WHEN 'observed' THEN 0 WHEN 'imported' THEN 1
+                            WHEN 'derived' THEN 2 WHEN 'inferred' THEN 3
+                            ELSE 4 END,
+                        CASE excluded.provenance
+                            WHEN 'observed' THEN 0 WHEN 'imported' THEN 1
+                            WHEN 'derived' THEN 2 WHEN 'inferred' THEN 3
+                            ELSE 4 END)
+                        WHEN 0 THEN 'observed' WHEN 1 THEN 'imported'
+                        WHEN 2 THEN 'derived' WHEN 3 THEN 'inferred'
+                        ELSE 'unknown' END,
                     span_count = (
                         SELECT COUNT(*) FROM spans
                         WHERE project_id=traces.project_id
@@ -398,6 +416,29 @@ class SQLiteTraceStore:
         ):
             return None
         return merged
+
+    def _union_flags(self, row: sqlite3.Row, span: Span) -> None:
+        """Union incoming integrity flags into the stored row.
+
+        Every re-delivery is ``DUPLICATE`` evidence, and flags the
+        incoming span carried that we lack are still observations —
+        recorded even when the payload itself changed nothing.
+        """
+        stored = set(json.loads(row["integrity_flags_json"] or "[]"))
+        merged = stored | {f.value for f in span.integrity_flags} | {
+            IntegrityFlag.DUPLICATE.value
+        }
+        if merged != stored:
+            self._conn.execute(
+                "UPDATE spans SET integrity_flags_json=? "
+                "WHERE project_id=? AND trace_id=? AND span_id=?",
+                (
+                    json.dumps(sorted(merged)),
+                    row["project_id"],
+                    row["trace_id"],
+                    row["span_id"],
+                ),
+            )
 
     def _span_exists(self, project_id: str, trace_id: str, span_id: str) -> bool:
         return (
