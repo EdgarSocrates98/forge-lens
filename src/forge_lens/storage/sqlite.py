@@ -534,6 +534,18 @@ class SQLiteTraceStore:
             is not None
         )
 
+    def span_trace_id(self, project_id: str, span_id: str) -> str | None:
+        """Which stored trace owns ``span_id`` in this project, if any.
+
+        Used at ingest to mark ORPHAN: a ``parent_span_id`` that exists
+        under a *different* trace will never resolve inside this one.
+        """
+        row = self._conn.execute(
+            "SELECT trace_id FROM spans WHERE project_id=? AND span_id=?",
+            (project_id, span_id),
+        ).fetchone()
+        return str(row["trace_id"]) if row else None
+
     def _refresh_integrity_flags(self, trace: Trace) -> None:
         """Clear MISSING_PARENT/MISSING_END flags the stored data resolved."""
         # json_each gives an exact element match — LIKE '%missing_end%'

@@ -206,3 +206,67 @@ def test_declared_bounds_contradicting_spans_warns(
     result = _pipeline(tmp_store).ingest([bad])
     assert any("started_at" in w for w in result.warnings)
     assert any("ended_at" in w for w in result.warnings)
+
+
+# -- round-10: dead contract flags wired -------------------------------------
+
+
+def test_llm_span_without_usage_gets_unknown_tokens(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    from forge_lens.contracts.v1.trace import SpanKind
+
+    # synthetic_trace's llm span carries usage; strip it to trigger the flag
+    bare = synthetic_trace.model_copy(deep=True)
+    bare.ended_at = bare.spans[-1].end_time  # avoid partial noise
+    for s in bare.spans:
+        if s.kind is SpanKind.LLM:
+            s.attributes.pop("forge_lens.token_usage")
+    _pipeline(tmp_store).ingest([bare])
+    stored = tmp_store.get_trace(bare.trace_id)
+    llm = next(s for s in stored.spans if s.kind is SpanKind.LLM)
+    assert IntegrityFlag.UNKNOWN_TOKENS in llm.integrity_flags
+
+
+def test_cross_trace_parent_gets_orphan(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """parent_span_id that exists under ANOTHER stored trace → ORPHAN."""
+    from datetime import UTC, datetime
+
+    from forge_lens.contracts.v1.trace import Span
+
+    p = _pipeline(tmp_store)
+    p.ingest([synthetic_trace])  # parent "1"*16 now lives in trace "a"*32
+    orphan_span = Span(
+        trace_id="b" * 32,
+        span_id="9" * 16,
+        parent_span_id="1" * 16,  # belongs to synthetic_trace
+        name="orphan-child",
+        start_time=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+        end_time=datetime(2026, 1, 1, 12, 0, 1, tzinfo=UTC),
+    )
+    t2 = Trace(
+        trace_id="b" * 32,
+        project_id=synthetic_trace.project_id,
+        started_at=orphan_span.start_time,
+        ended_at=orphan_span.end_time,
+        spans=[orphan_span],
+    )
+    result = p.ingest([t2])
+    stored = tmp_store.get_trace("b" * 32)
+    flags = stored.spans[0].integrity_flags
+    assert IntegrityFlag.ORPHAN in flags
+    assert IntegrityFlag.MISSING_PARENT in flags  # additive, not replacing
+    assert any("belongs to trace" in w for w in result.warnings)
+
+
+def test_partial_trace_flags_root_span(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    partial = synthetic_trace.model_copy(deep=True)
+    partial.ended_at = None
+    _pipeline(tmp_store).ingest([partial])
+    stored = tmp_store.get_trace(partial.trace_id)
+    root = next(s for s in stored.spans if s.span_id == stored.root_span_id)
+    assert IntegrityFlag.PARTIAL_TRACE in root.integrity_flags

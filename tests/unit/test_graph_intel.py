@@ -255,3 +255,129 @@ def test_waste_unpriced_model_finding() -> None:
     llm = _span("f1", "llm", kind=SpanKind.LLM, attrs=_usage("zzz", 5, 5))
     findings = detect_waste(_trace([llm]), PricingRegistry())
     assert any(f.kind == "unpriced_model" for f in findings)
+
+
+# -- round-10: cyclic + deep + multi-root ------------------------------------
+
+
+def test_critical_path_survives_parent_cycle() -> None:
+    """A↔B parent cycle: must not recurse forever — the closing edge is
+    cut deterministically and reported as evidence."""
+    a = _span("a1", "A", parent="b1", dur_ms=100)
+    b = _span("b1", "B", parent="a1", dur_ms=200, start_s=1)
+    g = build_trace_graph(_trace([a, b]))
+    cp = critical_path(g)
+    assert cp["path"]  # still yields a path
+    assert cp["cycles"]  # the cut edge is evidence, not silence
+    assert g.stats["cycle_members"] == 2
+
+
+def test_critical_path_self_parent() -> None:
+    s = _span("a1", "self", parent="a1", dur_ms=50)
+    g = build_trace_graph(_trace([s]))
+    cp = critical_path(g)
+    assert cp["total_ms"] == 50
+    assert g.stats["cycle_members"] == 1
+
+
+def test_critical_path_deep_chain_no_recursion() -> None:
+    """2000-deep linear chain — plausible for looping agents — must not
+    hit the interpreter recursion limit."""
+    spans = [
+        _span(f"{i:04x}", f"s{i}", parent=(f"{i - 1:04x}" if i else None),
+              start_s=i * 0.001, dur_ms=1)
+        for i in range(2000)
+    ]
+    cp = critical_path(build_trace_graph(_trace(spans)))
+    assert len(cp["path"]) == 2000
+    assert cp["total_ms"] == 2000.0
+
+
+def test_critical_path_multi_root_takes_max() -> None:
+    """Partial traces can arrive with several roots — evaluate all."""
+    r1 = _span("a1", "root-a", dur_ms=100)
+    r2 = _span("b1", "root-b", dur_ms=500, start_s=1)
+    cp = critical_path(build_trace_graph(_trace([r1, r2])))
+    assert cp["path"] == ["b1".ljust(16, "0")]
+    assert cp["total_ms"] == 500
+
+
+# -- Cycle 05: failure classification, replay, incident -----------------------
+
+
+def _err_span(sid: str, name: str, kind: SpanKind, msg: str = "",
+              attrs: dict | None = None) -> Span:
+    from forge_lens.contracts.v1.trace import Status, StatusCode
+
+    s = _span(sid, name, kind=kind, attrs=attrs)
+    s.status = Status(code=StatusCode.ERROR, message=msg or None)
+    return s
+
+
+def test_classify_timeout_and_tool_error() -> None:
+    from forge_lens.investigate import classify_failure
+
+    t = _trace([_err_span("a1", "call api", SpanKind.TOOL, msg="ETIMEDOUT")])
+    r = classify_failure(t)
+    assert r.failed
+    assert r.category == "timeout"
+    assert r.evidence["span_ids"] == ["a1".ljust(16, "0")]
+
+    t2 = _trace([_err_span("a1", "call api", SpanKind.TOOL, msg="500 boom")])
+    r2 = classify_failure(t2)
+    assert r2.category == "tool_error"
+
+
+def test_classify_rate_limit_and_llm() -> None:
+    from forge_lens.investigate import classify_failure
+
+    rl = _err_span("a1", "gen", SpanKind.LLM,
+                   attrs={"http.status_code": 429})
+    assert classify_failure(_trace([rl])).category == "rate_limit"
+    bare = _err_span("b1", "gen", SpanKind.LLM, msg="server error")
+    assert classify_failure(_trace([bare])).category == "llm_error"
+
+
+def test_classify_incomplete_and_unknown() -> None:
+    from forge_lens.investigate import classify_failure
+
+    hanging = _span("a1", "hanging")
+    hanging.end_time = None
+    hanging.integrity_flags.append(IntegrityFlag.MISSING_END)
+    r = classify_failure(_trace([hanging]))
+    assert r.category == "incomplete"
+    assert r.confidence == "inferred"
+
+    ok = _span("a1", "fine")
+    r2 = classify_failure(_trace([ok]))
+    assert not r2.failed
+    assert r2.category == "unknown"
+
+
+def test_replay_timeline_orders_and_offsets() -> None:
+    from forge_lens.contracts.v1.trace import SpanEvent
+    from forge_lens.investigate import replay_timeline
+
+    s = _span("a1", "work", dur_ms=100)
+    s.events.append(SpanEvent(name="mid", time=s.start_time + timedelta(milliseconds=50)))
+    out = replay_timeline(_trace([s]))
+    kinds = [e["kind"] for e in out["entries"]]
+    assert kinds == ["span_start", "event", "span_end"]
+    assert out["entries"][0]["offset_ms"] == 0.0
+    assert out["entries"][-1]["offset_ms"] == 100.0
+    assert out["unclosed_spans"] == 0
+
+
+def test_incident_bundle_composes_evidence() -> None:
+    from forge_lens.intel import PricingRegistry
+    from forge_lens.investigate import incident_bundle
+
+    t = _trace([_err_span("a1", "llm", SpanKind.LLM, msg="timeout",
+                         attrs=_usage("gpt-4o", 10, 5))])
+    b = incident_bundle(t, PricingRegistry())
+    assert b["failure"]["category"] == "timeout"
+    assert b["graph"]["critical_path"]["path"]
+    assert "cost" in b
+    assert "waste" in b
+    assert "replay" in b
+    assert b["bundle_version"] == "1.0.0"

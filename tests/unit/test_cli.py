@@ -292,3 +292,29 @@ def test_ingest_enforces_payload_bound(tmp_path: Path, monkeypatch) -> None:
     result = CliRunner().invoke(app, ["ingest", str(f)])
     assert result.exit_code == 1
     assert "ingest failed" in result.output
+
+
+def test_ingest_fills_source_from_envelope(tmp_path: Path, synthetic_trace) -> None:
+    """Parity with the API: envelope.source fills traces whose
+    source.system is 'unknown' — previously API-only behavior."""
+    from forge_lens.contracts.v1.trace import TraceIngest, TraceSource
+    from forge_lens.storage.sqlite import SQLiteTraceStore
+
+    t = synthetic_trace.model_copy(deep=True)
+    t.source.system = "unknown"
+    env = TraceIngest(
+        traces=[t], source=TraceSource(system="file-importer")
+    )
+    f = tmp_path / "t.json"
+    f.write_text(env.model_dump_json())
+    db = tmp_path / "lens.db"
+    result = CliRunner().invoke(
+        app, ["ingest", str(f), "--db", str(db)]
+    )
+    assert result.exit_code == 0, result.output
+    store = SQLiteTraceStore(db)
+    try:
+        stored = store.get_trace(t.trace_id)
+        assert stored.source.system == "file-importer"
+    finally:
+        store.close()

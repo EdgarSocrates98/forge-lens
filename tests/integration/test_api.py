@@ -553,3 +553,46 @@ def test_auth_reads_off_keeps_reads_open(tmp_path) -> None:
         assert c.get("/v1/traces").status_code == 200
         assert c.get("/v1/health").status_code == 200
     store.close()
+
+
+def test_bad_pricing_file_fails_at_construction(tmp_path) -> None:
+    """Operator config errors fail fast at create_app — never as a
+    per-request 500 on /cost or /analytics/pricing."""
+    bad = tmp_path / "prices.json"
+    bad.write_text("{ not json")
+    cfg = LensConfig(
+        data_dir=tmp_path, db_path=tmp_path / "api.db", pricing_file=bad
+    )
+    with pytest.raises(ValueError):
+        create_app(config=cfg)
+
+
+def test_failure_replay_incident_endpoints(
+    client: TestClient, synthetic_trace: Trace
+) -> None:
+    client.post("/v1/traces", json=TraceIngest(traces=[synthetic_trace]).model_dump(mode="json"))
+    tid = synthetic_trace.trace_id
+
+    r = client.get(f"/v1/traces/{tid}/failure")
+    assert r.status_code == 200, r.text
+    f = r.json()
+    assert f["failed"] is True
+    # synthetic tool span carries status.message="timeout" — the
+    # timeout rule fires before the kind rule (more specific evidence)
+    assert f["category"] == "timeout"
+    assert f["evidence"]["span_ids"]
+
+    r = client.get(f"/v1/traces/{tid}/replay")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["span_count"] == 3
+    assert body["entries"][0]["kind"] == "span_start"
+    assert body["entries"][-1]["kind"] == "span_end"
+    assert "offset_ms" in body["entries"][0]
+
+    r = client.get(f"/v1/traces/{tid}/incident")
+    assert r.status_code == 200
+    b = r.json()
+    assert b["failure"]["failed"] is True
+    assert b["graph"]["stats"]["span_count"] == 3
+    assert b["bundle_version"] == "1.0.0"

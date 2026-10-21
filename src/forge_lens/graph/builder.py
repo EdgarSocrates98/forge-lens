@@ -91,8 +91,30 @@ def build_trace_graph(trace: Trace) -> ExecutionGraph:
             "missing_parents": sum(
                 1 for s in spans if s.parent_span_id and s.parent_span_id not in ids
             ),
+            "cycle_members": _cycle_members(spans),
         },
     )
+
+
+def _cycle_members(spans: list[Span]) -> int:
+    """Count of nodes sitting on a parent-pointer cycle.
+
+    A span is a cycle member iff walking its ancestor chain returns to
+    itself; nodes whose chain merely *leads into* a cycle are affected
+    downstream but not members.
+    """
+    parent_of = {s.span_id: s.parent_span_id for s in spans}
+    ids = set(parent_of)
+    members = 0
+    for sid in ids:
+        node: str | None = sid
+        seen: set[str] = set()
+        while node is not None and node in ids and node not in seen:
+            seen.add(node)
+            node = parent_of.get(node)
+        if node == sid:
+            members += 1
+    return members
 
 
 def _max_depth(siblings: dict[str | None, list[Span]], root_id: str | None) -> int:

@@ -47,12 +47,18 @@ Grafo de execução `ExecutionGraph`: nós = spans; arestas `parent`
 (contenção observada), `sequence` (sucessão temporal entre irmãos por
 `start_time`), `link` (`SpanLink`s — `dangling: true` quando o alvo não
 está no grafo). `stats`: `span_count`, `edge_count`, `max_depth`,
-`dangling_edges`, `missing_parents`. `404` se a trace não existe.
+`dangling_edges`, `missing_parents`, `cycle_members` (spans sentados
+num ciclo de parentesco — parent chains corrompidos são evidência).
+`404` se a trace não existe.
 
 ### `GET /v1/graph/traces/{trace_id}/critical-path`
-`{path: [span_id…], total_ms}` — cadeia raiz→folha que maximiza a soma
-de durações (o trabalho serializado que domina o wall-clock). Empates
-desempatam por id lexicográfico (determinístico).
+`{path: [span_id…], total_ms, cycles: [{from, to}]}` — cadeia
+raiz→folha que maximiza a soma de durações, avaliada sobre **todos** os
+roots (traces parciais multi-root são cobertas). Ciclos de parentesco
+são cortados deterministicamente — a aresta que fecha o ciclo aparece
+em `cycles` (evidência), não derruba o endpoint. Cadeias arbitrariamente
+profundas são iterativas (sem limite de recursão). Empates desempatam
+por id lexicográfico.
 
 ### `GET /v1/graph/traces/{trace_id}/bottlenecks?top=5`
 `{items: [{id, name, kind, self_ms, duration_ms}]}` — self-time =
@@ -80,6 +86,29 @@ sem `token_usage`), `unpriced_model`.
 ### `GET /v1/analytics/pricing`
 `{source, models: {model: {input_per_mtok, output_per_mtok,
 cached_input_per_mtok}}}` — a tabela efetiva em uso.
+
+## Investigação (Cycle 05)
+
+### `GET /v1/traces/{trace_id}/failure?project_id`
+Classificação determinística de falha: `{trace_id, failed, category,
+confidence, evidence, detail}`. Categorias: `timeout`, `rate_limit`,
+`tool_error`, `llm_error`, `guardrail`, `incomplete` (spans nunca
+fechados — host provável morto), `cycle`, `unknown`. Regras correm em
+ordem de especificidade; `evidence` nomeia os spans/atributos que
+dispararam. `unknown` com `failed=false` é a resposta honesta para
+traces saudáveis.
+
+### `GET /v1/traces/{trace_id}/replay?project_id`
+Replay **registrado** (não re-executa código do agente): timeline único
+ordenado por `(timestamp, span_id, kind)` intercalando
+`span_start`/`event`/`span_end` com `offset_ms` relativo ao primeiro
+timestamp. `unclosed_spans` conta spans sem `end_time`.
+
+### `GET /v1/traces/{trace_id}/incident?project_id`
+Bundle de incidente versionado (`bundle_version`) compondo em um payload
+JSON: `failure` + `graph` (stats, critical path, top-5 bottlenecks) +
+`cost` + `waste` + `replay`. Um call, todo o evidence — feito para
+handoff/export.
 
 ## Ops
 

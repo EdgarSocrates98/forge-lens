@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from forge_lens.contracts.v1.trace import IntegrityFlag, Trace
+from forge_lens.contracts.v1.trace import IntegrityFlag, SpanKind, Trace
 from forge_lens.core.config import LensConfig
 from forge_lens.core.errors import PayloadTooLargeError, RateLimitedError, ValidationError
 from forge_lens.core.metrics import (
@@ -91,6 +91,12 @@ def flag_integrity(trace: Trace) -> list[str]:
             and IntegrityFlag.CLOCK_SKEW not in span.integrity_flags
         ):
             span.integrity_flags.append(IntegrityFlag.CLOCK_SKEW)
+        if (
+            span.kind is SpanKind.LLM
+            and "forge_lens.token_usage" not in span.attributes
+            and IntegrityFlag.UNKNOWN_TOKENS not in span.integrity_flags
+        ):
+            span.integrity_flags.append(IntegrityFlag.UNKNOWN_TOKENS)
     if not trace.spans:
         warnings.append("trace contains no spans")
     elif missing_end == len(trace.spans):
@@ -99,6 +105,15 @@ def flag_integrity(trace: Trace) -> list[str]:
         warnings.append(f"{missing_parents} span(s) reference parents not present in this trace")
     if trace.ended_at is None and trace.spans:
         warnings.append("trace is partial (no ended_at)")
+        # evidence lives on the root span — the flag marks the trace
+        # delivered incomplete, not that the span itself is broken
+        roots = [s for s in trace.spans if s.parent_span_id is None]
+        root = next(
+            (s for s in trace.spans if s.span_id == trace.root_span_id),
+            roots[0] if roots else None,
+        )
+        if root is not None and IntegrityFlag.PARTIAL_TRACE not in root.integrity_flags:
+            root.integrity_flags.append(IntegrityFlag.PARTIAL_TRACE)
     if trace.spans:
         # envelope-declared bounds are trusted as-is — flag when they
         # contradict the spans they claim to cover
@@ -209,6 +224,29 @@ class IngestPipeline:
                 )
                 warnings = flag_integrity(trace)
                 result.warnings.extend(f"{trace.trace_id}: {w}" for w in warnings)
+
+                # ORPHAN — parent absent from this trace but present in
+                # the store under another trace: it can never resolve
+                # here. Additive to MISSING_PARENT (absence stays true).
+                span_ids = {s.span_id for s in trace.spans}
+                for span in trace.spans:
+                    if (
+                        span.parent_span_id
+                        and span.parent_span_id not in span_ids
+                        and IntegrityFlag.ORPHAN not in span.integrity_flags
+                        and (
+                            owner := self.store.span_trace_id(
+                                trace.project_id, span.parent_span_id
+                            )
+                        )
+                        is not None
+                        and owner != trace.trace_id
+                    ):
+                        span.integrity_flags.append(IntegrityFlag.ORPHAN)
+                        result.warnings.append(
+                            f"{trace.trace_id}: span {span.span_id} parent "
+                            f"belongs to trace {owner}"
+                        )
 
                 inserted, updated, duplicates = self.store.upsert_trace(trace)
                 result.accepted_spans += inserted

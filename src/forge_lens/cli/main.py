@@ -191,6 +191,10 @@ def ingest(
                     t.project_id = project
                 elif t.project_id == "default" and envelope.project_id != "default":
                     t.project_id = envelope.project_id
+                # parity with the API path: the envelope's declared
+                # sender fills traces that didn't name a producer
+                if envelope.source is not None and t.source.system == "unknown":
+                    t.source = envelope.source
         # byte bound applies on the CLI path too — same limit the API enforces
         result = pipeline.ingest(traces, payload_bytes=len(raw))
     except Exception as exc:
@@ -366,11 +370,15 @@ def cost(
     if trace is None:
         typer.echo(f"trace {trace_id} not found", err=True)
         raise typer.Exit(1)
-    registry = (
-        PricingRegistry.from_file(cfg.pricing_file)
-        if cfg.pricing_file
-        else PricingRegistry()
-    )
+    try:
+        registry = (
+            PricingRegistry.from_file(cfg.pricing_file)
+            if cfg.pricing_file
+            else PricingRegistry()
+        )
+    except Exception as exc:
+        typer.echo(f"cost failed: invalid pricing_file: {exc}", err=True)
+        raise typer.Exit(2) from None
     report = trace_cost(trace, registry)
     waste = detect_waste(trace, registry)
     if json_out:
@@ -401,6 +409,59 @@ def cost(
         typer.echo(f"  ~ unpriced model: {m}")
     for w in waste:
         typer.echo(f"  ~ {w.kind}: {w.detail}")
+
+
+@app.command()
+def incident(
+    trace_id: Annotated[str, typer.Argument()],
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Incident bundle for a trace: failure class + evidence + timeline."""
+    from forge_lens.intel import PricingRegistry
+    from forge_lens.investigate import incident_bundle
+
+    cfg = _config(db)
+    store = _store(cfg)
+    try:
+        trace = store.get_trace(trace_id, project_id=project or cfg.project_id)
+    finally:
+        store.close()
+    if trace is None:
+        typer.echo(f"trace {trace_id} not found", err=True)
+        raise typer.Exit(1)
+    try:
+        registry = (
+            PricingRegistry.from_file(cfg.pricing_file)
+            if cfg.pricing_file
+            else PricingRegistry()
+        )
+    except Exception as exc:
+        typer.echo(f"incident failed: invalid pricing_file: {exc}", err=True)
+        raise typer.Exit(2) from None
+    bundle = incident_bundle(trace, registry)
+    if json_out:
+        typer.echo(json.dumps(bundle, indent=2))
+        return
+    f = bundle["failure"]
+    typer.echo(
+        f"trace {bundle['trace_id']}  status={bundle['status']}  "
+        f"failed={f['failed']}"
+    )
+    if f["failed"]:
+        typer.echo(f"  category: {f['category']} ({f['confidence']})")
+        typer.echo(f"  detail:   {f['detail']}")
+        for sid in f["evidence"].get("span_ids", []):
+            typer.echo(f"  evidence: span {sid}")
+    cp = bundle["graph"]["critical_path"]
+    if cp["path"]:
+        typer.echo(f"  critical path: {len(cp['path'])} spans, {cp['total_ms']}ms")
+    typer.echo(
+        f"  replay: {len(bundle['replay']['entries'])} timeline entries, "
+        f"{bundle['replay']['total_ms']}ms"
+    )
+    typer.echo(f"  est. cost: ${bundle['cost']['total_estimated_usd']:.6f}")
 
 
 @app.command()
@@ -445,6 +506,14 @@ def doctor(
         check("sdk importable", True)
     except Exception as exc:
         check("sdk importable", False, str(exc))
+    if cfg.pricing_file:
+        try:
+            from forge_lens.intel.pricing import PricingRegistry
+
+            PricingRegistry.from_file(cfg.pricing_file)
+            check("pricing file parseable", True, str(cfg.pricing_file))
+        except Exception as exc:
+            check("pricing file parseable", False, str(exc))
     raise typer.Exit(0 if ok else 1)
 
 

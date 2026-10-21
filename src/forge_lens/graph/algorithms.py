@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from forge_lens.graph.models import EdgeKind, ExecutionGraph
 
+WHITE, GRAY, BLACK = 0, 1, 2
+
 
 def _children(graph: ExecutionGraph) -> dict[str, list[str]]:
     """parent id → ordered child ids (parent edges only)."""
@@ -24,33 +26,74 @@ def critical_path(graph: ExecutionGraph) -> dict[str, object]:
     """Root→leaf chain maximizing the sum of node durations.
 
     In waterfall terms this is the serialized work that dominates the
-    trace's wall-clock time. Ties break on lexicographic node id —
-    deterministic, never random.
+    trace's wall-clock time. Iterative over an explicit stack — parent
+    cycles and arbitrarily deep chains cannot overflow the recursion
+    limit. A cycle edge is *cut* deterministically (the edge into an
+    in-progress node contributes nothing to the path) and reported in
+    ``cycles`` as evidence. Multi-root partial traces evaluate every
+    root candidate and take the maximum — ties break on the
+    lexicographically smallest path.
     """
     durations = {n.id: (n.duration_ms or 0.0) for n in graph.nodes}
     kids = _children(graph)
+    color = {n.id: WHITE for n in graph.nodes}
     memo: dict[str, tuple[float, list[str]]] = {}
+    cycles: list[dict[str, str]] = []
 
-    def best(node_id: str) -> tuple[float, list[str]]:
-        if node_id in memo:
-            return memo[node_id]
-        best_child: tuple[float, list[str]] = (0.0, [])
-        for child in sorted(kids.get(node_id, [])):
-            cand = best(child)
-            if cand[0] > best_child[0] or (
-                cand[0] == best_child[0] and cand[1] and cand[1] < (best_child[1] or ["~"])
-            ):
-                best_child = cand
-        memo[node_id] = (
-            durations.get(node_id, 0.0) + best_child[0],
-            [node_id, *best_child[1]],
-        )
-        return memo[node_id]
+    def best(entry: str) -> None:
+        # iterative post-order: each stack entry is (node, expanded?)
+        stack: list[tuple[str, bool]] = [(entry, False)]
+        while stack:
+            node, expanded = stack.pop()
+            if not expanded:
+                if color[node] == BLACK:
+                    continue
+                if color[node] == GRAY:
+                    continue  # re-entry handled at the parent's expansion
+                color[node] = GRAY
+                stack.append((node, True))
+                for child in sorted(kids.get(node, []), reverse=True):
+                    if color[child] == GRAY:
+                        # edge closes a cycle — cut it for path purposes,
+                        # keep it as evidence in `cycles`
+                        cycles.append({"from": node, "to": child})
+                        continue
+                    if color[child] == WHITE:
+                        stack.append((child, False))
+            else:
+                color[node] = BLACK
+                best_child: tuple[float, list[str]] = (0.0, [])
+                for child in sorted(kids.get(node, [])):
+                    cand = memo.get(child)
+                    if cand is None:
+                        continue  # child is in a cycle cut — contributes 0
+                    if cand[0] > best_child[0] or (
+                        cand[0] == best_child[0]
+                        and cand[1]
+                        and cand[1] < (best_child[1] or ["~"])
+                    ):
+                        best_child = cand
+                memo[node] = (
+                    durations.get(node, 0.0) + best_child[0],
+                    [node, *best_child[1]],
+                )
 
-    if graph.root_id is None or graph.root_id not in durations:
-        return {"path": [], "total_ms": 0.0}
-    weight, path = best(graph.root_id)
-    return {"path": path, "total_ms": round(weight, 3)}
+    # evaluate every node — covers multi-root partial traces and
+    # components that contain the cycle cut
+    for node_id in sorted(durations):
+        best(node_id)
+
+    best_total = 0.0
+    best_path: list[str] = []
+    for node_id in sorted(durations):
+        w, path = memo.get(node_id, (0.0, []))
+        if w > best_total or (w == best_total and path and path < (best_path or ["~"])):
+            best_total, best_path = w, path
+    return {
+        "path": best_path,
+        "total_ms": round(best_total, 3),
+        "cycles": cycles,
+    }
 
 
 def self_time_ranking(graph: ExecutionGraph, top: int = 5) -> list[dict[str, object]]:

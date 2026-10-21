@@ -78,7 +78,16 @@ def create_app(
     _init_lock = threading.RLock()
     _store_holder: dict[str, TraceStore] = {}
     _pipeline_holder: dict[str, IngestPipeline] = {}
-    _pricing_holder: dict[str, Any] = {}
+
+    # Operator-config failures fail fast at app construction, never as a
+    # per-request 500 — a malformed pricing_file raises here, once.
+    from forge_lens.intel.pricing import PricingRegistry
+
+    _pricing = (
+        PricingRegistry.from_file(cfg.pricing_file)
+        if cfg.pricing_file
+        else PricingRegistry()
+    )
 
     def get_store() -> TraceStore:
         if "db" not in _store_holder:
@@ -259,15 +268,7 @@ def create_app(
         return trace
 
     def _registry() -> Any:
-        from forge_lens.intel.pricing import PricingRegistry
-
-        if "registry" not in _pricing_holder:
-            _pricing_holder["registry"] = (
-                PricingRegistry.from_file(cfg.pricing_file)
-                if cfg.pricing_file
-                else PricingRegistry()
-            )
-        return _pricing_holder["registry"]
+        return _pricing
 
     @app.get(f"/{API_VERSION}/graph/traces/{{trace_id}}", dependencies=read_deps)
     async def trace_graph(
@@ -346,6 +347,35 @@ def create_app(
     async def pricing_table() -> dict[str, Any]:
         registry = _registry()
         return {"source": registry.source, "models": registry.models()}
+
+    # -- investigation (Cycle 05): failure + replay + incident -----------
+
+    @app.get(f"/{API_VERSION}/traces/{{trace_id}}/failure", dependencies=read_deps)
+    async def trace_failure(
+        trace_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        from forge_lens.investigate import classify_failure
+
+        trace = _get_trace_or_404(trace_id, project_id)
+        return classify_failure(trace).model_dump(mode="json")
+
+    @app.get(f"/{API_VERSION}/traces/{{trace_id}}/replay", dependencies=read_deps)
+    async def trace_replay(
+        trace_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        from forge_lens.investigate import replay_timeline
+
+        trace = _get_trace_or_404(trace_id, project_id)
+        return replay_timeline(trace)
+
+    @app.get(f"/{API_VERSION}/traces/{{trace_id}}/incident", dependencies=read_deps)
+    async def trace_incident(
+        trace_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        from forge_lens.investigate import incident_bundle
+
+        trace = _get_trace_or_404(trace_id, project_id)
+        return incident_bundle(trace, _registry())
 
     # -- ops ------------------------------------------------------------
 

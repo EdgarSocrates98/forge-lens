@@ -526,3 +526,46 @@ Endpoints `/v1/traces/{id}/cost` + `/v1/analytics/pricing`. CLI
 192 testes py + 20 ts; `ruff` limpo; `mypy --strict` 0 erros em 45
 arquivos; schemas sem drift (grafos/relatórios são modelos de saída,
 não contratos de ingestão).
+
+## Rodada 10 — revisão externa (crash em ciclo + flags mortas)
+
+- **`critical_path` caía com `RecursionError`** (HTTP 500 / crash no
+  CLI) em grafos com ciclo de parentesco ou cadeias profundas — a
+  proteção já existia em `_max_depth` e em `traces show` (iterativo
+  "span trapped in a parent cycle") e eu não a repliquei no algoritmo
+  novo. Reescrito iterativo com coloring WHITE/GRAY/BLACK: a aresta que
+  fecha o ciclo é cortada deterministicamente e reportada em
+  `cycles[]` (evidência); avaliação cobre **todos** os roots (traces
+  parciais multi-root deixavam de reportar o máximo). `stats` do grafo
+  ganha `cycle_members`. Testes: `test_critical_path_survives_
+  parent_cycle` (A↔B), `test_critical_path_self_parent`,
+  `test_critical_path_deep_chain_no_recursion` (2000 spans),
+  `test_critical_path_multi_root_takes_max`.
+- **`PricingRegistry.from_file` 500 por request**: registry agora é
+  construído *eager* em `create_app` — `pricing_file` malformado falha
+  na construção (e em `doctor`/`serve`), não num 500 repetido por
+  request. CLI `cost` embrulha o erro em exit 2 limpo —
+  `test_bad_pricing_file_fails_at_construction`.
+- **Flags do contrato ligadas**: `UNKNOWN_TOKENS` (span LLM sem
+  `forge_lens.token_usage`), `PARTIAL_TRACE` (root quando
+  `ended_at=None`), `ORPHAN` (parent presente no store sob *outra*
+  trace — novo `span_trace_id` no `TraceStore`/SQLite) — testes
+  `test_llm_span_without_usage_gets_unknown_tokens`,
+  `test_partial_trace_flags_root_span`,
+  `test_cross_trace_parent_gets_orphan`.
+- **Paridade CLI ingest**: envelope `source` preenche traces com
+  `source.system == "unknown"` — mesma regra da API —
+  `test_ingest_fills_source_from_envelope`.
+- **`_registry()` fora do lock**: tornou-se moot — eager, sem holder
+  lazy, thread-safe por construção.
+- **README "Status: Cycle 01"** atualizado (03/04 backend shipped).
+
+## Estado pós-fix (rodada 10)
+
+~200 testes py + 20 ts; `ruff` limpo; `mypy --strict` 0 erros; schemas
+sem drift; `cycle_members`/`cycles` são evidência em stats — nenhum
+campo novo em contratos (enum intacto). Na mesma rodada, Cycle 05
+backend (`forge_lens/investigate/`): `classify_failure`,
+`replay_timeline`, `incident_bundle`, endpoints `/failure` `/replay`
+`/incident`, CLI `forge-lens incident` — relatório em
+`cycle-05-final-report.md`.

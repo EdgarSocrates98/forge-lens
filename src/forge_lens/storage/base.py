@@ -41,4 +41,9 @@ class TraceStore(Protocol):
 
     def stats(self) -> dict[str, Any]: ...
 
+    def span_trace_id(self, project_id: str, span_id: str) -> str | None:
+        """Which stored trace owns ``span_id`` in this project, if any —
+        lets ingest mark ORPHAN for cross-trace parent references."""
+        ...
+
     def close(self) -> None: ...

@@ -46,6 +46,12 @@ modelo, `estimated` em USD, modelos sem preço e findings de desperdício
 (`retry_amplification`, `context_replay`, `duplicate_delivery`,
 `unknown_tokens`, `unpriced_model`). `--json` inclui `waste[]`.
 
+## `forge-lens incident <trace_id> [--db] [--project] [--json]`
+
+Bundle de incidente (Cycle 05): categoria de falha com evidência,
+critical path, timeline de replay e custo estimado — em um único payload.
+`--json` emite o bundle completo (`bundle_version` versionado).
+
 ## `forge-lens doctor [path] [--db]`
 
 Verifica Python ≥3.11, diretório de dados, store legível (schema_version,
