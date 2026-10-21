@@ -17,6 +17,11 @@ export const routes: Routes = [
     title: 'Sessions — Forge Lens',
   },
   {
+    path: 'datasets',
+    loadComponent: () => import('./datasets').then(m => m.DatasetsComponent),
+    title: 'Datasets — Forge Lens',
+  },
+  {
     path: 'traces/:id',
     loadComponent: () => import('./trace-detail').then(m => m.TraceDetailComponent),
     title: 'Trace — Forge Lens',

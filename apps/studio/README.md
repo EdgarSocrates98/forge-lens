@@ -74,6 +74,22 @@ from `GET /v1/sessions` in pages of 50 with offset-based "load more"
 pagination. The search box filters fetched rows by session-id prefix, and
 each session links to `/traces?session_id=<id>`.
 
+The **datasets** view (`/datasets`, linked in the header) manages eval
+datasets and compares cohorts. It lists `GET /v1/datasets` (a bare array —
+id, name, task, created), filters client-side by id/name, and a **new
+dataset** panel `PUT`s `{name, task?}` to `/v1/datasets/{id}` (an existing
+id upserts its metadata). Selecting a row loads `GET /v1/datasets/{id}` plus
+`GET …/versions` (version, description, case_count, created). The **new
+version** form `PUT`s `{cases, description?}` to `…/versions/{v}` — each
+case row takes a `case_id` plus optional `input`/`expected` JSON objects;
+versions are append-only so a repeat is a surfaced 409. The **compare
+cohorts** panel posts `POST /v1/eval/compare` with
+`{a: {trace_ids, dataset?}, b: {…}, evaluators: [{name}], gate?}` — both
+sides need stored trace ids (a missing id is a 404) and a side's `dataset`
+is only a report label. Results render per-metric `n`, means, delta, pass
+rates, significance and p-value, plus the gate verdict/failures when a gate
+was sent; `null`s render as `n/a`.
+
 The trace detail **evidence** tab ends with an **eval** panel that auto-loads `GET /v1/traces/:id/eval` and can run any of the built-in evaluators via `POST /v1/eval/run` (`score: null` renders as `n/a` with the evaluator's reason). Checking a param-taking evaluator reveals its inputs — `*` marks params the evaluator requires, `allowed` takes a comma-separated list, `expected` accepts a JSON value, and a malformed value blocks the run before POST (an omitted param instead comes back as an `evaluator_error` row).
 
 ## API connection

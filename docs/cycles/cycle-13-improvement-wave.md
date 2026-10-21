@@ -61,10 +61,25 @@ binary=True)` — elegíveis ao z-test de `eval/compare`. Trace sem
   falha), README links; `cli.md`/`mcp.md`/`api.md`/`security/retention.md`
   sincronizados com o código (drift anterior corrigido).
 
+## Follow-on increments (landed após o report inicial)
+
+- `forge-lens sessions` — CLI parity para `/v1/sessions` (flags `--db`,
+  `--project`, `--limit -n` ≤500, `--json`).
+- `lens.{sessions,tools}` MCP: `offset` exposto (shared `_page_args`
+  valida limit/offset; malformado → JSON-RPC -32603).
+- Studio trace-detail: UI de params por avaliador — fields tipados por
+  kind (number/int/bool/list/json/text) serializam para
+  `{name, params}`; valor malformado bloqueia antes do POST; campo
+  vazio = omitido → `evaluator_error`/`n/a` honesto (comportamento
+  anterior preservado).
+- Studio `/datasets`: list/search, create dataset, create version com
+  cases (input/expected JSON), e painel "compare cohorts" que posta o
+  body real de `/v1/eval/compare` e renderiza deltas + gate verdict.
+
 ## Residuals — DOCUMENTED_ONLY
 
-- `lens.{sessions,tools}` MCP: `limit` >500 clamps (API também); paginação por
-  `offset` existe na store/API mas o tool MCP só expõe `limit`.
+- `limit` >500 clamps nos roll-ups (store/API/CLI/MCP — consistente).
 - Saved views legadas: toleradas, campos novos ausentes → defaults.
-- Studio eval runner: avaliadores que exigem params rodam com `{}` →
-  `evaluator_error`/`n/a` honesto; UI de params é trabalho futuro.
+- `POST /v1/eval/compare`: trace-id ausente é 404 per-side (não há
+  `missing_trace_ids` na resposta — UI reflete o erro verbatim).
+- Side `dataset` em compare é label, não resolver — a UI documenta.
