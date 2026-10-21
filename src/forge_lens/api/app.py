@@ -163,6 +163,11 @@ def create_app(
     # effective mode: explicit auth_mode, else `api_key` implies "key",
     # else local-first "none"
     _mode = cfg.auth_mode if cfg.auth_mode != "none" else ("key" if cfg.api_key else "none")
+    if _mode == "key" and not cfg.api_key:
+        raise ValueError(
+            "auth_mode='key' requires api_key — every write would be a "
+            "permanent 401 otherwise"
+        )
 
     def _audit(
         actor: str,
@@ -1228,9 +1233,12 @@ def create_app(
                 raise _reject_request(
                     422, f"budget.{field} must be a number"
                 ) from None
-            if isinstance(out, (int, float)) and not math.isfinite(out):
+            if (
+                isinstance(out, (int, float))
+                and (not math.isfinite(out) or out <= 0)
+            ):
                 raise _reject_request(
-                    422, f"budget.{field} must be finite")
+                    422, f"budget.{field} must be a positive finite number")
             return out
 
         budget = AgentBudget(
@@ -1241,6 +1249,9 @@ def create_app(
         ctx = body.get("context") or {}
         if not isinstance(ctx, dict):
             raise _reject_request(422, "context must be an object")
+        # server-side objects can never arrive over JSON — inject so the
+        # specialist gets the real registry, not a dead/invalid wire value
+        ctx = {**ctx, "pricing": _registry()}
         run_id = body.get("run_id")
         if run_id is not None and not isinstance(run_id, str):
             raise _reject_request(422, "run_id must be a string")
@@ -1306,6 +1317,11 @@ def create_app(
         passes ``"use_saved": true``."""
         from forge_lens.ops.alerts import save_rule
 
+        ident = getattr(request.state, "lens_identity", None)
+        if ident is not None and ident.projects:
+            raise _reject_request(
+                403, "alert rules are global — an unscoped admin key "
+                     "is required")
         body = await _eval_body(request)
         rule = body.get("rule")
         if not isinstance(rule, dict) or not isinstance(
@@ -1327,6 +1343,11 @@ def create_app(
         """Delete a persisted rule — keeps the file under the eval cap."""
         from forge_lens.ops.alerts import delete_rule, load_rules
 
+        ident = getattr(request.state, "lens_identity", None)
+        if ident is not None and ident.projects:
+            raise _reject_request(
+                403, "alert rules are global — an unscoped admin key "
+                     "is required")
         path = cfg.data_dir / "alert-rules.json"
         if not any(r["rule_id"] == rule_id for r in load_rules(path)):
             raise _reject_request(404, "rule not found")

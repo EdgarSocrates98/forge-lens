@@ -60,9 +60,10 @@ def _registry() -> dict[str, ToolFn]:
 
     def _cost_analyst(trace: Trace, ctx: dict[str, Any]) -> dict[str, Any]:
         from forge_lens.intel.cost import trace_cost
+        from forge_lens.intel.pricing import PricingRegistry
 
         reg = ctx.get("pricing")
-        if reg is None:
+        if not isinstance(reg, PricingRegistry):
             return {"reason": "no pricing registry"}
         return trace_cost(trace, reg).model_dump(mode="json")
 

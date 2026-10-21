@@ -1472,3 +1472,33 @@ def test_require_no_error_non_bool_defaults_true(
                         "metric": "completed",
                         "params": {"require_no_error": "false"}}]})
     assert r.status_code == 200  # truthy string treated as default True
+
+
+def test_cost_analyst_works_via_api_and_context_cannot_500(
+    client: TestClient, synthetic_trace: Trace,
+) -> None:
+    """The pricing registry is injected server-side — a client-supplied
+    'pricing' context value is ignored, never an AttributeError → 500."""
+    env = {"traces": [synthetic_trace.model_dump(mode="json")]}
+    assert client.post("/v1/traces", json=env).status_code == 200
+    tid = synthetic_trace.trace_id
+    for bad_pricing in ({}, "x", [1], 42):
+        r = client.post(f"/v1/analyze/cost_analyst/{tid}",
+                        json={"context": {"pricing": bad_pricing}})
+        assert r.status_code == 200, (bad_pricing, r.status_code, r.text)
+    # hostile non-positive/non-finite budgets → 422
+    for bad_budget in (0, -1, "nan"):
+        r = client.post(f"/v1/analyze/cost_analyst/{tid}", json={
+            "budget": {"max_iterations": bad_budget}})
+        assert r.status_code == 422, (bad_budget, r.status_code)
+
+
+def test_empty_project_id_rejected(
+    client: TestClient, synthetic_trace: Trace,
+) -> None:
+    tr = synthetic_trace.model_dump(mode="json")
+    tr["project_id"] = ""
+    r = client.post("/v1/traces", json={"traces": [tr]})
+    assert r.status_code == 422, (r.status_code, r.text)
+    assert client.get(
+        f"/v1/traces/{synthetic_trace.trace_id}").status_code == 404

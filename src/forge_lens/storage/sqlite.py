@@ -747,7 +747,7 @@ class SQLiteTraceStore:
         except UnicodeEncodeError:
             return None
         with self._lock:
-            if project_id:
+            if project_id is not None:
                 trow = self._conn.execute(
                     "SELECT * FROM traces WHERE project_id=? AND trace_id=?",
                     (project_id, trace_id),
@@ -792,7 +792,7 @@ class SQLiteTraceStore:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         clauses, params = [], []
-        if project_id:
+        if project_id is not None:
             clauses.append("project_id = ?")
             params.append(project_id)
         if session_id:
@@ -828,8 +828,8 @@ class SQLiteTraceStore:
 
     def stats(self, project_id: str | None = None) -> dict[str, Any]:
         with self._lock:
-            where = " WHERE project_id = ?" if project_id else ""
-            params = (project_id,) if project_id else ()
+            where = " WHERE project_id = ?" if project_id is not None else ""
+            params = (project_id,) if project_id is not None else ()
             traces = self._conn.execute(
                 f"SELECT COUNT(*) c FROM traces{where}", params
             ).fetchone()["c"]
@@ -838,8 +838,8 @@ class SQLiteTraceStore:
             ).fetchone()["c"]
             errors = self._conn.execute(
                 "SELECT COUNT(*) c FROM spans WHERE status_code='error'"
-                + (" AND project_id = ?" if project_id else ""),
-                params if project_id else (),
+                + (" AND project_id = ?" if project_id is not None else ""),
+                params if project_id is not None else (),
             ).fetchone()["c"]
             # WAL mode: live data also sits in -wal/-shm sidecars.
             db_size = sum(
@@ -918,7 +918,7 @@ class SQLiteTraceStore:
 
     def list_datasets(self, project_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
-            if project_id:
+            if project_id is not None:
                 rows = self._conn.execute(
                     "SELECT * FROM datasets WHERE project_id=? "
                     "ORDER BY dataset_id",
@@ -1218,7 +1218,7 @@ class SQLiteTraceStore:
         deletion would fabricate incomplete executions."""
         clauses = ["started_ns < ?"]
         params: list[Any] = [before_ns]
-        if project_id:
+        if project_id is not None:
             clauses.append("project_id = ?")
             params.append(project_id)
         where = " AND ".join(clauses)
@@ -1248,8 +1248,8 @@ class SQLiteTraceStore:
             for tid in trace_ids:
                 rows = self._conn.execute(
                     "SELECT project_id, trace_id FROM traces WHERE trace_id = ?"
-                    + (" AND project_id = ?" if project_id else ""),
-                    (tid, project_id) if project_id else (tid,),
+                    + (" AND project_id = ?" if project_id is not None else ""),
+                    (tid, project_id) if project_id is not None else (tid,),
                 ).fetchall()
                 for row in rows:
                     self._conn.execute(

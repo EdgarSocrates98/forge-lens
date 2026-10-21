@@ -11,6 +11,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields
+from typing import Any
 
 from forge_lens.contracts.v1.trace import IntegrityFlag, SpanKind, Trace
 from forge_lens.core.bounded import BoundedList
@@ -25,7 +26,7 @@ from forge_lens.core.metrics import (
     M_TRACES_INGESTED,
     METRICS,
 )
-from forge_lens.core.time import ensure_aware
+from forge_lens.core.time import ensure_aware, to_unix_nano
 from forge_lens.intel.cost import extract_usage
 from forge_lens.sanitize.redact import SanitizeReport, sanitize_trace
 from forge_lens.storage.base import TraceStore
@@ -135,6 +136,39 @@ def flag_integrity(trace: Trace) -> list[str]:
     return warnings
 
 
+def _ensure_storable(trace: Trace) -> None:
+    """Validate everything a SQLite bind can reject — empty project_id,
+    int64-range timestamps, unencodable TEXT — BEFORE the first write
+    of the batch, so ingest is all-or-nothing for input errors."""
+    if not trace.project_id or not trace.project_id.strip():
+        raise ValidationError(
+            f"trace {trace.trace_id}: project_id must be non-empty")
+    to_unix_nano(trace.started_at)
+    if trace.ended_at is not None:
+        to_unix_nano(trace.ended_at)
+    for span in trace.spans:
+        to_unix_nano(span.start_time)
+        if span.end_time is not None:
+            to_unix_nano(span.end_time)
+    # any string the driver must encode — attributes included (they
+    # land via json.dumps, which escapes safely, but the walk is cheap
+    # and means a future TEXT column can't re-open the hole)
+    stack: list[Any] = [trace.model_dump(mode="python")]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, str):
+            try:
+                cur.encode("utf-8")
+            except UnicodeEncodeError:
+                raise ValidationError(
+                    f"trace {trace.trace_id}: unencodable string "
+                    "(lone surrogate)") from None
+        elif isinstance(cur, dict):
+            stack.extend(cur.values())
+        elif isinstance(cur, (list, tuple)):
+            stack.extend(cur)
+
+
 def _normalize_times(trace: Trace) -> None:
     """Coerce every naive datetime in the trace to UTC-aware.
 
@@ -209,6 +243,12 @@ class IngestPipeline:
                     f"trace {trace.trace_id}: {len(bad)} span(s) declare a different "
                     f"trace_id ({bad[:5]}) — envelope is inconsistent"
                 )
+            # every bind-time failure mode must surface here, before the
+            # first upsert — otherwise a bad record mid-batch leaves a
+            # partially-committed ingest that a retried client can't
+            # reason about (dedup covers retries, but a "failed" batch
+            # persisting rows is a lie about what happened)
+            _ensure_storable(trace)
 
         result = IngestResult()
         # warnings are bounded during accumulation — a hostile batch

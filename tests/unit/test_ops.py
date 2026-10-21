@@ -435,3 +435,96 @@ def test_parse_session_oversize_rejected(tmp_path: Path) -> None:
     big.write_bytes(b" " * (257 * 1024 * 1024))
     with pytest.raises(ValueError, match="MiB"):
         parse_session(big)
+
+
+def test_ingest_batch_all_or_nothing_on_bad_record(tmp_path: Path) -> None:
+    """A surrogate/int64-overflow record mid-batch must fail the WHOLE
+    batch before any upsert — never a partial commit."""
+    from forge_lens.core.config import LensConfig
+    from forge_lens.ingest.pipeline import IngestPipeline
+
+    store = SQLiteTraceStore(tmp_path / "b.db")
+    pipe = IngestPipeline(store, LensConfig(
+        data_dir=tmp_path, db_path=tmp_path / "b.db"))
+    good = _trace([_tool(0)])
+    bad = _trace([_tool(1)])
+    for s in bad.spans:
+        object.__setattr__(s, "name", "x\ud800")
+    from forge_lens.core.errors import ValidationError as _VE
+    with pytest.raises(_VE):
+        pipe.ingest([good, bad])
+    assert store.stats()["traces"] == 0  # nothing persisted
+    # int64 range on a later trace → same guarantee
+    from datetime import timedelta as _td
+    bad2 = _trace([_tool(2)])
+    object.__setattr__(bad2, "started_at", _T0 + _td(days=1_000_000))
+    with pytest.raises(_VE):
+        pipe.ingest([_trace([_tool(3)]), bad2])
+    assert store.stats()["traces"] == 0
+    store.close()
+
+
+def test_scoped_admin_blocked_from_global_alert_rules(
+    tmp_path: Path, synthetic_trace: Trace,
+) -> None:
+    """alert-rules.json is global — a scoped admin writing it is
+    cross-tenant config influence."""
+    from forge_lens.security.keys import generate_key
+
+    store = SQLiteTraceStore(tmp_path / "ar.db")
+    cfg = LensConfig(data_dir=tmp_path, db_path=tmp_path / "ar.db",
+                     auth_mode="keys")
+    app = create_app(store=store, config=cfg)
+    _, root, h = generate_key()
+    store.create_api_key("root", name="root", key_hash=h, role="admin")
+    try:
+        with TestClient(app) as c:
+            r = c.post("/v1/admin/keys",
+                       headers={"X-Forge-Lens-Key": root},
+                       json={"name": "sa", "role": "admin",
+                             "projects": ["p1"]})
+            sa = {"X-Forge-Lens-Key": r.json()["secret"]}
+            assert c.post("/v1/alerts/rules", headers=sa, json={
+                "rule": {"rule_id": "x", "metric": "trace_count",
+                         "op": ">", "threshold": 0}}).status_code == 403
+            assert c.delete("/v1/alerts/rules/x",
+                            headers=sa).status_code == 403
+            assert c.post("/v1/alerts/rules", json={
+                "rule": {"rule_id": "x", "metric": "trace_count",
+                         "op": ">", "threshold": 0}},
+                headers={"X-Forge-Lens-Key": root}).status_code == 200
+    finally:
+        store.close()
+
+
+def test_auth_mode_key_requires_secret(tmp_path: Path) -> None:
+    """auth_mode='key' with no api_key must fail at startup, not serve
+    a permanently-401 API."""
+    cfg = LensConfig(data_dir=tmp_path, db_path=tmp_path / "k.db",
+                     auth_mode="key", api_key=None)
+    with pytest.raises(ValueError, match="api_key"):
+        create_app(config=cfg)
+
+
+def test_cli_ingest_surrogate_batch_leaves_zero_rows(tmp_path: Path) -> None:
+    """The reviewer's exact case: \\ud800 mid-batch via CLI — command
+    fails and NOTHING persists (was: partial commit + 'failed')."""
+    import json as _json
+
+    from typer.testing import CliRunner
+
+    from forge_lens.cli.main import app
+
+    db = tmp_path / "c.db"
+    good = _trace([_tool(0)]).model_dump(mode="json")
+    bad = _trace([_tool(1)]).model_dump(mode="json")
+    f = tmp_path / "batch.json"
+    # json.dumps emits \ud800 as an ASCII escape — json.loads on the
+    # CLI path decodes it back to a lone surrogate, exactly the wire case
+    bad["spans"][0]["name"] = "x\ud800"
+    f.write_text(_json.dumps({"traces": [good, bad]}))
+    r = CliRunner().invoke(app, ["ingest", str(f), "--db", str(db)])
+    assert r.exit_code == 1
+    store = SQLiteTraceStore(db)
+    assert store.stats()["traces"] == 0
+    store.close()

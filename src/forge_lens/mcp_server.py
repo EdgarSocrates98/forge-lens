@@ -38,16 +38,27 @@ def _tools() -> list[dict[str, Any]]:
 
 def serve(db_path: str) -> int:
     """Blocking stdio loop — one JSON-RPC message per line."""
-    store = SQLiteTraceStore(db_path, readonly=True)
+    try:
+        store = SQLiteTraceStore(db_path, readonly=True)
+    except Exception as exc:
+        print(f"cannot open store at {db_path}: {exc}", file=sys.stderr)
+        return 2
 
     def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name == "lens.list_traces":
             pid = args.get("project_id")
             if pid is not None and not isinstance(pid, str):
                 raise TypeError("project_id must be a string")
+            raw_lim = args.get("limit")
+            if raw_lim is not None and (
+                isinstance(raw_lim, bool)
+                or not isinstance(raw_lim, (int, float, str))
+            ):
+                raise TypeError("limit must be a number")
+            limit = 20 if raw_lim is None else int(raw_lim)
             return {"traces": store.list_traces(
                 project_id=pid,
-                limit=min(500, int(args.get("limit") or 20)))}
+                limit=min(500, max(0, limit)))}
         if name == "lens.get_trace":
             tid = args.get("trace_id")
             if not isinstance(tid, str) or not tid:
