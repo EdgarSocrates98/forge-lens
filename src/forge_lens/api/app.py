@@ -390,26 +390,103 @@ def create_app(
         else []
     )
 
+    _TRACE_STATUSES = ("error", "ok", "unset")
+
+    def _query_str(value: str | None, field: str) -> str | None:
+        """Query-param str safe to bind into sqlite — the query-string
+        counterpart of ``_eval_str`` (lone surrogates cannot reach the
+        driver)."""
+        if value is None:
+            return None
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise _reject_request(
+                422, f"{field}: unencodable string (lone surrogate)"
+            ) from None
+        return value
+
+    def _query_dt_ns(value: str | None, field: str) -> int | None:
+        """ISO-8601 query param → unix ns — same naive-as-UTC rule and
+        int64 bound as ``_optional_body_datetime_ns``."""
+        if value is None:
+            return None
+        try:
+            return to_unix_nano(ensure_aware(datetime.fromisoformat(value)))
+        except (ValueError, ValidationError) as exc:
+            raise _reject_request(422, f"{field}: {exc}") from exc
+
+    def _query_duration_ns(value: float | None, field: str) -> int | None:
+        """Non-negative finite ms → ns; anything else is bad input."""
+        if value is None:
+            return None
+        if not math.isfinite(value) or value < 0:
+            raise _reject_request(
+                422, f"{field}: non-negative finite number required"
+            )
+        return int(value * 1_000_000)
+
     @app.get(f"/{API_VERSION}/traces", dependencies=read_deps)
     async def list_traces(
         request: Request,
         project_id: str | None = None,
         session_id: str | None = None,
         status: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        min_duration_ms: float | None = None,
+        max_duration_ms: float | None = None,
+        q: str | None = None,
+        tool: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> dict[str, Any]:
         limit = max(1, min(limit, 500))
         offset = max(0, offset)  # symmetric with limit — clamp, don't reject
+        # validation before any store call — malformed input is a 422
+        # here, never a sqlite bind or an unhandled driver error
+        if status is not None and status not in _TRACE_STATUSES:
+            raise _reject_request(
+                422, f"status: one of {list(_TRACE_STATUSES)}"
+            )
+        session_id = _query_str(session_id, "session_id")
+        q = _query_str(q, "q")
+        tool = _query_str(tool, "tool")
+        since_ns = _query_dt_ns(since, "since")
+        until_ns = _query_dt_ns(until, "until")
+        min_ns = _query_duration_ns(min_duration_ms, "min_duration_ms")
+        max_ns = _query_duration_ns(max_duration_ms, "max_duration_ms")
         _require_scope(request, project_id or cfg.project_id)
         with METRICS.timer(M_QUERY_LATENCY):
             items = get_store().list_traces(
                 project_id=project_id or cfg.project_id,
                 session_id=session_id,
                 status=status,
+                since_ns=since_ns,
+                until_ns=until_ns,
+                min_duration_ns=min_ns,
+                max_duration_ns=max_ns,
+                q=q,
+                tool=tool,
                 limit=limit,
                 offset=offset,
             )
+        return {"items": items, "limit": limit, "offset": offset}
+
+    @app.get(f"/{API_VERSION}/sessions", dependencies=read_deps)
+    async def list_sessions(
+        request: Request,
+        project_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Session roll-up — one row per observed session_id, newest
+        activity first (see ``SQLiteTraceStore.list_sessions``)."""
+        limit = max(1, min(limit, 500))
+        offset = max(0, offset)
+        pid = _resolve_pid(request, project_id)
+        with METRICS.timer(M_QUERY_LATENCY):
+            items = get_store().list_sessions(pid, limit=limit, offset=offset)
         return {"items": items, "limit": limit, "offset": offset}
 
     @app.get(f"/{API_VERSION}/traces/{{trace_id}}", dependencies=read_deps)

@@ -1,6 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpParams, HttpHeaders } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 
 export interface TraceRow {
   trace_id: string; name?: string; status?: string;
@@ -27,6 +27,18 @@ export interface OpsSummary {
   project_id: string | null; stats: Record<string, unknown>;
   recent_traces: number; recent_failures: string[]; note: string;
 }
+/** Server-side filters accepted by GET /v1/traces — empty/undefined omitted. */
+export interface TraceFilter {
+  status?: string; session_id?: string; tool?: string; q?: string;
+  since?: string; until?: string;
+  min_duration_ms?: number; max_duration_ms?: number;
+  limit?: number;
+}
+/** Row shape returned by GET /v1/sessions (ordered last_activity_at DESC). */
+export interface SessionRow {
+  session_id: string; traces: number; spans: number;
+  first_started_at: string; last_activity_at: string | null;
+}
 
 const BASE_KEY = 'lens-api-base';
 const KEY_KEY = 'lens-api-key';
@@ -46,12 +58,30 @@ export class Api {
     return k ? new HttpHeaders({ 'X-Forge-Lens-Key': k }) : new HttpHeaders();
   }
 
-  listTraces(f: { status?: string; limit?: number }): Observable<{ items: TraceRow[] }> {
-    let p = new HttpParams();
-    if (f.status) p = p.set('status', f.status);
-    p = p.set('limit', f.limit ?? 100);
+  listTraces(f: TraceFilter): Observable<{ items: TraceRow[] }> {
+    let p = new HttpParams().set('limit', f.limit ?? 100);
+    const set = (k: string, v: string | number | undefined): void => {
+      if (v !== undefined && v !== '') p = p.set(k, v);
+    };
+    set('status', f.status);
+    set('session_id', f.session_id);
+    set('tool', f.tool);
+    set('q', f.q);
+    set('since', f.since);
+    set('until', f.until);
+    set('min_duration_ms', f.min_duration_ms);
+    set('max_duration_ms', f.max_duration_ms);
     return this.http.get<{ items: TraceRow[] }>(`${this.base()}/traces`,
       { params: p, headers: this.headers() });
+  }
+  listSessions(project_id?: string, limit?: number, offset?: number):
+    Observable<SessionRow[]> {
+    let p = new HttpParams();
+    if (project_id) p = p.set('project_id', project_id);
+    if (limit != null) p = p.set('limit', limit);
+    if (offset != null) p = p.set('offset', offset);
+    return this.http.get<{ items: SessionRow[] }>(`${this.base()}/sessions`,
+      { params: p, headers: this.headers() }).pipe(map(r => r.items));
   }
   private get<T>(path: string): Observable<T> {
     return this.http.get<T>(`${this.base()}${path}`, { headers: this.headers() });

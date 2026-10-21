@@ -67,3 +67,7 @@ A runnable offline demo (SDK → pipeline → store → read-back, no server):
 ## Documentation
 
 See `docs/` — architecture, guides, API/CLI/contracts reference, ADRs and cycle reports (PT-BR first, EN planned).
+
+- `docs/guides/quickstart.md` — first trace in minutes
+- `docs/guides/operations-runbook.md` — serve, auth modes, retention, backups, monitoring, alert rules
+- `docs/guides/troubleshooting.md` — symptom → cause → fix

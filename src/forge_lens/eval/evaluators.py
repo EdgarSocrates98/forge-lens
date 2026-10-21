@@ -60,17 +60,49 @@ def _error_free(
 def _latency_budget(
     trace: Trace, params: dict[str, Any], now: datetime | None
 ) -> EvaluationResult:
-    budget = float(params["budget_ms"])
+    # `max_duration_ms` is the canonical name; `budget_ms` stays accepted
+    # — it is what the CLI (`--budget-ms`) and pre-existing specs emit
+    if "max_duration_ms" in params:
+        raw = params["max_duration_ms"]
+    elif "budget_ms" in params:
+        raw = params["budget_ms"]
+    else:
+        raise KeyError("max_duration_ms")
+    # bool is a subclass of int and strings parse through float() — a
+    # wire value the caller typed as a number is the only valid shape
+    # (same convention as token_budget)
+    if isinstance(raw, (bool, str)) or not isinstance(raw, (int, float)):
+        raise TypeError(
+            f"max_duration_ms must be a number, got {type(raw).__name__}"
+        )
+    budget = float(raw)
     if not math.isfinite(budget):
-        raise ValueError("budget_ms must be finite")
-    if trace.ended_at is None or not trace.spans:
+        raise ValueError("max_duration_ms must be finite")
+    if budget <= 0:
+        raise ValueError("max_duration_ms must be positive")
+    if trace.ended_at is None:
         return _result(
             "latency_budget",
             "within_budget_ms",
             None,
             trace,
             now,
-            {"budget_ms": str(budget), "reason": "trace incomplete — no verdict"},
+            {
+                "budget_ms": str(budget),
+                "reason": "unended trace — duration unknown",
+            },
+        )
+    if not trace.spans:
+        return _result(
+            "latency_budget",
+            "within_budget_ms",
+            None,
+            trace,
+            now,
+            {
+                "budget_ms": str(budget),
+                "reason": "empty trace — duration unknown",
+            },
         )
     # envelope wall-clock — the honest "how long did the run take"
     observed = (trace.ended_at - trace.started_at).total_seconds() * 1000.0
@@ -350,6 +382,153 @@ def _task_completion(
     )
 
 
+def _bool_param(params: dict[str, Any], key: str, default: bool) -> bool:
+    """Optional bool — a non-bool falls back to ``default`` instead of
+    silently flipping semantics (same convention as task_completion)."""
+    raw = params.get(key, default)
+    return raw if isinstance(raw, bool) else default
+
+
+def _output_field(params: dict[str, Any]) -> str:
+    """Field carrying the trace's final output — ``output.value`` is the
+    OpenInference convention; ``field`` overrides for other producers."""
+    return str(params.get("field") or "output.value")
+
+
+def _contains(
+    trace: Trace, params: dict[str, Any], now: datetime | None
+) -> EvaluationResult:
+    """Literal-substring check against the trace's observed output."""
+    text = params["text"]
+    if not isinstance(text, str):
+        raise TypeError("contains 'text' must be a string")
+    field = _output_field(params)
+    case_sensitive = _bool_param(params, "case_sensitive", True)
+    observed, span_id = _observed_value(trace, field)
+    if not isinstance(observed, str):
+        return _result(
+            "contains",
+            "output_contains",
+            None,
+            trace,
+            now,
+            {"field": field, "reason": "field not observed as string"},
+        )
+    haystack = observed if case_sensitive else observed.lower()
+    needle = text if case_sensitive else text.lower()
+    matched = needle in haystack
+    return _result(
+        "contains",
+        "output_contains",
+        1.0 if matched else 0.0,
+        trace,
+        now,
+        {
+            "field": field,
+            "matched": str(matched).lower(),
+            "observed_in": span_id or "resource_attributes",
+            "case_sensitive": str(case_sensitive).lower(),
+            "needle": text[:120],
+        },
+    )
+
+
+def _regex(
+    trace: Trace, params: dict[str, Any], now: datetime | None
+) -> EvaluationResult:
+    """Regex search against the trace's observed output — an invalid
+    pattern is a malformed spec (evaluator_error), never a crash."""
+    pattern = params["pattern"]
+    if not isinstance(pattern, str):
+        raise TypeError("regex 'pattern' must be a string")
+    case_sensitive = _bool_param(params, "case_sensitive", True)
+    try:
+        rx = re.compile(pattern, 0 if case_sensitive else re.IGNORECASE)
+    except re.error as exc:
+        # re.error is not a ValueError — re-raise as one so the runner's
+        # evaluator_error path reports it instead of letting it escape
+        raise ValueError(f"invalid pattern: {exc}") from exc
+    field = _output_field(params)
+    observed, span_id = _observed_value(trace, field)
+    if not isinstance(observed, str):
+        return _result(
+            "regex",
+            "output_regex_match",
+            None,
+            trace,
+            now,
+            {"field": field, "reason": "field not observed as string"},
+        )
+    m = rx.search(observed)
+    details = {
+        "field": field,
+        "pattern": pattern,
+        "matched": str(m is not None).lower(),
+        "observed_in": span_id or "resource_attributes",
+        "case_sensitive": str(case_sensitive).lower(),
+    }
+    if m is not None:
+        match = m.group(0)
+        details["match"] = match[:120] + ("…" if len(match) > 120 else "")
+    return _result(
+        "regex",
+        "output_regex_match",
+        1.0 if m is not None else 0.0,
+        trace,
+        now,
+        details,
+    )
+
+
+def _count_bound(params: dict[str, Any], key: str) -> int:
+    """``min``/``max`` bound — a non-negative integer; bools, strings and
+    fractional floats are invalid params, not silent truncations."""
+    raw = params[key]  # KeyError → evaluator_error
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise TypeError(f"{key} must be an integer, got {type(raw).__name__}")
+    if isinstance(raw, float) and (not math.isfinite(raw) or not raw.is_integer()):
+        raise ValueError(f"{key} must be a finite integer")
+    bound = int(raw)
+    if bound < 0:
+        raise ValueError(f"{key} must be ≥ 0")
+    return bound
+
+
+def _tool_call_count(
+    trace: Trace, params: dict[str, Any], now: datetime | None
+) -> EvaluationResult:
+    """Count TOOL-kind spans (optionally one ``tool.name``) — pass when
+    the observed count sits inside the inclusive [min, max] bounds."""
+    lo = _count_bound(params, "min")
+    hi = _count_bound(params, "max")
+    if lo > hi:
+        raise ValueError(f"min ({lo}) must be ≤ max ({hi})")
+    tool = params.get("tool")
+    if tool is not None and not isinstance(tool, str):
+        raise TypeError(f"tool must be a string, got {type(tool).__name__}")
+    tools = [s for s in trace.spans if s.kind is SpanKind.TOOL]
+    counted = (
+        tools
+        if tool is None
+        else [s for s in tools if s.attributes.get("tool.name") == tool]
+    )
+    count = len(counted)
+    return _result(
+        "tool_call_count",
+        "tool_calls_within_bounds",
+        1.0 if lo <= count <= hi else 0.0,
+        trace,
+        now,
+        {
+            "tool": tool if tool is not None else "*",
+            "count": str(count),
+            "min": str(lo),
+            "max": str(hi),
+            "span_ids": ",".join(s.span_id for s in counted),
+        },
+    )
+
+
 # name → (fn, binary?) — binary marks metrics whose trace-level pass
 # fraction (score==1.0 counts) supports the proportion z-test in compare
 EVALUATORS: dict[str, tuple[Evaluator, bool]] = {
@@ -362,6 +541,9 @@ EVALUATORS: dict[str, tuple[Evaluator, bool]] = {
     "token_f1": (_token_f1, False),  # continuous — deltas only
     "allowed_tools": (_allowed_tools, True),
     "task_completion": (_task_completion, True),
+    "contains": (_contains, True),
+    "regex": (_regex, True),
+    "tool_call_count": (_tool_call_count, True),
 }
 """Binary flag: ``True`` = the score is a per-trace pass (1.0)/fail —
 the pass fraction across traces is a proportion the z-test can test."""

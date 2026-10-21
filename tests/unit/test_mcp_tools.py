@@ -1,0 +1,378 @@
+"""Cycle 13 — MCP stdio observer tools over the read-intelligence surface.
+
+Drives ``forge_lens.mcp_server.serve`` in-process: ``sys.stdin`` is
+swapped for a StringIO of newline-delimited JSON-RPC frames and stdout
+is captured, exactly like ``test_mcp_server_survives_bad_call`` in
+``test_ops.py``.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from forge_lens.contracts.v1.trace import (
+    Span,
+    SpanKind,
+    Status,
+    StatusCode,
+    Trace,
+)
+from forge_lens.intel.pricing import PRICING_SOURCE_ID
+from forge_lens.mcp_server import serve
+from forge_lens.storage.sqlite import SQLiteTraceStore
+
+_T0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+LOOP_TID = "b" * 32
+
+
+def _loop_trace() -> Trace:
+    """Four identical tool calls — detect_loops must flag the run."""
+    spans = [
+        Span(
+            trace_id=LOOP_TID,
+            span_id=f"{i + 1:016x}",
+            name="tool read",
+            kind=SpanKind.TOOL,
+            start_time=_T0 + timedelta(milliseconds=i),
+            end_time=_T0 + timedelta(milliseconds=i + 1),
+            status=Status(code=StatusCode.OK),
+            attributes={"tool.args": {"path": "/x"}},
+        )
+        for i in range(4)
+    ]
+    return Trace(
+        trace_id=LOOP_TID,
+        root_span_id=spans[0].span_id,
+        started_at=_T0,
+        ended_at=_T0 + timedelta(milliseconds=4),
+        status=Status(code=StatusCode.OK),
+        spans=spans,
+    )
+
+
+@pytest.fixture
+def seeded_db(
+    tmp_path: Path, synthetic_trace: Trace, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """A closed store on disk — ``serve`` reopens it readonly.
+
+    ``load_config()`` (called by ``serve`` for the pricing registry)
+    reads ``cwd/.forge-lens/config.toml`` and ``FORGE_LENS_*`` env, so
+    tests pin both for determinism.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("FORGE_LENS_PRICING_FILE", raising=False)
+    db = tmp_path / "m.db"
+    store = SQLiteTraceStore(db)
+    store.upsert_trace(synthetic_trace)
+    store.upsert_trace(_loop_trace())
+    store.upsert_dataset("ds-1", project_id="default", name="demo")
+    store.close()
+    return db
+
+
+def _rpc(method: str, rid: int, **params: Any) -> dict[str, Any]:
+    msg: dict[str, Any] = {"jsonrpc": "2.0", "id": rid, "method": method}
+    if params:
+        msg["params"] = params
+    return msg
+
+
+def _call_tool(rid: int, name: str, arguments: Any = None) -> dict[str, Any]:
+    params: dict[str, Any] = {"name": name}
+    if arguments is not None:
+        params["arguments"] = arguments
+    return _rpc("tools/call", rid, **params)
+
+
+def _serve(
+    db: Path,
+    msgs: list[dict[str, Any]],
+    capsys: pytest.CaptureFixture[str],
+) -> dict[int, dict[str, Any]]:
+    stdin = io.StringIO("".join(json.dumps(m) + "\n" for m in msgs))
+    old = sys.stdin
+    sys.stdin = stdin
+    try:
+        serve(str(db))
+    finally:
+        sys.stdin = old
+    out = [
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if line
+    ]
+    return {o["id"]: o for o in out}
+
+
+def _payload(resp: dict[str, Any]) -> dict[str, Any]:
+    """Unwrap the MCP text-content envelope into the tool's dict."""
+    return json.loads(resp["result"]["content"][0]["text"])
+
+
+def test_tools_list_covers_read_intel(
+    seeded_db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    by_id = _serve(seeded_db, [_rpc("tools/list", 1)], capsys)
+    tools = by_id[1]["result"]["tools"]
+    assert {t["name"] for t in tools} == {
+        "lens.capabilities",
+        "lens.cost",
+        "lens.detect_loops",
+        "lens.failure",
+        "lens.get_trace",
+        "lens.list_datasets",
+        "lens.list_traces",
+        "lens.stats",
+        "lens.trace_efficiency",
+    }
+    for t in tools:
+        assert t["inputSchema"]["type"] == "object", t["name"]
+
+
+def test_existing_tools_still_work(
+    seeded_db: Path,
+    capsys: pytest.CaptureFixture[str],
+    synthetic_trace: Trace,
+) -> None:
+    by_id = _serve(
+        seeded_db,
+        [
+            _call_tool(1, "lens.list_traces", {"limit": 5}),
+            _call_tool(
+                2, "lens.get_trace", {"trace_id": synthetic_trace.trace_id}
+            ),
+            _call_tool(3, "lens.stats"),
+        ],
+        capsys,
+    )
+    assert len(_payload(by_id[1])["traces"]) == 2
+    assert (
+        _payload(by_id[2])["trace"]["trace_id"] == synthetic_trace.trace_id
+    )
+    assert _payload(by_id[3])["traces"] == 2
+
+
+def test_detect_loops_happy_missing_and_wrong_project(
+    seeded_db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    by_id = _serve(
+        seeded_db,
+        [
+            _call_tool(1, "lens.detect_loops", {"trace_id": LOOP_TID}),
+            _call_tool(2, "lens.detect_loops", {"trace_id": "f" * 32}),
+            _call_tool(
+                3,
+                "lens.detect_loops",
+                {"trace_id": LOOP_TID, "project_id": "other"},
+            ),
+        ],
+        capsys,
+    )
+    out = _payload(by_id[1])
+    assert out["trace_id"] == LOOP_TID
+    assert out["classification"] == "heuristic"
+    kinds = {f["kind"] for f in out["findings"]}
+    assert "repeated_identical_tool" in kinds
+    # missing / wrong-project ids are data, not protocol faults
+    assert _payload(by_id[2]) == {
+        "trace_id": "f" * 32,
+        "error": "trace not found",
+    }
+    assert _payload(by_id[3])["error"] == "trace not found"
+
+
+def test_trace_efficiency_roll_up(
+    seeded_db: Path,
+    capsys: pytest.CaptureFixture[str],
+    synthetic_trace: Trace,
+) -> None:
+    by_id = _serve(
+        seeded_db,
+        [
+            _call_tool(
+                1,
+                "lens.trace_efficiency",
+                {"trace_id": synthetic_trace.trace_id},
+            )
+        ],
+        capsys,
+    )
+    out = _payload(by_id[1])
+    assert out["trace_id"] == synthetic_trace.trace_id
+    assert out["tool_calls"] == 1
+    assert out["llm_calls"] == 1
+    assert out["error_spans"] == 1
+    assert out["input_tokens"] == 100
+    assert out["output_tokens"] == 42
+    assert out["succeeded"] is False
+
+
+def test_cost_default_bundled_registry(
+    seeded_db: Path,
+    capsys: pytest.CaptureFixture[str],
+    synthetic_trace: Trace,
+) -> None:
+    by_id = _serve(
+        seeded_db,
+        [_call_tool(1, "lens.cost", {"trace_id": synthetic_trace.trace_id})],
+        capsys,
+    )
+    out = _payload(by_id[1])
+    # same shape as GET /v1/traces/{id}/cost
+    assert out["pricing_source"] == PRICING_SOURCE_ID
+    assert out["provenance"] == "derived"
+    assert "gpt-test" in out["unpriced_models"]
+    assert out["total_input_tokens"] == 100
+    assert out["total_output_tokens"] == 42
+    assert isinstance(out["waste"], list)
+    assert isinstance(out["span_costs"], list)
+
+
+def test_cost_uses_pricing_file_env(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    synthetic_trace: Trace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same path as the API: FORGE_LENS_PRICING_FILE → from_file."""
+    monkeypatch.chdir(tmp_path)
+    prices = tmp_path / "prices.json"
+    prices.write_text(
+        json.dumps(
+            {"gpt-test": {"input_per_mtok": 1.0, "output_per_mtok": 2.0}}
+        )
+    )
+    monkeypatch.setenv("FORGE_LENS_PRICING_FILE", str(prices))
+    db = tmp_path / "m.db"
+    store = SQLiteTraceStore(db)
+    store.upsert_trace(synthetic_trace)
+    store.close()
+    by_id = _serve(
+        db,
+        [_call_tool(1, "lens.cost", {"trace_id": synthetic_trace.trace_id})],
+        capsys,
+    )
+    out = _payload(by_id[1])
+    assert out["pricing_source"] == "file:prices.json"
+    assert out["unpriced_models"] == []
+    assert out["total_estimated_usd"] > 0
+
+
+def test_bad_pricing_file_fails_fast_at_startup(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Operator-config error → exit 2 before serving, like app startup."""
+    monkeypatch.chdir(tmp_path)
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json")
+    monkeypatch.setenv("FORGE_LENS_PRICING_FILE", str(bad))
+    db = tmp_path / "m.db"
+    SQLiteTraceStore(db).close()
+    stdin = io.StringIO(json.dumps(_rpc("tools/list", 1)) + "\n")
+    old = sys.stdin
+    sys.stdin = stdin
+    try:
+        rc = serve(str(db))
+    finally:
+        sys.stdin = old
+    assert rc == 2
+    assert "pricing" in capsys.readouterr().err
+
+
+def test_failure_classification(
+    seeded_db: Path,
+    capsys: pytest.CaptureFixture[str],
+    synthetic_trace: Trace,
+) -> None:
+    by_id = _serve(
+        seeded_db,
+        [
+            _call_tool(
+                1, "lens.failure", {"trace_id": synthetic_trace.trace_id}
+            ),
+            _call_tool(2, "lens.failure", {"trace_id": LOOP_TID}),
+        ],
+        capsys,
+    )
+    out = _payload(by_id[1])
+    assert out["failed"] is True
+    assert out["category"] == "timeout"
+    assert out["evidence"]["span_ids"]
+    clean = _payload(by_id[2])
+    assert clean["failed"] is False
+    assert clean["category"] == "unknown"
+
+
+def test_list_datasets(
+    seeded_db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    by_id = _serve(
+        seeded_db,
+        [
+            _call_tool(1, "lens.list_datasets"),
+            _call_tool(2, "lens.list_datasets", {"project_id": "other"}),
+        ],
+        capsys,
+    )
+    datasets = _payload(by_id[1])["datasets"]
+    assert [d["dataset_id"] for d in datasets] == ["ds-1"]
+    assert datasets[0]["name"] == "demo"
+    assert _payload(by_id[2])["datasets"] == []
+
+
+def test_capabilities_matrix(
+    seeded_db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    by_id = _serve(seeded_db, [_call_tool(1, "lens.capabilities")], capsys)
+    out = _payload(by_id[1])
+    assert "claude_code" in out["hosts"]
+    assert out["hosts"]["claude_code"]["native_tracing"] is False
+    assert out["hosts"]["forge"]["native_tracing"] is True
+
+
+def test_malformed_args_error_never_kills_loop(
+    seeded_db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Every bad-typed arg → JSON-RPC -32603; the loop keeps serving."""
+    by_id = _serve(
+        seeded_db,
+        [
+            _call_tool(1, "lens.detect_loops", {"trace_id": 123}),
+            _call_tool(
+                2,
+                "lens.failure",
+                {"trace_id": "x" * 32, "project_id": 42},
+            ),
+            _call_tool(3, "lens.cost", "notadict"),
+            _call_tool(4, "lens.trace_efficiency", {}),
+            _call_tool(5, "lens.list_datasets", {"project_id": ["p"]}),
+            _call_tool(6, "lens.list_traces", {"limit": "lots"}),
+            _rpc("tools/list", 7),
+        ],
+        capsys,
+    )
+    for rid in range(1, 7):
+        assert by_id[rid]["error"]["code"] == -32603, rid
+    assert "tools" in by_id[7]["result"]
+
+
+def test_unknown_tool_is_data_not_death(
+    seeded_db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    by_id = _serve(
+        seeded_db,
+        [_call_tool(1, "lens.nope", {}), _rpc("ping", 2)],
+        capsys,
+    )
+    assert "unknown tool" in _payload(by_id[1])["error"]
+    assert by_id[2]["result"] == {}

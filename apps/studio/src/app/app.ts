@@ -12,6 +12,7 @@ import { Api } from './api';
       <strong>Forge Lens</strong>
       <nav>
         <a routerLink="/">traces</a>
+        <a routerLink="/sessions">sessions</a>
         <a routerLink="/ops">ops</a>
         <a routerLink="/capabilities">capabilities</a>
       </nav>

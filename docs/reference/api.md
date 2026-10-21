@@ -36,9 +36,35 @@ inválida, `429` rate limit.
 
 ## Consulta
 
-### `GET /v1/traces?project_id&session_id&status&limit≤500&offset`
+### `GET /v1/traces?project_id&session_id&status&since&until&min_duration_ms&max_duration_ms&q&tool&limit≤500&offset`
 `{items:[{trace_id, project_id, session_id, root_span_id, started_at,
 ended_at, status, span_count, error_count}], limit, offset}`.
+
+Todos os filtros combinam com `AND`; parâmetros malformados → `422`:
+
+- `status`: um de `ok|error|unset` (coluna `status_code`).
+- `session_id`: correspondência exata.
+- `since`/`until`: ISO-8601 → limites **inclusivos** sobre `started_at`
+  (timestamps naïve são lidos como UTC).
+- `min_duration_ms`/`max_duration_ms`: números ≥ 0, comparados contra
+  `ended_at − started_at`. Traces sem `ended_at` (ainda em execução)
+  **são excluídas sempre que um filtro de duração é usado** — duração
+  desconhecida não é coagida a 0 nem a "ainda rodando".
+- `q`: substring literal sobre `trace_id` OU nome de qualquer span.
+- `tool`: substring literal sobre o valor do atributo `tool.name` de
+  qualquer span. `q` e `tool` escapam `%`/`_`/`\` — um `%` no termo
+  casa um sinal de porcentagem literal, nunca funciona como wildcard.
+
+### `GET /v1/sessions?project_id&limit≤500&offset`
+Roll-up por sessão — `{items:[{session_id, traces, spans,
+first_started_at, last_activity_at}], limit, offset}`.
+`first_started_at` = menor `started_at` da sessão; `last_activity_at` =
+maior instante observável (o `ended_at` de uma trace encerrada, ou o
+`started_at` de uma ainda em execução — nunca `null` enquanto houver
+traces). Ordenação determinística: `last_activity_at` DESC, desempate
+por `session_id` ASC. Escopo resolvido como nas outras rotas: sem
+`project_id`, usa `cfg.project_id`; chaves com escopo recebem `403`
+fora dele.
 
 ### `GET /v1/traces/{trace_id}?project_id`
 Contrato `Trace` completo ou `404`. Sem `project_id`, usa o

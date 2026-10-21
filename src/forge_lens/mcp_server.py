@@ -1,9 +1,12 @@
-"""MCP stdio observer server — Cycle 10.
+"""MCP stdio observer server — Cycle 10, expanded in Cycle 13.
 
 A minimal JSON-RPC 2.0 MCP server over stdin/stdout exposing read-only
 Lens tools. Real MCP surface: `tools/list`, `tools/call`,
 `initialize`, `ping` — enough for a client to observe stored traces
-through the protocol it already speaks.
+through the protocol it already speaks. The tool set mirrors the API's
+core read intelligence (loops, efficiency, cost, failure, datasets,
+capabilities) so MCP-capable agents can investigate traces without a
+running HTTP server.
 """
 
 from __future__ import annotations
@@ -13,27 +16,79 @@ import sys
 from typing import Any
 
 from forge_lens import __version__
+from forge_lens.contracts.v1.trace import Trace
 from forge_lens.storage.sqlite import SQLiteTraceStore
 
 _METHODS = ("initialize", "ping", "tools/list", "tools/call", "notifications/initialized")
 
+_TRACE_INPUT = {
+    "type": "object",
+    "required": ["trace_id"],
+    "properties": {
+        "trace_id": {"type": "string"},
+        "project_id": {"type": "string"},
+    },
+}
+
 
 def _tools() -> list[dict[str, Any]]:
     return [
+        {"name": "lens.capabilities",
+         "description": "Host adapter capability matrix — honest "
+                        "coverage claims.",
+         "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "lens.cost",
+         "description": "Derived cost report for one trace "
+                        "(registry-priced; includes waste findings).",
+         "inputSchema": _TRACE_INPUT},
+        {"name": "lens.detect_loops",
+         "description": "Heuristic loop/no-progress findings with "
+                        "span evidence.",
+         "inputSchema": _TRACE_INPUT},
+        {"name": "lens.failure",
+         "description": "Deterministic failure classification with "
+                        "span evidence.",
+         "inputSchema": _TRACE_INPUT},
+        {"name": "lens.get_trace",
+         "description": "Fetch one trace by id.",
+         "inputSchema": _TRACE_INPUT},
+        {"name": "lens.list_datasets",
+         "description": "List eval datasets in the store.",
+         "inputSchema": {"type": "object", "properties": {
+             "project_id": {"type": "string"}}}},
         {"name": "lens.list_traces",
          "description": "List recent traces (bounded, sorted).",
          "inputSchema": {"type": "object", "properties": {
              "limit": {"type": "integer", "default": 20},
              "project_id": {"type": "string"}}}},
-        {"name": "lens.get_trace",
-         "description": "Fetch one trace by id.",
-         "inputSchema": {"type": "object", "required": ["trace_id"],
-                         "properties": {"trace_id": {"type": "string"},
-                                        "project_id": {"type": "string"}}}},
         {"name": "lens.stats",
          "description": "Store statistics snapshot.",
-         "inputSchema": {"type": "object", "properties": {}}},
+         "inputSchema": {"type": "object", "properties": {
+             "project_id": {"type": "string"}}}},
+        {"name": "lens.trace_efficiency",
+         "description": "Per-trace efficiency roll-up "
+                        "(tokens/tools/retries).",
+         "inputSchema": _TRACE_INPUT},
     ]
+
+
+def _pid(args: dict[str, Any]) -> str | None:
+    pid = args.get("project_id")
+    if pid is not None and not isinstance(pid, str):
+        raise TypeError("project_id must be a string")
+    return pid
+
+
+def _tid_pid(args: dict[str, Any]) -> tuple[str, str | None]:
+    tid = args.get("trace_id")
+    if not isinstance(tid, str) or not tid:
+        raise TypeError("trace_id must be a non-empty string")
+    return tid, _pid(args)
+
+
+def _missing(trace_id: str) -> dict[str, Any]:
+    """Not-found is data, not a protocol fault — the loop keeps serving."""
+    return {"trace_id": trace_id, "error": "trace not found"}
 
 
 def serve(db_path: str) -> int:
@@ -44,11 +99,31 @@ def serve(db_path: str) -> int:
         print(f"cannot open store at {db_path}: {exc}", file=sys.stderr)
         return 2
 
+    # Identical construction to api/app.py: the registry comes from
+    # LensConfig.pricing_file (FORGE_LENS_PRICING_FILE / config.toml) or
+    # the bundled default. A malformed pricing file is an operator-config
+    # error — it fails fast here, once, never as a per-call fault.
+    from forge_lens.core.config import load_config
+    from forge_lens.intel.pricing import PricingRegistry
+
+    try:
+        pricing_file = load_config().pricing_file
+        pricing = (
+            PricingRegistry.from_file(pricing_file)
+            if pricing_file
+            else PricingRegistry()
+        )
+    except Exception as exc:
+        print(f"cannot load pricing registry: {exc}", file=sys.stderr)
+        return 2
+
+    def _trace_lookup(args: dict[str, Any]) -> tuple[str, Trace | None]:
+        tid, pid = _tid_pid(args)
+        return tid, store.get_trace(tid, project_id=pid)
+
     def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name == "lens.list_traces":
-            pid = args.get("project_id")
-            if pid is not None and not isinstance(pid, str):
-                raise TypeError("project_id must be a string")
+            pid = _pid(args)
             raw_lim = args.get("limit")
             if raw_lim is not None and (
                 isinstance(raw_lim, bool)
@@ -60,19 +135,52 @@ def serve(db_path: str) -> int:
                 project_id=pid,
                 limit=min(500, max(0, limit)))}
         if name == "lens.get_trace":
-            tid = args.get("trace_id")
-            if not isinstance(tid, str) or not tid:
-                raise TypeError("trace_id must be a non-empty string")
-            pid = args.get("project_id")
-            if pid is not None and not isinstance(pid, str):
-                raise TypeError("project_id must be a string")
+            tid, pid = _tid_pid(args)
             t = store.get_trace(tid, project_id=pid)
             return {"trace": t.model_dump(mode="json") if t else None}
         if name == "lens.stats":
-            pid = args.get("project_id")
-            if pid is not None and not isinstance(pid, str):
-                raise TypeError("project_id must be a string")
-            return store.stats(project_id=pid)
+            return store.stats(project_id=_pid(args))
+        if name == "lens.detect_loops":
+            from forge_lens.ops.loops import detect_loops
+
+            tid, trace = _trace_lookup(args)
+            if trace is None:
+                return _missing(tid)
+            return detect_loops(trace)
+        if name == "lens.trace_efficiency":
+            from forge_lens.intel.efficiency import trace_efficiency
+
+            tid, trace = _trace_lookup(args)
+            if trace is None:
+                return _missing(tid)
+            return trace_efficiency(trace)
+        if name == "lens.cost":
+            from forge_lens.intel import detect_waste, trace_cost
+
+            tid, trace = _trace_lookup(args)
+            if trace is None:
+                return _missing(tid)
+            # same shape as GET /v1/traces/{id}/cost
+            out = trace_cost(trace, pricing).model_dump(mode="json")
+            out["pricing_source"] = pricing.source
+            out["waste"] = [
+                w.model_dump(mode="json")
+                for w in detect_waste(trace, pricing)
+            ]
+            return out
+        if name == "lens.failure":
+            from forge_lens.investigate import classify_failure
+
+            tid, trace = _trace_lookup(args)
+            if trace is None:
+                return _missing(tid)
+            return classify_failure(trace).model_dump(mode="json")
+        if name == "lens.list_datasets":
+            return {"datasets": store.list_datasets(_pid(args))}
+        if name == "lens.capabilities":
+            from forge_lens.adapters.capabilities import capability_matrix
+
+            return capability_matrix()
         return {"error": f"unknown tool {name!r}"}
 
     for line in sys.stdin:

@@ -35,7 +35,20 @@ class TraceStore(Protocol):
         project_id: str | None = None,
         session_id: str | None = None,
         status: str | None = None,
+        since_ns: int | None = None,
+        until_ns: int | None = None,
+        min_duration_ns: int | None = None,
+        max_duration_ns: int | None = None,
+        q: str | None = None,
+        tool: str | None = None,
         limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]: ...
+
+    def list_sessions(
+        self,
+        project_id: str | None = None,
+        limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]: ...
 

@@ -58,6 +58,22 @@ Angular CLI does not come with an end-to-end testing framework by default. You c
 
 For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
 
+## Trace Explorer filters & Sessions
+
+The Trace Explorer (`/`, also reachable as `/traces`) mirrors every filter
+into the URL query string, so filtered views are deep-linkable. Beyond the
+status select it maps these `GET /v1/traces` params: `q` (trace id or
+span-name substring), `tool` (span `tool.name`), `session_id`,
+`min_duration_ms`/`max_duration_ms`, and `since`/`until` (picked as local
+datetimes, sent as ISO instants). **Save view** persists the whole filter
+set to `localStorage` (`lens-view:*`); older saved views missing the new
+keys still load.
+
+The **sessions** view (`/sessions`, linked in the header) lists sessions
+from `GET /v1/sessions` in pages of 50 with offset-based "load more"
+pagination. The search box filters fetched rows by session-id prefix, and
+each session links to `/traces?session_id=<id>`.
+
 ## API connection
 
 The Studio talks to `forge-lens serve` (default `http://localhost:7777`).

@@ -251,15 +251,73 @@ def traces_list(
     db: Annotated[Path | None, typer.Option("--db")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     status: Annotated[str | None, typer.Option("--status")] = None,
+    session: Annotated[
+        str | None, typer.Option("--session", help="exact session_id")
+    ] = None,
+    tool: Annotated[
+        str | None,
+        typer.Option("--tool", help="substring match on span tool.name"),
+    ] = None,
+    q: Annotated[
+        str | None,
+        typer.Option("--q", help="substring match on trace_id or span name"),
+    ] = None,
+    since: Annotated[
+        str | None, typer.Option("--since", help="ISO-8601 started_at lower bound")
+    ] = None,
+    until: Annotated[
+        str | None, typer.Option("--until", help="ISO-8601 started_at upper bound")
+    ] = None,
+    min_duration_ms: Annotated[
+        float | None, typer.Option("--min-duration-ms")
+    ] = None,
+    max_duration_ms: Annotated[
+        float | None, typer.Option("--max-duration-ms")
+    ] = None,
     limit: Annotated[int, typer.Option("--limit", "-n")] = 20,
     json_out: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """List stored traces (most recent first)."""
+    import math
+
+    from forge_lens.core.errors import ValidationError
+    from forge_lens.core.time import ensure_aware, to_unix_nano
+
     cfg = _config(db)
+
+    def _iso_ns(value: str | None, opt: str) -> int | None:
+        if value is None:
+            return None
+        try:
+            return to_unix_nano(ensure_aware(datetime.fromisoformat(value)))
+        except (ValueError, ValidationError) as exc:
+            typer.echo(f"invalid {opt} {value!r}: {exc}", err=True)
+            raise typer.Exit(2) from None
+
+    def _dur_ns(value: float | None, opt: str) -> int | None:
+        if value is None:
+            return None
+        if not math.isfinite(value) or value < 0:
+            typer.echo(
+                f"invalid {opt} {value!r}: non-negative finite ms expected",
+                err=True,
+            )
+            raise typer.Exit(2)
+        return int(value * 1_000_000)
+
     store = _store(cfg)
     try:
         items = store.list_traces(
-            project_id=project or cfg.project_id, status=status, limit=limit
+            project_id=project or cfg.project_id,
+            session_id=session,
+            status=status,
+            since_ns=_iso_ns(since, "--since"),
+            until_ns=_iso_ns(until, "--until"),
+            min_duration_ns=_dur_ns(min_duration_ms, "--min-duration-ms"),
+            max_duration_ns=_dur_ns(max_duration_ms, "--max-duration-ms"),
+            q=q,
+            tool=tool,
+            limit=limit,
         )
     finally:
         store.close()

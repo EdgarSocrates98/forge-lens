@@ -211,6 +211,21 @@ def _json_finite(value: Any) -> Any:
     return value
 
 
+def _like_escape(value: str) -> str:
+    """Literal-ize LIKE metacharacters in a user-supplied substring.
+
+    ``\\`` first — escaping ``%``/``_`` before the escape char would
+    double-escape the markers themselves. Bound with ``ESCAPE '\\'``
+    so a ``%`` in a search term matches a literal percent sign, never
+    acts as a wildcard.
+    """
+    return (
+        value.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+
+
 def _derived_status_code(spans: list[Span]) -> str | None:
     """The UPDATE path's CASE, in Python — bound on INSERT so a first
     write and its identical re-delivery agree (idempotent status)."""
@@ -791,10 +806,30 @@ class SQLiteTraceStore:
         project_id: str | None = None,
         session_id: str | None = None,
         status: str | None = None,
+        since_ns: int | None = None,
+        until_ns: int | None = None,
+        min_duration_ns: int | None = None,
+        max_duration_ns: int | None = None,
+        q: str | None = None,
+        tool: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        clauses, params = [], []
+        """Filtered, paginated trace listing — every predicate ANDs.
+
+        ``since_ns``/``until_ns`` bound ``started_ns`` inclusively.
+        ``min_duration_ns``/``max_duration_ns`` compare against
+        ``ended_ns - started_ns``: a trace whose ``ended_ns`` is NULL
+        has no observable duration, so *any* duration filter excludes
+        it (never coerced to 0 or "still running").
+        ``q`` is a literal substring matched against ``trace_id`` OR
+        any span ``name``; ``tool`` matches traces carrying a span
+        whose ``tool.name`` attribute contains the value. Both are
+        LIKE-escaped — user input can never inject wildcards.
+        ``project_id=None`` stays the all-projects wildcard.
+        """
+        clauses: list[str] = []
+        params: list[Any] = []
         if project_id is not None:
             clauses.append("project_id = ?")
             params.append(project_id)
@@ -804,6 +839,39 @@ class SQLiteTraceStore:
         if status:
             clauses.append("status_code = ?")
             params.append(status)
+        if since_ns is not None:
+            clauses.append("started_ns >= ?")
+            params.append(since_ns)
+        if until_ns is not None:
+            clauses.append("started_ns <= ?")
+            params.append(until_ns)
+        if min_duration_ns is not None or max_duration_ns is not None:
+            # NULL ended_ns = no duration evidence — excluded on purpose
+            clauses.append("ended_ns IS NOT NULL")
+            if min_duration_ns is not None:
+                clauses.append("(ended_ns - started_ns) >= ?")
+                params.append(min_duration_ns)
+            if max_duration_ns is not None:
+                clauses.append("(ended_ns - started_ns) <= ?")
+                params.append(max_duration_ns)
+        if q:
+            clauses.append(
+                "(trace_id LIKE ? ESCAPE '\\' OR EXISTS ("
+                "SELECT 1 FROM spans s "
+                "WHERE s.project_id = traces.project_id "
+                "AND s.trace_id = traces.trace_id "
+                "AND s.name LIKE ? ESCAPE '\\'))"
+            )
+            pat = f"%{_like_escape(q)}%"
+            params.extend([pat, pat])
+        if tool:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM spans s "
+                "WHERE s.project_id = traces.project_id "
+                "AND s.trace_id = traces.trace_id "
+                "AND s.attributes_json LIKE ? ESCAPE '\\')"
+            )
+            params.append(f'%"tool.name": "%{_like_escape(tool)}%"%')
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._lock:
             rows = self._conn.execute(
@@ -825,6 +893,56 @@ class SQLiteTraceStore:
                 "status": r["status_code"],
                 "span_count": r["span_count"],
                 "error_count": r["error_count"],
+            }
+            for r in rows
+        ]
+
+    def list_sessions(
+        self,
+        project_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """One row per observed ``session_id``.
+
+        ``first_started_at`` = earliest trace start in the session;
+        ``last_activity_at`` = latest observable moment — a completed
+        trace's ``ended_at``, a still-running trace's ``started_at``
+        (scalar ``MAX`` propagates NULL, so the COALESCE is load-bearing).
+        Order is deterministic: most-recent activity first, ties break
+        on ``session_id`` ASC. ``project_id=None`` is the same
+        all-projects wildcard as ``list_traces``.
+        """
+        clauses = ["session_id IS NOT NULL"]
+        params: list[Any] = []
+        if project_id is not None:
+            clauses.append("project_id = ?")
+            params.append(project_id)
+        with self._lock:
+            rows = self._conn.execute(
+                f"""SELECT session_id,
+                           COUNT(*) AS trace_count,
+                           SUM(span_count) AS span_total,
+                           MIN(started_ns) AS first_started_ns,
+                           MAX(MAX(started_ns, COALESCE(ended_ns, started_ns)))
+                               AS last_activity_ns
+                    FROM traces WHERE {' AND '.join(clauses)}
+                    GROUP BY session_id
+                    ORDER BY last_activity_ns DESC, session_id ASC
+                    LIMIT ? OFFSET ?""",
+                (*params, max(0, limit), max(0, offset)),
+            ).fetchall()
+        return [
+            {
+                "session_id": r["session_id"],
+                "traces": r["trace_count"],
+                "spans": r["span_total"] or 0,
+                "first_started_at": (
+                    d.isoformat() if (d := _dt(r["first_started_ns"])) else None
+                ),
+                "last_activity_at": (
+                    d.isoformat() if (d := _dt(r["last_activity_ns"])) else None
+                ),
             }
             for r in rows
         ]

@@ -7,6 +7,16 @@ export const routes: Routes = [
     title: 'Traces — Forge Lens',
   },
   {
+    path: 'traces',
+    loadComponent: () => import('./traces').then(m => m.TracesComponent),
+    title: 'Traces — Forge Lens',
+  },
+  {
+    path: 'sessions',
+    loadComponent: () => import('./sessions').then(m => m.SessionsComponent),
+    title: 'Sessions — Forge Lens',
+  },
+  {
     path: 'traces/:id',
     loadComponent: () => import('./trace-detail').then(m => m.TraceDetailComponent),
     title: 'Trace — Forge Lens',
