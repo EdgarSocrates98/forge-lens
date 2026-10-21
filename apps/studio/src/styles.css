@@ -29,3 +29,7 @@ b.error { color: var(--err); }
 @media (max-width: 720px) { .wf .name { width: 55%; } th:nth-child(1), td:nth-child(1) { display: none; } }
 .err-banner { color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent);
   padding: .5rem .8rem; border-radius: 4px; }
+.cfg { display: flex; gap: 1rem; padding: .5rem 1rem; background: var(--panel);
+  border-bottom: 1px solid color-mix(in srgb, var(--fg) 12%, transparent); }
+.cfg input { min-width: 20rem; }
+.mini { font-size: .8em; padding: 0 .3rem; }

@@ -250,6 +250,15 @@ def create_app(
             raise _reject_ingest(403, "writer role required")
         request.state.lens_identity = ident
 
+    def _resolve_pid(request: Request, raw: str | None) -> str:
+        """Resolve + scope-check in one step: the returned pid is what
+        the query must use — omitting it resolves to cfg.project_id for
+        check AND query, so a scoped key can never drift into a global
+        (all-projects) read via the omitted-param path."""
+        pid = raw or cfg.project_id
+        _require_scope(request, pid)
+        return pid
+
     def _require_scope(request: Request, project_id: str | None) -> None:
         """Tenant isolation: a project-scoped key may only touch its own
         projects. Reads AND writes — the rule is uniform."""
@@ -598,12 +607,6 @@ def create_app(
     _MAX_EVAL_TRACES = 500
     _MAX_EVAL_SPECS = 100
 
-    def _optional_project_id(body: dict[str, Any]) -> str | None:
-        v = body.get("project_id")
-        if v is None:
-            return None
-        return _eval_str(v, "project_id")
-
     def _eval_str(value: Any, field: str) -> str:
         """str that is safe to bind into sqlite — lone surrogates from
         WTF-8 bodies pass isinstance() but raise UnicodeEncodeError in
@@ -778,8 +781,7 @@ def create_app(
 
         body = await _eval_body(request)
         store = get_store()
-        pid = _optional_project_id(body)
-        _require_scope(request, pid or cfg.project_id)
+        pid = _resolve_pid(request, _eval_project_id(body))
         ids = None
         if "trace_ids" in body:
             ids = _eval_trace_ids(body, "trace_ids")
@@ -898,8 +900,8 @@ def create_app(
     async def list_datasets(
         request: Request, project_id: str | None = None
     ) -> list[dict[str, Any]]:
-        _require_scope(request, project_id or cfg.project_id)
-        return get_store().list_datasets(project_id)
+        pid = _resolve_pid(request, project_id)
+        return get_store().list_datasets(pid)
 
     @app.get(f"/{API_VERSION}/datasets/{{dataset_id}}", dependencies=read_deps)
     async def get_dataset(
@@ -1156,13 +1158,22 @@ def create_app(
         ctx = body.get("context") or {}
         if not isinstance(ctx, dict):
             raise _reject_request(422, "context must be an object")
+        run_id = body.get("run_id")
+        if run_id is not None and not isinstance(run_id, str):
+            raise _reject_request(422, "run_id must be a string")
         trace = _get_trace_or_404(
-            trace_id, _optional_project_id(body), request
+            trace_id, _eval_project_id(body), request
         )
-        run = run_specialist(
-            specialist, trace, budget=budget, context=ctx,
-            run_id=body.get("run_id") or f"{specialist}:{trace_id}",
-        )
+        try:
+            run = run_specialist(
+                specialist, trace, budget=budget, context=ctx,
+                run_id=run_id or f"{specialist}:{trace_id}",
+            )
+        except (ValueError, TypeError, KeyError, ArithmeticError) as exc:
+            # a malformed context value must not 500 — the boundary owns it
+            raise _reject_request(
+                422, f"specialist rejected context: {exc}"
+            ) from None
         return {
             "run_id": run.run_id, "specialist": run.specialist,
             "stop_reason": run.stop_reason, "iterations": run.iterations,
@@ -1182,6 +1193,7 @@ def create_app(
         raw_rules = body.get("rules")
         if raw_rules is not None and not isinstance(raw_rules, list):
             raise _reject_request(422, "rules must be a list of <=100 objects")
+        pid = _resolve_pid(request, _eval_project_id(body))
         rules: list[Any] = list(raw_rules or [])
         if body.get("use_saved"):
             from forge_lens.ops.alerts import load_rules
@@ -1189,8 +1201,6 @@ def create_app(
             rules += load_rules(cfg.data_dir / "alert-rules.json")
         if len(rules) > 100:
             raise _reject_request(422, "rules must be a list of <=100 objects")
-        pid = _optional_project_id(body)
-        _require_scope(request, pid or cfg.project_id)
         stats = get_store().stats(project_id=pid)
         spans_total = int(stats.get("spans") or 0)
         errors = int(stats.get("error_spans") or 0)
@@ -1226,6 +1236,22 @@ def create_app(
                "alert_rule.save", str(rule["rule_id"]), "ok", {})
         return {"rules": rules, "path": str(path)}
 
+    @app.delete(
+        f"/{API_VERSION}/alerts/rules/{{rule_id}}", dependencies=admin_deps
+    )
+    async def alerts_delete_rule(request: Request, rule_id: str) -> dict[str, Any]:
+        """Delete a persisted rule — keeps the file under the eval cap."""
+        from forge_lens.ops.alerts import delete_rule, load_rules
+
+        path = cfg.data_dir / "alert-rules.json"
+        if not any(r["rule_id"] == rule_id for r in load_rules(path)):
+            raise _reject_request(404, "rule not found")
+        rules = delete_rule(path, rule_id)
+        ident = getattr(request.state, "lens_identity", None)
+        _audit(ident.actor if ident else "anon",
+               "alert_rule.delete", rule_id, "ok", {})
+        return {"rules": rules}
+
     @app.get(f"/{API_VERSION}/ops/summary", dependencies=read_deps)
     async def ops_summary(
         request: Request, project_id: str | None = None
@@ -1233,12 +1259,12 @@ def create_app(
         """Operational dashboard data: store stats + recent failures +
         cost/token roll-up over the bounded recent window."""
         store = get_store()
-        _require_scope(request, project_id or cfg.project_id)
-        traces = store.list_traces(project_id=project_id, limit=200)
+        pid = _resolve_pid(request, project_id)
+        traces = store.list_traces(project_id=pid, limit=200)
         failed = [t for t in traces if t.get("status") == "error"]
         return {
-            "project_id": project_id,
-            "stats": store.stats(project_id=project_id),
+            "project_id": pid,
+            "stats": store.stats(project_id=pid),
             "recent_traces": len(traces),
             "recent_failures": sorted(
                 (t["trace_id"] for t in failed), reverse=True

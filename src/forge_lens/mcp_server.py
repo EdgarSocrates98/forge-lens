@@ -42,13 +42,19 @@ def serve(db_path: str) -> int:
 
     def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name == "lens.list_traces":
+            pid = args.get("project_id")
+            if pid is not None and not isinstance(pid, str):
+                raise TypeError("project_id must be a string")
             return {"traces": store.list_traces(
-                project_id=args.get("project_id"),
+                project_id=pid,
                 limit=min(500, int(args.get("limit") or 20)))}
         if name == "lens.get_trace":
             tid = args.get("trace_id")
             if not isinstance(tid, str) or not tid:
                 raise TypeError("trace_id must be a non-empty string")
+            pid = args.get("project_id")
+            if pid is not None and not isinstance(pid, str):
+                raise TypeError("project_id must be a string")
             t = store.get_trace(tid,
                                 project_id=args.get("project_id"))
             return {"trace": t.model_dump(mode="json") if t else None}
@@ -64,6 +70,8 @@ def serve(db_path: str) -> int:
             req = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(req, dict):
+            continue  # non-object frame — ignore, keep serving
         method = req.get("method")
         rid = req.get("id")
         if method in ("notifications/initialized",) or rid is None:
@@ -78,7 +86,12 @@ def serve(db_path: str) -> int:
         elif method == "tools/list":
             result = {"tools": _tools()}
         elif method == "tools/call":
-            p = req.get("params") or {}
+            p = req.get("params")
+            if not isinstance(p, dict):
+                out = {"jsonrpc": "2.0", "id": rid, "error": {
+                    "code": -32602, "message": "params must be an object"}}
+                print(json.dumps(out), flush=True)
+                continue
             try:
                 args = p.get("arguments") or {}
                 if not isinstance(args, dict):
@@ -87,7 +100,7 @@ def serve(db_path: str) -> int:
                 content: list[dict[str, str]] = [{
                     "type": "text", "text": json.dumps(payload)}]
                 result = {"content": content}
-            except (KeyError, TypeError, ValueError) as exc:
+            except Exception as exc:  # observer loop: a bad call never kills it
                 # one malformed call must not kill the stdio loop
                 out = {"jsonrpc": "2.0", "id": rid,
                        "error": {"code": -32603,

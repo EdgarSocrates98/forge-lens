@@ -105,8 +105,14 @@ export class TracesComponent implements OnInit {
   applyView(): void {
     const raw = localStorage.getItem(`lens-view:${this.viewSel}`);
     if (!raw) return;
-    const v = JSON.parse(raw) as { status: string; limit: number };
-    this.status = v.status; this.limit = v.limit; this.load();
+    try {
+      const v = JSON.parse(raw) as { status: string; limit: number };
+      this.status = v.status ?? ''; this.limit = v.limit || 100;
+      this.load();
+    } catch {
+      // corrupted saved view — ignore rather than crash the list
+      localStorage.removeItem(`lens-view:${this.viewSel}`);
+    }
   }
   exportJson(): void {
     const blob = new Blob([JSON.stringify(this.sorted(), null, 2)],

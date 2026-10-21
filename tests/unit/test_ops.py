@@ -217,3 +217,108 @@ def test_mcp_server_survives_bad_call(tmp_path: Path, capsys) -> None:
     assert by_id[3]["error"]["code"] == -32603
     assert "tools" in by_id[4]["result"]
     assert by_id[5]["error"]["code"] == -32601
+
+
+def test_claude_code_session_id_before_first_tool(tmp_path: Path) -> None:
+    """Regression: tool_use BEFORE the sessionId line must still share
+    the resolved trace id (two-pass parse), and session_id lands on
+    the Trace for session grouping."""
+    import json as _json
+
+    from forge_lens.adapters.claude_code import parse_session
+
+    f = tmp_path / "s.jsonl"
+    f.write_text(
+        _json.dumps({"type": "tool_use", "tool_name": "early",
+                     "timestamp": "2026-01-01T10:00:00Z"})
+        + "\n"
+        + _json.dumps({"sessionId": "abc-non-hex", "type": "meta"})
+        + "\n"
+        + _json.dumps({"type": "tool_use", "tool_name": "late",
+                       "timestamp": "2026-01-01T10:00:01Z"})
+        + "\n"
+    )
+    t = parse_session(f)
+    assert t is not None
+    assert t.session_id == "abc-non-hex"
+    assert {s.trace_id for s in t.spans} == {t.trace_id}
+
+
+def test_alerts_corrupt_rules_file(tmp_path: Path) -> None:
+    """Corrupt/junk rules file → tolerant load, save still repairs."""
+    from forge_lens.ops.alerts import delete_rule, load_rules, save_rule
+
+    p = tmp_path / "alert-rules.json"
+    p.write_text('{"rules": [{"rule_id": 1}, "junk", {"rule_id": "ok"}')
+    assert load_rules(p) == []  # truncated JSON → []
+    p.write_text('{"rules": [{"rule_id": 1}, "junk", {"rule_id": "good", '
+                 '"metric": "trace_count", "op": ">", "threshold": 0}]}')
+    assert [r["rule_id"] for r in load_rules(p)] == ["good"]
+    out = save_rule(p, {"rule_id": "b", "metric": "error_rate",
+                        "op": ">", "threshold": 0.5})
+    assert [r["rule_id"] for r in out] == ["b", "good"]
+    assert [r["rule_id"] for r in delete_rule(p, "good")] == ["b"]
+
+
+def test_delete_trace_ids_shared_id_across_projects(tmp_path: Path) -> None:
+    """A trace_id present in two projects: unscoped delete removes all
+    rows; scoped delete removes only its project's."""
+    store = SQLiteTraceStore(tmp_path / "m.db")
+    for proj in ("a", "b"):
+        tr = _trace([_tool(0)])
+        t2 = Trace(trace_id="ef" * 16, root_span_id=tr.spans[0].span_id,
+                   started_at=_T0, ended_at=_T0, spans=tr.spans,
+                   project_id=proj, status=Status(code=StatusCode.OK))
+        for s in t2.spans:
+            object.__setattr__(s, "trace_id", "ef" * 16)
+        store.upsert_trace(t2)
+    out = store.delete_trace_ids(["ef" * 16], project_id="a")
+    assert out["traces"] == 1
+    assert store.get_trace("ef" * 16, project_id="a") is None
+    assert store.get_trace("ef" * 16, project_id="b") is not None
+    assert store.delete_trace_ids(["ef" * 16])["traces"] == 1
+    store.close()
+
+
+def test_archive_cli_deletes_only_exported(tmp_path: Path) -> None:
+    """P0 regression at the CLI surface: --delete removes exactly the
+    written ids; a started-before/ended-after trace survives."""
+    from typer.testing import CliRunner
+
+    from forge_lens.cli.main import app
+
+    db = tmp_path / "a.db"
+    store = SQLiteTraceStore(db)
+    old = Trace(trace_id="aa" * 16, root_span_id="0" * 16,
+                started_at=_T0, ended_at=_T0, spans=[_tool(0)],
+                status=Status(code=StatusCode.OK))
+    for s in old.spans:
+        object.__setattr__(s, "trace_id", "aa" * 16)
+    # started before cutoff, ends AFTER it — must not be deleted
+    straddler = Trace(trace_id="bb" * 16, root_span_id="0" * 16,
+                      started_at=_T0, ended_at=_T0 + timedelta(days=30),
+                      spans=[_tool(1)], status=Status(code=StatusCode.OK))
+    for s in straddler.spans:
+        object.__setattr__(s, "trace_id", "bb" * 16)
+    store.upsert_trace(old)
+    store.upsert_trace(straddler)
+    store.close()
+
+    arc = tmp_path / "arch.ndjson"
+    r = CliRunner().invoke(app, [
+        "archive", "--db", str(db),
+        "--before", (_T0 + timedelta(days=1)).isoformat(),
+        "--out", str(arc), "--delete", "--yes"])
+    assert r.exit_code == 0, r.output
+    assert "archived 1" in r.output
+    assert "pruned 1" in r.output
+    store = SQLiteTraceStore(db)
+    assert store.get_trace("aa" * 16) is None
+    assert store.get_trace("bb" * 16) is not None  # survived — never archived
+    store.close()
+    # rerun to same path without --append → refused
+    r2 = CliRunner().invoke(app, [
+        "archive", "--db", str(db),
+        "--before", (_T0 + timedelta(days=1)).isoformat(),
+        "--out", str(arc)])
+    assert r2.exit_code == 2

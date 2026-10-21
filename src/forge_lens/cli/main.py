@@ -722,6 +722,8 @@ def archive(
     db: Annotated[Path | None, typer.Option("--db")] = None,
     delete: Annotated[bool, typer.Option(
         "--delete", help="prune after archiving (needs --yes)")] = False,
+    append: Annotated[bool, typer.Option(
+        "--append", help="append to an existing archive file")] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
 ) -> None:
     """Tiered storage: export traces older than a cutoff to NDJSON.
@@ -738,13 +740,19 @@ def archive(
     except ValueError:
         typer.echo(f"invalid --before {before!r}", err=True)
         raise typer.Exit(2) from None
+    if out.exists() and not append:
+        typer.echo(
+            f"{out} exists — refusing to truncate a prior archive "
+            "(pass --append to append)", err=True,
+        )
+        raise typer.Exit(2)
     cfg = _config(db)
     store = _store(cfg)
     try:
         written_ids: list[str] = []
         offset = 0
         page = 1000
-        with out.open("w", encoding="utf-8") as fh:
+        with out.open("a" if append else "w", encoding="utf-8") as fh:
             while True:
                 rows = store.list_traces(
                     project_id=project, limit=page, offset=offset

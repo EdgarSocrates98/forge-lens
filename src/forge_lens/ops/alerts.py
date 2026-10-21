@@ -17,19 +17,44 @@ METRICS = (
 )
 
 
+def _valid_rule(r: Any) -> bool:
+    return isinstance(r, dict) and isinstance(r.get("rule_id"), str)
+
+
 def load_rules(path: Path) -> list[dict[str, Any]]:
+    """Tolerant read: a truncated/corrupt file yields [] (never a
+    crash that also blocks repair via save_rule)."""
     if not path.exists():
         return []
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return data if isinstance(data, list) else data.get("rules", [])
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    raw = data if isinstance(data, list) else data.get("rules", [])
+    return [r for r in raw if _valid_rule(r)]
 
 
 def save_rule(path: Path, rule: dict[str, Any]) -> list[dict[str, Any]]:
-    rules = [r for r in load_rules(path) if r.get("rule_id") != rule["rule_id"]]
+    """Insert/replace a rule; atomic write (tmp+rename) so a crash
+    mid-write can't truncate the store."""
+    rules = [r for r in load_rules(path) if r["rule_id"] != rule["rule_id"]]
     rules.append(rule)
     rules.sort(key=lambda r: r["rule_id"])
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(rules, indent=2, sort_keys=True), encoding="utf-8")
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(rules, indent=2, sort_keys=True),
+                   encoding="utf-8")
+    tmp.replace(path)
+    return rules
+
+
+def delete_rule(path: Path, rule_id: str) -> list[dict[str, Any]]:
+    rules = [r for r in load_rules(path) if r["rule_id"] != rule_id]
+    if path.exists():
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(rules, indent=2, sort_keys=True),
+                       encoding="utf-8")
+        tmp.replace(path)
     return rules
 
 

@@ -1241,22 +1241,21 @@ class SQLiteTraceStore:
         doomed: list[tuple[str, str]] = []
         with self._lock, self._conn:
             for tid in trace_ids:
-                row = self._conn.execute(
+                rows = self._conn.execute(
                     "SELECT project_id, trace_id FROM traces WHERE trace_id = ?"
                     + (" AND project_id = ?" if project_id else ""),
                     (tid, project_id) if project_id else (tid,),
-                ).fetchone()
-                if row is None:
-                    continue
-                self._conn.execute(
-                    "DELETE FROM spans WHERE project_id=? AND trace_id=?",
-                    (row["project_id"], row["trace_id"]),
-                )
-                self._conn.execute(
-                    "DELETE FROM traces WHERE project_id=? AND trace_id=?",
-                    (row["project_id"], row["trace_id"]),
-                )
-                doomed.append((row["project_id"], row["trace_id"]))
+                ).fetchall()
+                for row in rows:
+                    self._conn.execute(
+                        "DELETE FROM spans WHERE project_id=? AND trace_id=?",
+                        (row["project_id"], row["trace_id"]),
+                    )
+                    self._conn.execute(
+                        "DELETE FROM traces WHERE project_id=? AND trace_id=?",
+                        (row["project_id"], row["trace_id"]),
+                    )
+                    doomed.append((row["project_id"], row["trace_id"]))
         return {"traces": len(doomed)}
 
     def close(self) -> None:

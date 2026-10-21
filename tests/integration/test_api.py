@@ -1119,3 +1119,81 @@ def test_intel_and_analyze_malformed_422_not_500(client: TestClient) -> None:
         assert r.status_code == 422, f"{bad} → {r.status_code}"
     r = client.post("/v1/intel/regress", json={"a": "no", "b": {}})
     assert r.status_code == 422
+
+
+def test_tenancy_omitted_project_id_paths(tmp_path, synthetic_trace: Trace) -> None:
+    """P0: the omitted-project_id path must not widen into a global read.
+    Scoped key naming no project resolves to cfg.project_id — and gets
+    403 if its scope doesn't cover that, or default-only data if it does."""
+    from forge_lens.security.keys import generate_key
+
+    store = SQLiteTraceStore(tmp_path / "k3.db")
+    victim = synthetic_trace.model_copy(update={"project_id": "secret"})
+    store.upsert_trace(victim)
+    decoy = synthetic_trace.model_copy(update={"project_id": "default"})
+    store.upsert_trace(decoy)
+    cfg = LensConfig(
+        data_dir=tmp_path, db_path=tmp_path / "k3.db", auth_mode="keys"
+    )
+    app = create_app(store=store, config=cfg)
+    kid, secret, h = generate_key()
+    store.create_api_key(kid, name="root", key_hash=h, role="admin")
+    try:
+        with TestClient(app) as c:
+            admin = {"X-Forge-Lens-Key": secret}
+            # key scoped to p1 only — omitted pid resolves to 'default',
+            # outside its scope → 403 (never a silent global read)
+            r = c.post("/v1/admin/keys", headers=admin,
+                       json={"name": "p1", "role": "reader",
+                             "projects": ["p1"]})
+            p1 = {"X-Forge-Lens-Key": r.json()["secret"]}
+            assert c.get("/v1/ops/summary", headers=p1).status_code == 403
+            assert c.get("/v1/datasets", headers=p1).status_code == 403
+            assert c.post("/v1/alerts/evaluate", json={}, headers=p1
+                          ).status_code == 403
+            assert c.post("/v1/intel/efficiency", json={}, headers=p1
+                          ).status_code == 403
+            # key scoped to 'default' — omitted pid reads ONLY default
+            r = c.post("/v1/admin/keys", headers=admin,
+                       json={"name": "d", "role": "reader",
+                             "projects": ["default"]})
+            dk = {"X-Forge-Lens-Key": r.json()["secret"]}
+            s = c.get("/v1/ops/summary", headers=dk)
+            assert s.status_code == 200
+            assert s.json()["stats"]["traces"] == 1  # decoy only, not 'secret'
+            r = c.post("/v1/alerts/evaluate", headers=dk,
+                       json={"use_saved": False, "rules": [
+                           {"rule_id": "x", "metric": "trace_count",
+                            "op": ">", "threshold": 0}]})
+            assert r.status_code == 200
+            assert r.json()["fired"][0]["observed"] == 1.0
+            assert c.get("/v1/datasets", headers=dk).status_code == 200
+            assert c.get("/v1/health", headers=dk).json()["stats"]["traces"] == 1
+    finally:
+        store.close()
+
+
+def test_analyze_bad_context_422_and_alert_rules_io(
+    client: TestClient, synthetic_trace: Trace,
+) -> None:
+    env = {"traces": [synthetic_trace.model_dump(mode="json")]}
+    assert client.post("/v1/traces", json=env).status_code == 200
+    tid = synthetic_trace.trace_id
+    r = client.post(
+        f"/v1/analyze/loop_detection_specialist/{tid}",
+        json={"context": {"repeat_threshold": "abc"}},
+    )
+    assert r.status_code == 422
+    r = client.post(f"/v1/analyze/trace_investigator/{tid}",
+                    json={"run_id": {"x": 1}})
+    assert r.status_code == 422
+    # saved rules round-trip via API (default auth mode → admin unscoped)
+    r = client.post("/v1/alerts/rules", json={"rule": {
+        "rule_id": "persisted", "metric": "trace_count",
+        "op": ">=", "threshold": 0}})
+    assert r.status_code == 200
+    r = client.post("/v1/alerts/evaluate", json={"use_saved": True})
+    assert r.status_code == 200
+    assert {f["rule_id"] for f in r.json()["fired"]} == {"persisted"}
+    assert client.delete("/v1/alerts/rules/persisted").status_code == 200
+    assert client.delete("/v1/alerts/rules/persisted").status_code == 404
