@@ -1,5 +1,9 @@
 # Forge Lens
 
+<p align="center">
+  <img src="docs/assets/logo.png" alt="Forge Lens logo" width="420" />
+</p>
+
 **Local-first, open-source agentic observability.** Understand every agent execution. Trace every tool. Measure every cost. Investigate every failure. Prove every improvement.
 
 Forge Lens receives, persists and explains agent executions — via OTLP/HTTP, OpenInference attributes, or its own SDKs — on your machine, with no mandatory external dependency.
