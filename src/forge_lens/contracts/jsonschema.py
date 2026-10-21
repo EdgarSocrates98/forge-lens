@@ -19,6 +19,7 @@ from forge_lens.contracts.v1 import (
     Dataset,
     EvaluationResult,
     Evidence,
+    Experiment,
     Span,
     TokenUsage,
     ToolInvocation,
@@ -37,6 +38,7 @@ MODELS_V1: dict[str, type[LensModel]] = {
     "evidence": Evidence,
     "evaluation-result": EvaluationResult,
     "dataset": Dataset,
+    "experiment": Experiment,
 }
 
 

@@ -8,6 +8,11 @@ from forge_lens.contracts.v1.evidence import (
     Evidence,
     SanitizationStatus,
 )
+from forge_lens.contracts.v1.experiment import (
+    Experiment,
+    ExperimentCohort,
+    ExperimentCohorts,
+)
 from forge_lens.contracts.v1.refs import BlobRef
 from forge_lens.contracts.v1.trace import (
     Span,
@@ -35,6 +40,9 @@ __all__ = [
     "DatasetVersion",
     "EvaluationResult",
     "Evidence",
+    "Experiment",
+    "ExperimentCohort",
+    "ExperimentCohorts",
     "SanitizationStatus",
     "Span",
     "SpanEvent",

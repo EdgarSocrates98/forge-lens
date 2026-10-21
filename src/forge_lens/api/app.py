@@ -37,7 +37,7 @@ from forge_lens.core.metrics import (
     M_QUERY_LATENCY,
     METRICS,
 )
-from forge_lens.core.time import ensure_aware, to_unix_nano
+from forge_lens.core.time import ensure_aware, from_unix_nano, to_unix_nano
 from forge_lens.ingest.pipeline import IngestPipeline
 from forge_lens.otlp.normalize import normalize_otlp_request
 from forge_lens.storage.base import TraceStore
@@ -1135,6 +1135,248 @@ def create_app(
                 404, f"dataset version {dataset_id!r}@{version!r} not found"
             )
         return v
+
+    # -- experiments (Cycle 13): persisted A/B eval specs ---------------
+    # Audit gap 06.3: eval/compare runs used to be ephemeral — an
+    # experiment pins cohorts + evaluator spec so runs are reproducible;
+    # every execution appends to experiment_results (append-only).
+
+    _EXPERIMENT_STATUSES = ("open", "completed")
+
+    def _reject_non_finite(obj: Any) -> None:
+        """NaN/Infinity in a *declared* spec is dishonest data — reject at
+        the boundary instead of silently null-coercing on write (engine
+        output still coerces via the store, like everywhere else)."""
+        stack = [obj]
+        while stack:
+            cur = stack.pop()
+            if isinstance(cur, float) and not math.isfinite(cur):
+                raise _reject_request(
+                    422, "non-finite number in experiment spec"
+                ) from None
+            if isinstance(cur, dict):
+                stack.extend(cur.values())
+            elif isinstance(cur, list):
+                stack.extend(cur)
+
+    def _experiment_cohort(body: dict[str, Any], key: str) -> dict[str, Any]:
+        """Validate one stored cohort — same 1..500 trace-id contract as
+        /v1/eval/compare's sides, so a persisted experiment can always
+        re-run through the identical compare path."""
+        cohorts = body.get("cohorts")
+        if not isinstance(cohorts, dict):
+            raise _reject_request(
+                422, "cohorts: object with 'a' and 'b' required"
+            )
+        side = cohorts.get(key)
+        if not isinstance(side, dict):
+            raise _reject_request(422, f"cohorts.{key}: object required")
+        ids = _eval_trace_ids(side, f"cohorts.{key}.trace_ids")
+        label = side.get("label")
+        if label is not None:
+            label = _eval_str(label, f"cohorts.{key}.label")
+        config = side.get("config")
+        if config is not None and not isinstance(config, dict):
+            raise _reject_request(422, f"cohorts.{key}.config: object required")
+        return {"trace_ids": ids, "label": label, "config": config or {}}
+
+    def _experiment_dataset_label(exp: dict[str, Any]) -> str | None:
+        """Pinned dataset ref → the ``dataset`` label compare emits."""
+        ds = exp.get("dataset_id")
+        if not ds:
+            return None
+        ver = exp.get("dataset_version")
+        return f"{ds}@{ver}" if ver else str(ds)
+
+    @app.put(
+        f"/{API_VERSION}/experiments/{{experiment_id}}",
+        dependencies=[Depends(check_auth)],
+    )
+    async def put_experiment(experiment_id: str, request: Request) -> dict[str, Any]:
+        body = await _eval_body(request)
+        _reject_non_finite(body)
+        # cheap spec validation before any store access — same order as
+        # eval/compare: malformed input is a 422, never a fan-out cost
+        specs = _eval_specs(body)
+        cohorts = {
+            "a": _experiment_cohort(body, "a"),
+            "b": _experiment_cohort(body, "b"),
+        }
+        name = body.get("name")
+        if name is not None:
+            name = _eval_str(name, "name").strip()
+            if not name:
+                raise _reject_request(422, "name: non-empty string required")
+        description = body.get("description")
+        if description is not None:
+            description = _eval_str(description, "description")
+        dataset_id = body.get("dataset_id")
+        if dataset_id is not None:
+            dataset_id = _eval_str(dataset_id, "dataset_id")
+        dataset_version = body.get("dataset_version")
+        if dataset_version is not None:
+            dataset_version = _eval_str(dataset_version, "dataset_version")
+        if dataset_version is not None and dataset_id is None:
+            raise _reject_request(
+                422, "dataset_version requires dataset_id"
+            )
+        metadata = body.get("metadata")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise _reject_request(422, "metadata: object required")
+        status = body.get("status")
+        if status is not None and status not in _EXPERIMENT_STATUSES:
+            raise _reject_request(
+                422, f"status: one of {list(_EXPERIMENT_STATUSES)}"
+            )
+        created_ns = _optional_body_datetime_ns(body, "created_at")
+        pid = _resolve_pid(request, _eval_project_id(body))
+        get_store().upsert_experiment(
+            experiment_id,
+            project_id=pid,
+            name=name,
+            description=description,
+            dataset_id=dataset_id,
+            dataset_version=dataset_version,
+            cohorts=cohorts,
+            evaluators=list(specs),
+            metadata=metadata,
+            now_ns=created_ns,
+        )
+        if status is not None:
+            # explicit lifecycle move (e.g. reopen after a run) —
+            # recording a run sets 'completed' on its own
+            get_store().set_experiment_status(
+                experiment_id, str(status), project_id=pid
+            )
+        return {
+            "experiment_id": experiment_id,
+            "project_id": pid,
+            "stored": True,
+        }
+
+    @app.get(f"/{API_VERSION}/experiments", dependencies=read_deps)
+    async def list_experiments(
+        request: Request,
+        project_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        limit = max(1, min(limit, 500))
+        offset = max(0, offset)
+        pid = _resolve_pid(request, project_id)
+        with METRICS.timer(M_QUERY_LATENCY):
+            items = get_store().list_experiments(
+                pid, limit=limit, offset=offset
+            )
+        return {"items": items, "limit": limit, "offset": offset}
+
+    @app.get(
+        f"/{API_VERSION}/experiments/{{experiment_id}}",
+        dependencies=read_deps,
+    )
+    async def get_experiment(
+        request: Request,
+        experiment_id: str,
+        project_id: str | None = None,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """The stored spec plus its append-only run history.
+
+        ``limit``/``offset`` page the embedded ``runs`` list (bounded at
+        500 like every other collection)."""
+        limit = max(1, min(limit, 500))
+        offset = max(0, offset)
+        pid = _resolve_pid(request, project_id)
+        store = get_store()
+        exp = store.get_experiment(experiment_id, pid)
+        if exp is None:
+            raise _reject_request(
+                404, f"experiment {experiment_id!r} not found"
+            )
+        runs = store.list_experiment_results(
+            experiment_id, pid, limit=limit, offset=offset
+        )
+        return {
+            **exp,
+            "runs": runs,
+            "run_limit": limit,
+            "run_offset": offset,
+        }
+
+    @app.post(
+        f"/{API_VERSION}/experiments/{{experiment_id}}/run",
+        dependencies=[Depends(check_auth)],
+    )
+    async def run_experiment(
+        experiment_id: str, request: Request
+    ) -> dict[str, Any]:
+        """Execute the stored spec through the SAME compare path as
+        ``/v1/eval/compare`` (resolve cohorts → evaluate_traces →
+        compare_runs → optional gate), then append the report to
+        ``experiment_results`` — a write, so it needs ``writer``.
+
+        Cohort trace_ids resolve inside the experiment's project —
+        experiments never span tenants (unlike ad-hoc compare, which
+        permits per-side ``project_id``).
+
+        Body (must be a JSON object; all fields optional):
+        ``{"project_id": "...", "gate": {...}}``."""
+        from forge_lens.eval import compare_runs, evaluate_traces
+
+        body = await _eval_body(request)
+        pid = _resolve_pid(request, _eval_project_id(body))
+        store = get_store()
+        exp = store.get_experiment(experiment_id, pid)
+        if exp is None:
+            raise _reject_request(
+                404, f"experiment {experiment_id!r} not found"
+            )
+        specs = exp["evaluators"]
+        if not specs:
+            # unreachable via the API (PUT enforces 1..100) but a spec
+            # written outside it must fail loudly, not run a null eval
+            raise _reject_request(
+                422, f"experiment {experiment_id!r} has no evaluators spec"
+            )
+        cohorts = exp["cohorts"]
+        label = _experiment_dataset_label(exp)
+        a_ids = (cohorts.get("a") or {}).get("trace_ids") or []
+        b_ids = (cohorts.get("b") or {}).get("trace_ids") or []
+        result = compare_runs(
+            evaluate_traces(
+                [_get_trace_or_404(t, pid, request) for t in a_ids],
+                specs, dataset=label,
+            ),
+            evaluate_traces(
+                [_get_trace_or_404(t, pid, request) for t in b_ids],
+                specs, dataset=label,
+            ),
+        )
+        gate = body.get("gate")
+        if gate is not None:
+            from forge_lens.eval.compare import apply_gate
+
+            if not isinstance(gate, dict):
+                raise _reject_request(422, "gate: object required")
+            try:
+                result["gate"] = apply_gate(result, gate)
+            except (ValueError, TypeError) as exc:
+                raise _reject_request(422, f"gate: {exc}") from exc
+        run_ns = wall_clock_ns()
+        run_id = store.record_experiment_result(
+            experiment_id,
+            project_id=pid,
+            report=result,
+            run_ns=run_ns,
+        )
+        return {
+            "experiment_id": experiment_id,
+            "project_id": pid,
+            "run_id": run_id,
+            "run_at": from_unix_nano(run_ns).isoformat(),
+            "report": result,
+        }
 
     # -- admin (Cycle 08: keys, audit, retention) ------------------------
 

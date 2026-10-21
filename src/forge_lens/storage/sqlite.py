@@ -127,6 +127,33 @@ CREATE TABLE IF NOT EXISTS dataset_cases (
     PRIMARY KEY (project_id, dataset_id, version, case_id)
 );
 
+CREATE TABLE IF NOT EXISTS experiments (
+    experiment_id TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT 'default',
+    name TEXT,
+    description TEXT,
+    dataset_id TEXT,
+    dataset_version TEXT,
+    cohorts_json TEXT NOT NULL DEFAULT '{}',
+    evaluators_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'open',
+    result_ref TEXT,
+    provenance TEXT NOT NULL DEFAULT 'imported',
+    created_ns INTEGER,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (project_id, experiment_id)
+);
+
+CREATE TABLE IF NOT EXISTS experiment_results (
+    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    experiment_id TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT 'default',
+    run_ns INTEGER,
+    report_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_experiment_results_exp
+    ON experiment_results(project_id, experiment_id, run_id);
+
 CREATE TABLE IF NOT EXISTS api_keys (
     key_id TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -1235,6 +1262,214 @@ class SQLiteTraceStore:
                 "created_at": (
                     d.isoformat() if (d := _dt(r["created_ns"])) else None
                 ),
+            }
+            for r in rows
+        ]
+
+    # -- experiments (Cycle 13) ------------------------------------------
+
+    @staticmethod
+    def _experiment_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "experiment_id": row["experiment_id"],
+            "project_id": row["project_id"],
+            "name": row["name"],
+            "description": row["description"],
+            "dataset_id": row["dataset_id"],
+            "dataset_version": row["dataset_version"],
+            "cohorts": json.loads(row["cohorts_json"] or "{}"),
+            "evaluators": json.loads(row["evaluators_json"] or "[]"),
+            "status": row["status"],
+            "result_ref": row["result_ref"],
+            "provenance": row["provenance"],
+            "created_at": (
+                d.isoformat() if (d := _dt(row["created_ns"])) else None
+            ),
+            "metadata": json.loads(row["metadata_json"] or "{}"),
+        }
+
+    def upsert_experiment(
+        self,
+        experiment_id: str,
+        *,
+        project_id: str = "default",
+        name: str | None = None,
+        description: str | None = None,
+        dataset_id: str | None = None,
+        dataset_version: str | None = None,
+        cohorts: dict[str, Any] | None = None,
+        evaluators: list[Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        provenance: str = "imported",
+        now_ns: int | None = None,
+    ) -> None:
+        """Insert or update the experiment *spec*.
+
+        Same convention as ``upsert_dataset``: the declared spec is
+        mutable metadata — ``created_ns``, ``status`` and ``result_ref``
+        are never touched here. Prior runs stay pinned in
+        ``experiment_results``; each report embeds the resolved inputs,
+        so re-spec'ing cannot rewrite history."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                """INSERT INTO experiments(experiment_id, project_id, name,
+                        description, dataset_id, dataset_version,
+                        cohorts_json, evaluators_json, metadata_json,
+                        provenance, created_ns)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(project_id, experiment_id) DO UPDATE SET
+                       name=excluded.name, description=excluded.description,
+                       dataset_id=excluded.dataset_id,
+                       dataset_version=excluded.dataset_version,
+                       cohorts_json=excluded.cohorts_json,
+                       evaluators_json=excluded.evaluators_json,
+                       metadata_json=excluded.metadata_json,
+                       provenance=excluded.provenance""",
+                (
+                    experiment_id,
+                    project_id,
+                    name,
+                    description,
+                    dataset_id,
+                    dataset_version,
+                    json.dumps(_json_finite(cohorts or {}),
+                               sort_keys=True, default=str),
+                    json.dumps(_json_finite(evaluators or []),
+                               sort_keys=True, default=str),
+                    json.dumps(_json_finite(metadata or {}),
+                               sort_keys=True, default=str),
+                    provenance,
+                    now_ns,
+                ),
+            )
+
+    def get_experiment(
+        self, experiment_id: str, project_id: str = "default"
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM experiments WHERE project_id=? AND experiment_id=?",
+                (project_id, experiment_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._experiment_dict(row)
+
+    def list_experiments(
+        self,
+        project_id: str | None = None,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            if project_id is not None:
+                rows = self._conn.execute(
+                    "SELECT * FROM experiments WHERE project_id=? "
+                    "ORDER BY experiment_id LIMIT ? OFFSET ?",
+                    (project_id, max(0, limit), max(0, offset)),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM experiments "
+                    "ORDER BY project_id, experiment_id LIMIT ? OFFSET ?",
+                    (max(0, limit), max(0, offset)),
+                ).fetchall()
+        return [
+            {
+                "experiment_id": r["experiment_id"],
+                "project_id": r["project_id"],
+                "name": r["name"],
+                "status": r["status"],
+                "result_ref": r["result_ref"],
+                "created_at": (
+                    d.isoformat() if (d := _dt(r["created_ns"])) else None
+                ),
+            }
+            for r in rows
+        ]
+
+    def set_experiment_status(
+        self, experiment_id: str, status: str, *, project_id: str = "default"
+    ) -> bool:
+        """Explicit lifecycle transition (e.g. reopen). ``status`` is a
+        caller-validated ``open|completed`` — the store trusts the
+        boundary like it does for span status codes."""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE experiments SET status=? "
+                "WHERE project_id=? AND experiment_id=?",
+                (status, project_id, experiment_id),
+            )
+        return cur.rowcount > 0
+
+    def record_experiment_result(
+        self,
+        experiment_id: str,
+        *,
+        project_id: str = "default",
+        report: dict[str, Any],
+        run_ns: int | None = None,
+    ) -> int:
+        """Append one run report and advance the lifecycle atomically.
+
+        Append-only: every execution is a new ``experiment_results`` row
+        (``run:<id>`` becomes ``result_ref``), and the experiment flips
+        to ``completed`` in the same transaction — a recorded run can
+        never outlive the status that proves it happened."""
+        with self._lock, self._conn:
+            exists = self._conn.execute(
+                "SELECT 1 FROM experiments WHERE project_id=? AND experiment_id=?",
+                (project_id, experiment_id),
+            ).fetchone()
+            if exists is None:
+                raise ValidationError(
+                    f"experiment {experiment_id!r} not found "
+                    f"in project {project_id!r}"
+                )
+            cur = self._conn.execute(
+                """INSERT INTO experiment_results(experiment_id, project_id,
+                                                  run_ns, report_json)
+                   VALUES (?,?,?,?)""",
+                (
+                    experiment_id,
+                    project_id,
+                    run_ns,
+                    json.dumps(_json_finite(report),
+                               sort_keys=True, default=str),
+                ),
+            )
+            run_id = int(cur.lastrowid or 0)
+            self._conn.execute(
+                "UPDATE experiments SET status='completed', result_ref=? "
+                "WHERE project_id=? AND experiment_id=?",
+                (f"run:{run_id}", project_id, experiment_id),
+            )
+        return run_id
+
+    def list_experiment_results(
+        self,
+        experiment_id: str,
+        project_id: str = "default",
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM experiment_results WHERE project_id=? "
+                "AND experiment_id=? ORDER BY run_id LIMIT ? OFFSET ?",
+                (project_id, experiment_id, max(0, limit), max(0, offset)),
+            ).fetchall()
+        return [
+            {
+                "run_id": r["run_id"],
+                "experiment_id": r["experiment_id"],
+                "project_id": r["project_id"],
+                "run_at": (
+                    d.isoformat() if (d := _dt(r["run_ns"])) else None
+                ),
+                "report": json.loads(r["report_json"] or "{}"),
             }
             for r in rows
         ]

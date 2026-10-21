@@ -110,6 +110,58 @@ class TraceStore(Protocol):
         self, dataset_id: str, project_id: str = "default"
     ) -> list[dict[str, Any]]: ...
 
+    # -- experiments (Cycle 13) ------------------------------------------
+
+    def upsert_experiment(
+        self,
+        experiment_id: str,
+        *,
+        project_id: str = "default",
+        name: str | None = None,
+        description: str | None = None,
+        dataset_id: str | None = None,
+        dataset_version: str | None = None,
+        cohorts: dict[str, Any] | None = None,
+        evaluators: list[Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        provenance: str = "imported",
+        now_ns: int | None = None,
+    ) -> None: ...
+
+    def get_experiment(
+        self, experiment_id: str, project_id: str = "default"
+    ) -> dict[str, Any] | None: ...
+
+    def list_experiments(
+        self,
+        project_id: str | None = None,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]: ...
+
+    def set_experiment_status(
+        self, experiment_id: str, status: str, *, project_id: str = "default"
+    ) -> bool: ...
+
+    def record_experiment_result(
+        self,
+        experiment_id: str,
+        *,
+        project_id: str = "default",
+        report: dict[str, Any],
+        run_ns: int | None = None,
+    ) -> int: ...
+
+    def list_experiment_results(
+        self,
+        experiment_id: str,
+        project_id: str = "default",
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]: ...
+
     # -- security & governance (Cycle 08) -------------------------------
 
     def create_api_key(
