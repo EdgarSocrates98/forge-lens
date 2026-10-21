@@ -171,7 +171,21 @@ def ingest(
     pipeline = IngestPipeline(store, cfg)
     quarantine: list[str] = []
     try:
-        raw = file.read_bytes()
+        # same bound as the API — stat first (fast reject), then read at
+        # most max+1 bytes: read_bytes() on a giant file would OOM before
+        # payload_bytes is ever checked
+        max_bytes = cfg.max_payload_bytes
+        if file.stat().st_size > max_bytes:
+            raise ValueError(
+                f"file {file} ({file.stat().st_size}B) exceeds "
+                f"max_payload_bytes ({max_bytes}B)"
+            )
+        with file.open("rb") as fh:
+            raw = fh.read(max_bytes + 1)
+        if len(raw) > max_bytes:
+            raise ValueError(
+                f"file {file} exceeds max_payload_bytes ({max_bytes}B)"
+            )
         payload = json.loads(raw)
         if fmt == "otlp" or (fmt == "auto" and "resourceSpans" in payload):
             # file import — weaker provenance than a live OTLP push
@@ -462,6 +476,43 @@ def incident(
         f"{bundle['replay']['total_ms']}ms"
     )
     typer.echo(f"  est. cost: ${bundle['cost']['total_estimated_usd']:.6f}")
+
+
+@app.command(name="eval")
+def eval_cmd(
+    trace_id: Annotated[str, typer.Argument()],
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    budget_ms: Annotated[float | None, typer.Option("--budget-ms")] = None,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Run the deterministic evaluator battery on a stored trace."""
+    from forge_lens.eval import run_evaluators
+
+    cfg = _config(db)
+    store = _store(cfg)
+    try:
+        trace = store.get_trace(trace_id, project_id=project or cfg.project_id)
+    finally:
+        store.close()
+    if trace is None:
+        typer.echo(f"trace {trace_id} not found", err=True)
+        raise typer.Exit(1)
+    specs: list[dict[str, object]] = [
+        {"name": "error_free"},
+        {"name": "tool_success"},
+    ]
+    if budget_ms is not None:
+        specs.append({"name": "latency_budget", "params": {"budget_ms": budget_ms}})
+    results = run_evaluators(trace, specs)
+    if json_out:
+        typer.echo(json.dumps([r.model_dump(mode="json") for r in results], indent=2))
+        return
+    for r in results:
+        score = "n/a" if r.score is None else f"{r.score:g}"
+        typer.echo(f"  {r.evaluator}/{r.metric}: {score}")
+        if r.score is None and r.details.get("reason"):
+            typer.echo(f"    ~ {r.details['reason']}")
 
 
 @app.command()

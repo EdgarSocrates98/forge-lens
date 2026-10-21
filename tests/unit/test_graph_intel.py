@@ -573,3 +573,129 @@ def test_node_has_token_usage_requires_parseable() -> None:
                  attrs=_usage("gpt-4o", 1, 1))
     g2 = build_trace_graph(_trace([good]))
     assert g2.nodes[0].has_token_usage is True
+
+
+# -- Cycle 06: evaluation engine ----------------------------------------------
+
+
+def test_eval_error_free_and_tool_success() -> None:
+    from forge_lens.eval import run_evaluators
+
+    ok = _trace([_span("a1", "tool", kind=SpanKind.TOOL)])
+    res = run_evaluators(ok, [{"name": "error_free"}, {"name": "tool_success"}])
+    assert res[0].score == 1.0
+    assert res[1].score == 1.0
+
+    bad = _trace([_err_span("a1", "tool", SpanKind.TOOL, msg="boom")])
+    res2 = run_evaluators(bad, [{"name": "error_free"}, {"name": "tool_success"}])
+    assert res2[0].score == 0.0
+    assert res2[1].score == 0.0
+    assert res2[1].details["failed"] == "a1".ljust(16, "0")
+
+
+def test_eval_latency_and_token_budget() -> None:
+    from forge_lens.eval import run_evaluators
+
+    t = _trace([_span("a1", "work", dur_ms=250)])
+    res = run_evaluators(
+        t, [{"name": "latency_budget", "params": {"budget_ms": 20000}}]
+    )
+    assert res[0].score == 1.0  # envelope wall-clock = 10s ≤ 20s
+
+    t2 = _trace([_span("a1", "llm", kind=SpanKind.LLM,
+                       attrs=_usage("gpt-4o", 300, 200))])
+    res2 = run_evaluators(
+        t2,
+        [{"name": "token_budget", "params": {"max_total_tokens": 400}},
+         {"name": "token_budget", "params": {"max_total_tokens": 600}}],
+    )
+    assert res2[0].score == 0.0  # 500 > 400
+    assert res2[1].score == 1.0  # 500 ≤ 600
+
+
+def test_eval_unknown_evaluator_and_missing_params() -> None:
+    from forge_lens.eval import run_evaluators
+
+    res = run_evaluators(
+        _trace([_span("a1", "x")]),
+        [{"name": "bogus"}, {"name": "latency_budget"}],
+    )
+    assert res[0].score is None
+    assert "unknown evaluator" in res[0].details["reason"]
+    assert res[1].score is None  # missing budget_ms param
+    assert res[1].metric == "evaluator_error"
+
+
+def test_eval_report_summary_and_nulls() -> None:
+    from forge_lens.eval import evaluate_traces
+
+    traces = [
+        _trace([_span("a1", "ok", kind=SpanKind.TOOL)], trace_id="b" * 32),
+        _trace([_err_span("a1", "bad", SpanKind.TOOL)], trace_id="a" * 32),
+    ]
+    report = evaluate_traces(
+        traces, [{"name": "error_free"}, {"name": "tool_success"}],
+        dataset="ds1",
+    )
+    assert report.trace_ids == ["a" * 32, "b" * 32]
+    s = report.summary["error_free/no_error_spans"]
+    assert s["n"] == 2
+    assert s["pass_rate"] == 0.5
+    # tool_success nulls on traces without tool spans — none here
+    assert s["nulls"] == 0
+
+
+def test_eval_compare_significance() -> None:
+    from forge_lens.eval import compare_runs, evaluate_traces
+
+    # insufficient data: <10 samples → no significance claim
+    a = evaluate_traces(
+        [_trace([_err_span("a1", "x", SpanKind.TOOL)])],
+        [{"name": "error_free"}], dataset="a",
+    )
+    b = evaluate_traces(
+        [_trace([_span("b1", "y", kind=SpanKind.TOOL)])],
+        [{"name": "error_free"}], dataset="b",
+    )
+    out = compare_runs(a, b)
+    d = out["deltas"][0]
+    assert d["evaluator"] == "error_free"
+    assert d["delta"] == 1.0
+    assert d["significance"] == "insufficient_data"
+    assert d["p_value"] is None
+
+    # significant: 20 all-fail vs 20 all-pass → extreme z
+    many_a = evaluate_traces(
+        [_trace([_err_span("a1", "x", SpanKind.TOOL)],
+                trace_id=f"{i:032x}") for i in range(20)],
+        [{"name": "error_free"}], dataset="a",
+    )
+    many_b = evaluate_traces(
+        [_trace([_span("b1", "y", kind=SpanKind.TOOL)],
+                trace_id=f"{i + 100:032x}") for i in range(20)],
+        [{"name": "error_free"}], dataset="b",
+    )
+    out2 = compare_runs(many_a, many_b)
+    d2 = out2["deltas"][0]
+    # all-fail vs all-pass: pooled p=0.5, var>0 → z defined → significant
+    assert d2["significance"] == "significant"
+    assert d2["p_value"] is not None
+    assert d2["p_value"] < 0.05
+
+
+def test_eval_continuous_metric_no_pvalue() -> None:
+    from forge_lens.eval import compare_runs, evaluate_traces
+
+    a = evaluate_traces(
+        [_trace([_span("a1", "t", kind=SpanKind.TOOL)]) for _ in range(15)],
+        [{"name": "tool_success"}], dataset="a",
+    )
+    b = evaluate_traces(
+        [_trace([_err_span("a1", "t", SpanKind.TOOL)]) for _ in range(15)],
+        [{"name": "tool_success"}], dataset="b",
+    )
+    out = compare_runs(a, b)
+    d = out["deltas"][0]
+    assert d["significance"] == "not_tested"  # continuous — never fabricated
+    assert d["p_value"] is None
+    assert d["delta"] == -1.0

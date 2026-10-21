@@ -47,6 +47,12 @@ def _reject_ingest(status_code: int, detail: str) -> HTTPException:
     return HTTPException(status_code=status_code, detail=detail)
 
 
+def _reject_request(status_code: int, detail: str) -> HTTPException:
+    """Non-ingest rejection — API error metric only."""
+    METRICS.inc(M_API_ERRORS)
+    return HTTPException(status_code=status_code, detail=detail)
+
+
 def _check_declared_size(request: Request, max_bytes: int) -> None:
     """Fast-path 413 on Content-Length before reading any body bytes.
 
@@ -314,6 +320,10 @@ def create_app(
     ) -> dict[str, Any]:
         from forge_lens.graph import build_trace_graph, self_time_ranking
 
+        # clamp like limit/offset — bounded query parameters are a
+        # boundary concern, not the algorithm's
+        top = max(0, min(top, 100))
+
         trace = _get_trace_or_404(trace_id, project_id)
         return {"items": self_time_ranking(build_trace_graph(trace), top=top)}
 
@@ -390,6 +400,80 @@ def create_app(
 
         trace = _get_trace_or_404(trace_id, project_id)
         return incident_bundle(trace, _registry())
+
+    # -- evaluation (Cycle 06): deterministic evidence-based scores ------
+
+    @app.get(f"/{API_VERSION}/traces/{{trace_id}}/eval", dependencies=read_deps)
+    async def trace_eval(
+        trace_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        """Default battery (no-param evaluators) for one trace."""
+        from forge_lens.eval import run_evaluators
+
+        trace = _get_trace_or_404(trace_id, project_id)
+        results = run_evaluators(
+            trace,
+            [{"name": "error_free"}, {"name": "tool_success"}],
+        )
+        return {
+            "trace_id": trace_id,
+            "results": [r.model_dump(mode="json") for r in results],
+        }
+
+    @app.post(f"/{API_VERSION}/eval/run", dependencies=read_deps)
+    async def eval_run(request: Request) -> dict[str, Any]:
+        """Evaluate specs over a set of stored traces → EvalReport."""
+        from forge_lens.eval import evaluate_traces
+
+        body = json.loads(
+            await _read_capped_body(request, cfg.max_payload_bytes)
+        )
+        if not isinstance(body, dict):
+            raise _reject_request(422, "body must be a JSON object")
+        trace_ids = body.get("trace_ids")
+        if not isinstance(trace_ids, list) or not trace_ids:
+            raise _reject_request(422, "trace_ids: non-empty list required")
+        specs = body.get("evaluators")
+        if not isinstance(specs, list) or not specs:
+            raise _reject_request(422, "evaluators: non-empty list of specs required")
+        traces = [
+            _get_trace_or_404(str(tid), body.get("project_id"))
+            for tid in trace_ids[:500]
+        ]
+        report = evaluate_traces(
+            traces,
+            specs,
+            dataset=body.get("dataset"),
+        )
+        return report.model_dump(mode="json")
+
+    @app.post(f"/{API_VERSION}/eval/compare", dependencies=read_deps)
+    async def eval_compare(request: Request) -> dict[str, Any]:
+        """A/B compare: ``{a: {trace_ids,dataset}, b: {...}, evaluators}``."""
+        from forge_lens.eval import compare_runs, evaluate_traces
+
+        body = json.loads(
+            await _read_capped_body(request, cfg.max_payload_bytes)
+        )
+        if not isinstance(body, dict):
+            raise _reject_request(422, "body must be a JSON object")
+        specs = body.get("evaluators")
+        if not isinstance(specs, list) or not specs:
+            raise _reject_request(422, "evaluators: non-empty list of specs required")
+
+        def _side(key: str) -> Any:
+            side = body.get(key)
+            if not isinstance(side, dict) or not isinstance(side.get("trace_ids"), list):
+                raise _reject_request(422, f"{key}: {{trace_ids: [...]}} required")
+            traces = [
+                _get_trace_or_404(str(tid), body.get("project_id"))
+                for tid in side["trace_ids"][:500]
+            ]
+            return evaluate_traces(
+                traces, specs, dataset=side.get("dataset"),
+            )
+
+        return compare_runs(_side("a"), _side("b"))
 
     # -- ops ------------------------------------------------------------
 

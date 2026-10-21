@@ -35,11 +35,6 @@ def from_unix_nano(nanos: int) -> datetime:
     return _EPOCH + timedelta(seconds=seconds, microseconds=rem_ns // 1_000)
 
 
-def parse_unix_nano(value: int | str) -> int:
-    """OTLP sends unix nanos as a JSON string sometimes — normalize to int."""
-    return int(value)
-
-
 def ensure_aware(dt: datetime) -> datetime:
     """Coerce a naive datetime to UTC-aware (naive-as-UTC).
 

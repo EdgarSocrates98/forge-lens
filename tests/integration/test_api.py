@@ -627,3 +627,46 @@ def test_otlp_quarantine_warnings_bounded(client: TestClient) -> None:
     warnings = r.json()["warnings"]
     assert len(warnings) <= 201
     assert any("more item(s)" in w for w in warnings[-3:])
+
+
+# -- Cycle 06: evaluation endpoints --------------------------------------------
+
+
+def test_trace_eval_endpoint(client: TestClient, synthetic_trace: Trace) -> None:
+    client.post("/v1/traces", json=TraceIngest(traces=[synthetic_trace]).model_dump(mode="json"))
+    r = client.get(f"/v1/traces/{synthetic_trace.trace_id}/eval")
+    assert r.status_code == 200, r.text
+    results = {res["evaluator"]: res for res in r.json()["results"]}
+    assert results["error_free"]["score"] == 0.0  # fixture has an error span
+    assert results["tool_success"]["score"] == 0.0
+
+
+def test_eval_run_and_compare_endpoints(
+    client: TestClient, synthetic_trace: Trace
+) -> None:
+    client.post("/v1/traces", json=TraceIngest(traces=[synthetic_trace]).model_dump(mode="json"))
+    tid = synthetic_trace.trace_id
+    r = client.post(
+        "/v1/eval/run",
+        json={"trace_ids": [tid], "evaluators": [{"name": "error_free"}]},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["summary"]["error_free/no_error_spans"]["n"] == 1
+
+    r = client.post(
+        "/v1/eval/compare",
+        json={
+            "a": {"trace_ids": [tid]},
+            "b": {"trace_ids": [tid]},
+            "evaluators": [{"name": "error_free"}],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["deltas"][0]["delta"] == 0.0
+
+    # malformed bodies → 4xx, never 500
+    assert client.post("/v1/eval/run", json={"evaluators": []}).status_code == 422
+    assert client.post(
+        "/v1/eval/compare", json={"a": {}, "b": {"trace_ids": [tid]},
+                                  "evaluators": [{"name": "x"}]}
+    ).status_code == 422

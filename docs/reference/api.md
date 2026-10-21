@@ -121,6 +121,32 @@ JSON: `failure` + `graph` (stats, critical path, top-5 bottlenecks) +
 `cost` + `waste` + `replay`. Um call, todo o evidence — feito para
 handoff/export.
 
+## Avaliação (Cycle 06)
+
+Avaliadores determinísticos sobre evidência armazenada — sem LLM, sem
+relógio (`evaluated_at` só é emitido quando o caller injeta `now`;
+idênticos inputs produzem relatórios byte-idênticos). Score `null` com
+`details.reason` é a resposta honesta para dados insuficientes.
+
+### `GET /v1/traces/{trace_id}/eval?project_id`
+Bateria default (`error_free`, `tool_success`) → `{results[]}`.
+
+### `POST /v1/eval/run`
+`{trace_ids: [...≤500], evaluators: [{name, params?}], dataset?}` →
+`EvalReport`: `results` por trace + `summary` por `evaluator/metric`
+(`n`, `nulls`, `sum`, `mean_score`, `pass_rate`).
+
+### `POST /v1/eval/compare`
+`{a: {trace_ids, dataset?}, b: {...}, evaluators}` → deltas por
+`evaluator/metric` com `significance`: `significant` (z-teste de duas
+proporções, só para métricas binárias 0/1 com n≥10 por lado),
+`insufficient_data`, `not_tested` (métrica contínua — p-valor nunca é
+fabricado), `not_computable` (variância pooled zero).
+
+Avaliadores: `error_free` (binário), `tool_success` (binário, `null` sem
+tool spans), `latency_budget` (param `budget_ms`, relógio do envelope),
+`token_budget` (param `max_total_tokens`).
+
 ## Ops
 
 ### `GET /v1/health`

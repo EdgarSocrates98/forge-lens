@@ -639,3 +639,28 @@ ORPHAN resolvido/falso, usage malformado).
 Testes: +8 (chunked oversize 413, quarantine cap, multi-root depth,
 cycle-attached depth, in-flight≠falha, truncamento de envelope fechado,
 ordem span_start/event, has_token_usage malformado, doctor imutável).
+
+## Round 13 — semântica de evidência + Cycle 06 backend
+
+- **Divergência de `parent_span_id` → `CONFLICT`**: `_identity_differs`
+  compara só name/kind/start; um redelivery alegando outro pai era
+  absorvido como DUPLICATE com o pai original preservado silenciosamente.
+  Agora diverge de topologia gera `IntegrityFlag.CONFLICT` quando ambos
+  os lados declaram pais diferentes (pai ausente continua merge
+  first-non-None — informação nova, não contradição).
+- **Flags de produtor não são confiáveis**: o pipeline zera
+  `span.integrity_flags` na entrada — `conflict`/`duplicate`/
+  `out_of_order`/`truncated` no wire fabricavam evidência. Todos os
+  flags são vereditos do engine, recomputados na ingestão e no merge.
+- **CLI ingest bounded**: `stat()` antes de ler + leitura limitada a
+  `max_payload_bytes + 1` — sem `read_bytes()` irrestrito.
+- **`top` clamped**: endpoint de bottlenecks clampa `0..100` como os
+  demais parâmetros de consulta.
+- **Dead code**: removido `parse_unix_nano` (nunca chamado).
+- **Cycle 06 backend**: `forge_lens/eval/` — avaliadores determinísticos,
+  `EvalReport` agregado, `compare_runs` com z-teste honesto; endpoints
+  `/v1/eval/*` + CLI `forge-lens eval`. `evaluated_at` só existe quando
+  injetado — relatórios reproduzíveis byte-a-byte.
+
+Testes: +10 (parent-divergence CONFLICT, producer-flag strip, eval
+battery ×6, endpoints eval ×2).

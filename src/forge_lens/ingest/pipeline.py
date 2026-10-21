@@ -218,6 +218,11 @@ class IngestPipeline:
             for trace in traces:
                 _normalize_times(trace)
                 for span in trace.spans:
+                    # integrity flags are engine verdicts, never wire
+                    # claims — a producer asserting `conflict`/`duplicate`
+                    # on its own data fabricates evidence. Strip them;
+                    # flag_integrity + store merge recompute the true set.
+                    span.integrity_flags = []
                     if len(span.events) > self.config.max_events_per_span:
                         span.events = span.events[: self.config.max_events_per_span]
                         if IntegrityFlag.TRUNCATED not in span.integrity_flags:

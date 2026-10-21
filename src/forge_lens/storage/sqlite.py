@@ -451,11 +451,19 @@ class SQLiteTraceStore:
         ``name``/``kind``/``start_time`` are never merged (first-observed
         wins), so a difference means the same ``(project, trace, span)``
         key carried *different* telemetry — a conflict, not a retry.
+        ``parent_span_id`` merges first-non-None, so a *different*
+        declared parent is a topology conflict — the merge would drop it
+        silently otherwise.
         """
         return (
             incoming.name != stored.name
             or incoming.kind != stored.kind
             or incoming.start_time != stored.start_time
+            or (
+                incoming.parent_span_id is not None
+                and stored.parent_span_id is not None
+                and incoming.parent_span_id != stored.parent_span_id
+            )
         )
 
     def _merge_span(

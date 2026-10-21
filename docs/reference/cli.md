@@ -52,6 +52,13 @@ Bundle de incidente (Cycle 05): categoria de falha com evidência,
 critical path, timeline de replay e custo estimado — em um único payload.
 `--json` emite o bundle completo (`bundle_version` versionado).
 
+## `forge-lens eval <trace_id> [--db] [--project] [--budget-ms N] [--json]`
+
+Bateria de avaliadores determinísticos (Cycle 06): `error_free` +
+`tool_success` sempre; `latency_budget` quando `--budget-ms` é passado.
+Score `n/a` + motivo quando a evidência é insuficiente — nunca inventa
+veredito.
+
 ## `forge-lens doctor [path] [--db]`
 
 Verifica Python ≥3.11, diretório de dados, store legível (schema_version,

@@ -7,7 +7,7 @@ Forge Lens receives, persists and explains agent executions — via OTLP/HTTP, O
 ## Status
 
 Cycles 00–01 (foundation, verified): contracts v1, OTLP/HTTP JSON ingestion, sanitization, SQLite WAL store, Python + TypeScript SDKs, CLI.
-Cycles 03–05 backend: temporal execution graph (`/v1/graph/*`), token/cost intelligence (`/v1/traces/{id}/cost`), failure classification + recorded replay + incident bundles (`/v1/traces/{id}/failure|replay|incident`) — reports in `docs/cycles/`. Remaining cycles are `DOCUMENTED_ONLY`.
+Cycles 03–06 backend: temporal execution graph (`/v1/graph/*`), token/cost intelligence (`/v1/traces/{id}/cost`), failure classification + recorded replay + incident bundles (`/v1/traces/{id}/failure|replay|incident`), deterministic evaluation (`/v1/eval/*`) — reports in `docs/cycles/`. Remaining cycles are `DOCUMENTED_ONLY`.
 
 ## Quickstart
 

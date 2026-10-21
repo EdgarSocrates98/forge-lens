@@ -385,3 +385,53 @@ def test_llm_span_malformed_usage_gets_unknown_tokens(
     ])
     stored = tmp_store.get_trace("c" * 32)
     assert IntegrityFlag.UNKNOWN_TOKENS in stored.spans[0].integrity_flags
+
+
+def test_divergent_parent_is_conflict_not_duplicate(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """Re-delivery claiming a different parent → CONFLICT, kept parent."""
+    from datetime import UTC, datetime
+
+    from forge_lens.contracts.v1.trace import Span
+
+    p = _pipeline(tmp_store)
+    p.ingest([synthetic_trace])
+    target = synthetic_trace.spans[1]  # llm span — has parent "1"*16
+    diverged = Span(
+        trace_id=target.trace_id,
+        span_id=target.span_id,
+        parent_span_id="f" * 16,  # different claimed parent
+        name=target.name,
+        kind=target.kind,
+        start_time=target.start_time,
+        end_time=datetime(2026, 1, 1, 12, 0, 2, tzinfo=UTC),
+    )
+    t2 = Trace(
+        trace_id=target.trace_id,
+        project_id=synthetic_trace.project_id,
+        started_at=target.start_time,
+        ended_at=diverged.end_time,
+        spans=[diverged],
+    )
+    result = p.ingest([t2])
+    stored = tmp_store.get_trace(target.trace_id)
+    span = next(s for s in stored.spans if s.span_id == target.span_id)
+    assert IntegrityFlag.CONFLICT in span.integrity_flags
+    assert span.parent_span_id == target.parent_span_id  # stored wins
+    assert result.duplicate_spans + result.updated_spans >= 1
+
+
+def test_producer_flags_stripped_at_ingest(
+    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
+) -> None:
+    """A producer asserting conflict/duplicate on wire data fabricates
+    evidence — flags are engine verdicts, recomputed at ingest."""
+    forged = synthetic_trace.model_copy(deep=True)
+    for s in forged.spans:
+        s.integrity_flags = [IntegrityFlag.CONFLICT, IntegrityFlag.DUPLICATE]
+    _pipeline(tmp_store).ingest([forged])
+    stored = tmp_store.get_trace(forged.trace_id)
+    for s in stored.spans:
+        assert IntegrityFlag.CONFLICT not in s.integrity_flags
+        assert IntegrityFlag.DUPLICATE not in s.integrity_flags
