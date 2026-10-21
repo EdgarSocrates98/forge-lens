@@ -2,12 +2,20 @@
 // path consumers take (Node self-reference). If "main"/"exports" point
 // at a file tsc doesn't emit, this fails to resolve instead of passing
 // silently because tests import ../src/ relatively.
-import { LensTracer, HTTPExporter, InMemoryExporter } from "@forge-lens/sdk";
+import {
+  LensTracer,
+  HTTPExporter,
+  InMemoryExporter,
+  LensClient,
+  LensQueryError,
+} from "@forge-lens/sdk";
 
 if (
   typeof LensTracer !== "function" ||
   typeof HTTPExporter !== "function" ||
-  typeof InMemoryExporter !== "function"
+  typeof InMemoryExporter !== "function" ||
+  typeof LensClient !== "function" ||
+  typeof LensQueryError !== "function"
 ) {
   console.error("package entry resolved but exports are missing");
   process.exit(1);

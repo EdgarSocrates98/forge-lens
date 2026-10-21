@@ -84,7 +84,114 @@ mas não retido. `HTTPExporter.export()` devolve a resposta do servidor —
 aceite do servidor, não retenção local; os shapes são intencionalmente
 diferentes.
 
+## `LensClient` — leitura (`src/query.ts`)
+
+Lado de leitura do SDK — espelho do `HTTPExporter`: fetch nativo, zero
+deps de rede adicionais, todo I/O de rede isolado no módulo. Cliente
+fino: cada método mapeia 1:1 para uma rota de consulta `/v1` e devolve
+o corpo JSON parseado **verbatim** — nada fabricado nem recalculado
+localmente. Espelha o `LensClient` do SDK Python
+(`forge_lens.sdk.query`) método a método.
+
+```ts
+import { LensClient, LensQueryError } from "@forge-lens/sdk";
+
+new LensClient({
+  endpoint: "http://127.0.0.1:7777",  // barras finais removidas
+  apiKey: undefined,                  // vai como X-Forge-Lens-Key
+  projectId: "default",
+  timeoutMs: 10_000,                  // deadline via AbortController
+  fetchImpl: fetch,                   // injetável (testes/proxies)
+});
+```
+
+Auth espelha o ingest: `apiKey` viaja como `X-Forge-Lens-Key` quando
+definida — role `reader` basta. Leituras são abertas no modo local-first
+padrão; a chave só é exigida quando o servidor roda `auth_reads` ou
+`auth_mode = "keys"`. `projectId` funciona como `--project` da CLI e
+`projectId` do `HTTPExporter`: o valor por chamada vence; senão o projeto
+configurado no cliente é enviado em toda request.
+
+Falhas — transporte, HTTP 4xx/5xx, timeout, resposta não-JSON — levantam
+`LensQueryError`, o único tipo de exceção. `err.statusCode` carrega o
+status HTTP quando o servidor respondeu (401/403/404/422…) e fica
+`undefined` em falha pura de transporte (conexão recusada, timeout). Um
+`get*` de recurso ausente → `LensQueryError` com `statusCode === 404`.
+
+| Método | Rota | Retorno |
+|---|---|---|
+| `listTraces({projectId?, sessionId?, status?, since?, until?, minDurationMs?, maxDurationMs?, q?, tool?, limit=50, offset=0})` | `GET /v1/traces` | `{items, limit, offset}` |
+| `getTrace(traceId, {projectId?})` | `GET /v1/traces/{id}` | contrato `Trace` completo |
+| `listSessions({projectId?, limit=100, offset=0})` | `GET /v1/sessions` | `{items, limit, offset}` |
+| `listTools({projectId?, limit=100, offset=0})` | `GET /v1/tools` | `{items, limit, offset}` |
+| `traceGraph(traceId, {projectId?})` | `GET /v1/graph/traces/{id}` | `ExecutionGraph` |
+| `traceCriticalPath(traceId, {projectId?})` | `…/critical-path` | `{path, total_ms, cycles}` |
+| `traceBottlenecks(traceId, {projectId?, top=5})` | `…/bottlenecks` | `{items}` self-time |
+| `traceGraphAnalysis(traceId, {projectId?})` | `…/analysis` | centralidade/concentração |
+| `sessionGraph(sessionId, {projectId?, limit=200})` | `GET /v1/graph/sessions/{id}` | grafo de sessão |
+| `traceCost(traceId, {projectId?})` | `GET /v1/traces/{id}/cost` | relatório + `pricing_source` + `waste[]` |
+| `traceFailure(traceId, {projectId?})` | `…/failure` | classificação com evidência |
+| `traceReplay(traceId, {projectId?})` | `…/replay` | timeline registrado |
+| `traceIncident(traceId, {projectId?})` | `…/incident` | bundle versionado |
+| `traceSecurity(traceId, {projectId?})` | `…/security` | observações (observer) |
+| `traceEval(traceId, {projectId?})` | `…/eval` | `{trace_id, results}` |
+| `traceEfficiency(traceId, {projectId?})` | `…/efficiency` | tokens/tools/retries |
+| `traceRecommendations(traceId, {projectId?})` | `…/recommendations` | recomendações com evidência |
+| `traceLoops(traceId, {projectId?, repeatThreshold=3})` | `…/loops` | findings heurísticos |
+| `listDatasets({projectId?})` | `GET /v1/datasets` | **array puro** (sem envelope) |
+| `getDataset(datasetId, {projectId?})` | `GET /v1/datasets/{id}` | metadados do dataset |
+| `listDatasetVersions(datasetId, {projectId?})` | `…/versions` | **array puro** |
+| `getDatasetVersion(datasetId, version, {projectId?})` | `…/versions/{v}` | versão imutável |
+| `health()` | `GET /v1/health` | `{status, version, storage, stats?}` |
+| `metrics()` | `GET /v1/metrics` | snapshot de self-observability |
+| `capabilities()` | `GET /v1/capabilities` | matriz de capacidades |
+| `pricing()` | `GET /v1/analytics/pricing` | tabela de preços efetiva |
+| `opsSummary({projectId?})` | `GET /v1/ops/summary` | stats + falhas recentes |
+| `listSpecialists()` | `GET /v1/analyze/specialists` | `{specialists}` |
+
+Notas:
+
+- Em `listTraces`, `status` ∈ `error|ok|unset` (`StatusCode`);
+  `since`/`until` aceitam ISO-8601 ou `Date` (serializado via
+  `toISOString()`). Todos os filtros combinam com `AND`; validação vive
+  no servidor (422 → `LensQueryError`).
+- `/v1/datasets` e `/v1/datasets/{id}/versions` retornam **array puro** —
+  as demais listas paginadas usam o envelope `{items, limit, offset}`.
+- Rotas `POST` de leitura (argumentos via corpo JSON, ainda sob a
+  dependência de auth de leitura):
+  - `evalRun(traceIds, evaluators, {dataset?, projectId?})` →
+    `POST /v1/eval/run` → `EvalReport` (`results` indexado por trace_id +
+    `summary` por evaluator/metric).
+  - `evalCompare(a, b, evaluators, {gate?, projectId?})` →
+    `POST /v1/eval/compare` — `a`/`b` são objetos de lado
+    (`{trace_ids, dataset?, project_id?}`); `gate` segue o formato
+    `{metrics: {"eval/metric": {min_pass_rate_b, max_drop}},
+    fail_on_significant_regression}` → resposta inclui `gate.gate_passed`.
+  - `fleetEfficiency(traceIds?, {projectId?})` → `POST /v1/intel/efficiency`
+    — roll-up sobre ids explícitos ou a janela recente limitada.
+  - `compareCohorts(a, b, {projectId?})` → `POST /v1/intel/regress` —
+    deltas observados entre cohorts (significância fica com eval/compare).
+  - `runAnalysis(specialist, traceId, {budget?, context?, runId?,
+    projectId?})` → `POST /v1/analyze/{specialist}/{trace_id}` — roda um
+    specialist registrado sob budget cooperativo.
+  - `alertsEvaluate(rules?, {useSaved?, projectId?})` →
+    `POST /v1/alerts/evaluate` — regras de threshold contra métricas do
+    store em tempo de request.
+- O timeout é do cliente, não do transporte: o request corre contra um
+  deadline por `Promise.race` e o `AbortController` cancela o fetch real
+  — um `fetchImpl` que ignora `signal` ainda estoura `LensQueryError` no
+  prazo.
+- Não coberto de propósito: `GET /v1/traces/{id}/stream` (SSE replay —
+  stream de eventos, não um recurso JSON) e as rotas de ingest/admin.
+- Sem `fromConfig`: o SDK TS não tem cadeia `FORGE_LENS_*`/config.toml —
+  `endpoint`/`apiKey`/`projectId` vêm do construtor.
+
 ## Tipos
 
 `Trace`, `Span`, `SpanEvent`, `SpanLink`, `TraceIngest`, `TraceSource`,
 `Status`, `SpanKind`, `Provenance` — espelham `schemas/v1/*.json`.
+
+Do lado de leitura: `JsonObject`, `ListEnvelope<T>` (`{items, limit,
+offset}`), `HealthResponse`, `TraceEvalResponse`, `SpecialistsResponse`,
+`EvalSide`, `CohortSide`, `ListTracesFilters`, `ListPageOptions`,
+`ProjectScoped`, `LensClientOptions`.
