@@ -66,6 +66,11 @@ veredito.
 Verifica Python ≥3.11, diretório de dados, store legível (schema_version,
 contagens), extras de servidor e import do SDK. Exit 0/1.
 
+## `forge-lens sessions [--db] [--project] [--limit N] [--json]`
+
+Roll-up de sessões (espelha `GET /v1/sessions`): session_id,
+traces, spans e última atividade — ordenado por atividade recente.
+
 ## `forge-lens tools [--db] [--project] [--limit N] [--json]`
 
 Roll-up de ferramentas (espelha `GET /v1/tools`): uma linha por

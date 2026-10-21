@@ -445,6 +445,36 @@ def graph(
 
 
 @app.command()
+def sessions(
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    limit: Annotated[int, typer.Option("--limit", "-n")] = 50,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Session roll-up: one row per session_id, newest activity first."""
+    cfg = _config(db)
+    store = _store(cfg)
+    try:
+        items = store.list_sessions(
+            project or cfg.project_id, limit=min(500, max(0, limit))
+        )
+    finally:
+        store.close()
+    if json_out:
+        typer.echo(json.dumps(items, indent=2))
+        return
+    if not items:
+        typer.echo("no sessions recorded")
+        return
+    for s in items:
+        last = (s["last_activity_at"] or "?")[:19]
+        typer.echo(
+            f"{s['session_id']:<28} traces={s['traces']:<5} "
+            f"spans={s['spans']:<6} last={last}"
+        )
+
+
+@app.command()
 def tools(
     db: Annotated[Path | None, typer.Option("--db")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,

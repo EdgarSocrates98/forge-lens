@@ -646,3 +646,19 @@ def test_tools_cli_renders_rollup(tmp_path: Path) -> None:
     assert "web_search" in r.output
     assert "calls=4" not in r.output  # seeded counts are 1/1/1 + 2 unnamed
     assert "(unnamed)" in r.output
+
+
+def test_sessions_cli_renders_rollup(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from forge_lens.cli.main import app
+
+    s = SQLiteTraceStore(tmp_path / "cli.db")
+    _seed(s)
+    s.close()
+    r = CliRunner().invoke(
+        app, ["sessions", "--db", str(tmp_path / "cli.db")]
+    )
+    assert r.exit_code == 0
+    assert "sess-1" in r.output
+    assert "traces=2" in r.output
