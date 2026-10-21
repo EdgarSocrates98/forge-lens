@@ -15,7 +15,7 @@ Measured surfaces:
   ``get_trace`` point reads.
 - ``graph.build_trace_graph`` (2 000-span tree) and
   ``graph.build_session_graph`` (one 40-trace session).
-- ``eval.evaluate_traces`` — the full 12-evaluator registry over 200
+- ``eval.evaluate_traces`` — the full 17-evaluator registry over 200
   stored traces, fetch fan-out included (mirrors ``POST /v1/eval/run``).
 """
 
@@ -198,7 +198,7 @@ def test_graph_build(bench: BenchReport) -> None:
 
 
 def test_eval_run_battery(bench_store: SeededCorpus, bench: BenchReport) -> None:
-    """Fetch 200 stored traces + run the full 12-evaluator registry.
+    """Fetch 200 stored traces + run the full 17-evaluator registry.
 
     Mirrors ``POST /v1/eval/run``: per-id ``get_trace`` fan-out, then
     ``evaluate_traces`` — measured as two records so the read cost and

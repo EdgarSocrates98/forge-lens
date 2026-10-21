@@ -8,6 +8,7 @@ marks pass/fail metrics eligible for the proportion test in
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections import Counter
@@ -529,6 +530,558 @@ def _tool_call_count(
     )
 
 
+# -- §06.2/§06.5 evaluators -------------------------------------------------
+#
+# The evaluation-methods and metrics gaps closed here: output schema
+# checking, required-evidence coverage, the human-review queue marker,
+# set precision/recall/F1, and a documented lexical-grounding heuristic.
+# Same contract as the evaluators above: evidence or ``None``, malformed
+# params raise → ``evaluator_error``, collections emitted deterministically.
+
+
+_JSON_SCHEMA_TYPES = {
+    "object",
+    "array",
+    "string",
+    "number",
+    "integer",
+    "boolean",
+    "null",
+}
+"""Type names the ``schema_validation`` subset accepts."""
+
+_SCHEMA_KEYWORDS = {"type", "properties", "required", "items"}
+"""The entire supported JSON-Schema keyword set — anything beyond these
+(``minimum``, ``pattern``, ``additionalProperties``, ``enum``, …) is
+rejected as a malformed spec rather than silently ignored, which would
+fabricate validation the spec author never got."""
+
+_MAX_SCHEMA_DEPTH = 32
+"""Recursion bound on nested ``properties``/``items`` — deeper schemas are
+a spec bug (evaluator_error), never a ``RecursionError`` in the runner."""
+
+_MAX_VIOLATIONS = 50
+"""Detail-string bound — a large array failing ``items`` per element must
+not produce a megabyte ``details`` value."""
+
+
+def _check_schema_node(node: Any, path: str, depth: int) -> None:
+    """Validate one schema node against the supported subset.
+
+    Raises ``TypeError``/``ValueError`` — the runner maps both to
+    ``evaluator_error``, so a malformed schema is a reported spec bug,
+    not a crash and never a silently-relaxed check."""
+    if depth > _MAX_SCHEMA_DEPTH:
+        raise ValueError(
+            f"schema nesting exceeds {_MAX_SCHEMA_DEPTH} levels at {path}"
+        )
+    if not isinstance(node, dict):
+        raise TypeError(f"schema at {path} must be an object")
+    unknown = sorted(set(node) - _SCHEMA_KEYWORDS)
+    if unknown:
+        raise ValueError(
+            f"unsupported schema keyword(s) at {path}: {', '.join(unknown)}"
+        )
+    if "type" in node:
+        tname = node["type"]
+        if not isinstance(tname, str) or tname not in _JSON_SCHEMA_TYPES:
+            raise ValueError(
+                f"schema type at {path} must be one of "
+                f"{sorted(_JSON_SCHEMA_TYPES)}, got {tname!r}"
+            )
+    if "required" in node:
+        req = node["required"]
+        if not isinstance(req, list) or not all(isinstance(k, str) for k in req):
+            raise TypeError(f"schema 'required' at {path} must be a list of strings")
+    if "properties" in node:
+        props = node["properties"]
+        if not isinstance(props, dict):
+            raise TypeError(f"schema 'properties' at {path} must be an object")
+        for key in sorted(props):
+            _check_schema_node(props[key], f"{path}.{key}", depth + 1)
+    if "items" in node:
+        _check_schema_node(node["items"], f"{path}[*]", depth + 1)
+
+
+def _json_type_name(value: Any) -> str:
+    """JSON type name of a Python value — used in violation messages."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        # JSON Schema semantics: 1.0 is an integer
+        return "integer" if math.isfinite(value) and value.is_integer() else "number"
+    return type(value).__name__
+
+
+def _schema_type_ok(value: Any, tname: str) -> bool:
+    if tname == "object":
+        return isinstance(value, dict)
+    if tname == "array":
+        return isinstance(value, list)
+    if tname == "string":
+        return isinstance(value, str)
+    if tname == "boolean":
+        return isinstance(value, bool)
+    if tname == "null":
+        return value is None
+    if tname == "number":
+        # bool is a subclass of int — True is not a number; NaN/inf are
+        # not representable JSON numbers and honestly fail the check
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+        )
+    # integer — JSON has a single number type; an integral float counts
+    return (isinstance(value, int) and not isinstance(value, bool)) or (
+        isinstance(value, float) and math.isfinite(value) and value.is_integer()
+    )
+
+
+def _check_instance(
+    value: Any, schema: dict[str, Any], path: str, violations: list[str]
+) -> None:
+    """Apply a validated schema node to an instance, collecting
+    ``path: message`` violations. Kind-gated like real JSON Schema:
+    ``properties``/``required`` only bind dicts, ``items`` only lists."""
+    if len(violations) >= _MAX_VIOLATIONS:
+        return
+    tname = schema.get("type")
+    if tname is not None and not _schema_type_ok(value, tname):
+        violations.append(
+            f"{path}: expected {tname}, got {_json_type_name(value)}"
+        )
+        return  # wrong kind — nested checks would only repeat that fact
+    if isinstance(value, dict):
+        for key in schema.get("required", []):
+            if key not in value:
+                violations.append(f"{path}: required key {key!r} absent")
+        props = schema.get("properties", {})
+        for key in sorted(props):  # deterministic traversal
+            if key in value:
+                _check_instance(value[key], props[key], f"{path}.{key}", violations)
+    elif isinstance(value, list):
+        items = schema.get("items")
+        if items is not None:
+            for i, element in enumerate(value):
+                _check_instance(element, items, f"{path}[{i}]", violations)
+
+
+def _schema_validation(
+    trace: Trace, params: dict[str, Any], now: datetime | None
+) -> EvaluationResult:
+    """Validate the resolved field's JSON value against a schema.
+
+    Supported subset — ``type`` (``object``/``array``/``string``/
+    ``number``/``integer``/``boolean``/``null``, single name only),
+    ``properties`` (dict of subschemas), ``required`` (list of keys),
+    ``items`` (subschema applied to every element). No other keyword is
+    accepted — unsupported keys are an ``evaluator_error``, never
+    silently skipped. ``type``-less nodes are legal (a ``{}`` schema
+    validates anything, as in JSON Schema).
+
+    Field resolution reuses ``_output_field`` (default ``output.value``).
+    A string value that parses as a JSON object/array is validated as
+    the parsed structure; a string that does not (or parses to a scalar)
+    is validated as the string itself — ``"42"`` the string stays a
+    string, never a number."""
+    schema = params["schema"]  # KeyError → evaluator_error
+    _check_schema_node(schema, "$", 0)
+    field = _output_field(params)
+    observed, span_id = _observed_value(trace, field)
+    if span_id is None and observed is None:
+        return _result(
+            "schema_validation",
+            "field_schema_valid",
+            None,
+            trace,
+            now,
+            {"field": field, "reason": "field not observed in trace"},
+        )
+    instance = observed
+    decoded = "raw"
+    if isinstance(observed, str):
+        try:
+            parsed: Any = json.loads(observed)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, (dict, list)):
+            instance = parsed
+            decoded = "json"
+    violations: list[str] = []
+    _check_instance(instance, schema, "$", violations)
+    details = {
+        "field": field,
+        "observed_in": span_id or "resource_attributes",
+        "instance_kind": _json_type_name(instance),
+        "decoded": decoded,
+        "violation_count": str(len(violations)),
+    }
+    if violations:
+        shown = sorted(violations)
+        suffix = (
+            f"; … truncated at {_MAX_VIOLATIONS}"
+            if len(violations) >= _MAX_VIOLATIONS
+            else ""
+        )
+        details["violations"] = "; ".join(shown) + suffix
+    return _result(
+        "schema_validation",
+        "field_schema_valid",
+        1.0 if not violations else 0.0,
+        trace,
+        now,
+        details,
+    )
+
+
+def _fraction_param(params: dict[str, Any], key: str, default: float) -> float:
+    """Optional threshold in ``(0, 1]`` — wire strings, bools,
+    non-finite and out-of-range values are spec bugs, not clamps."""
+    raw = params.get(key, default)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise TypeError(f"{key} must be a number, got {type(raw).__name__}")
+    value = float(raw)
+    if not math.isfinite(value):
+        raise ValueError(f"{key} must be finite")
+    if not 0.0 < value <= 1.0:
+        raise ValueError(f"{key} must be in (0, 1]")
+    return value
+
+
+def _evidence_coverage(
+    trace: Trace, params: dict[str, Any], now: datetime | None
+) -> EvaluationResult:
+    """Fraction of ``required_attrs`` present anywhere in the trace.
+
+    Trace-level semantic: an attribute counts as covered when at least
+    one span — or ``resource_attributes`` — carries a key equal to it or
+    namespaced under it (``gen_ai.usage`` covers
+    ``gen_ai.usage.input_tokens``; a bare ``x`` never matches ``xyz``).
+    Per-span coverage was rejected: agent evidence legitimately lives
+    spread across spans (tool names on TOOL spans, usage on LLM spans),
+    so requiring every attribute on one span would fail honest traces.
+
+    ``score`` is the pass verdict against ``min_coverage`` (default 1.0)
+    so ``pass_rate`` and the z-test stay truthful; the raw fraction is
+    reported in ``details.coverage``."""
+    required = params["required_attrs"]  # KeyError → evaluator_error
+    if (
+        not isinstance(required, list)
+        or not required
+        or not all(isinstance(a, str) and a for a in required)
+    ):
+        raise TypeError("required_attrs must be a non-empty list of attribute keys")
+    min_cov = _fraction_param(params, "min_coverage", 1.0)
+    reqs = sorted(set(required))  # duplicates count once — set semantics
+    keys = set(trace.resource_attributes)
+    for s in trace.spans:
+        keys.update(s.attributes)
+    covered: list[str] = []
+    missing: list[str] = []
+    evidence: list[str] = []
+    for req in reqs:
+        hits = sorted(k for k in keys if k == req or k.startswith(req + "."))
+        if hits:
+            covered.append(req)
+            evidence.extend(f"{req}<-{k}" for k in hits)
+        else:
+            missing.append(req)
+    coverage = len(covered) / len(reqs)
+    ev = ",".join(sorted(evidence))
+    details = {
+        "required": ",".join(reqs),
+        "covered": ",".join(covered),
+        "missing": ",".join(missing),
+        "coverage": f"{coverage:.6f}",
+        "min_coverage": f"{min_cov:g}",
+        "attr_keys_observed": str(len(keys)),
+        "evidence": ev[:400] + ("…" if len(ev) > 400 else ""),
+    }
+    return _result(
+        "evidence_coverage",
+        "required_attrs_coverage",
+        1.0 if coverage >= min_cov else 0.0,
+        trace,
+        now,
+        details,
+    )
+
+
+def _human_review(
+    trace: Trace, params: dict[str, Any], now: datetime | None
+) -> EvaluationResult:
+    """Human-review queue marker — always ``score=None``.
+
+    A deterministic engine cannot decide a rubric; the result exists to
+    mark the trace as pending judgment, never to fabricate one. The
+    optional ``rubric`` is echoed verbatim into ``details`` so the
+    reviewer sees the instructions the spec carried."""
+    rubric = params.get("rubric")
+    if rubric is not None and not isinstance(rubric, str):
+        raise TypeError(f"rubric must be a string, got {type(rubric).__name__}")
+    return _result(
+        "human_review",
+        "pending_human_review",
+        None,
+        trace,
+        now,
+        {
+            "reason": "pending_human_review",
+            "verdict": "neutral",
+            "rubric": rubric or "",
+        },
+    )
+
+
+def _canonical_item(item: Any) -> str:
+    """Canonical comparison form for expected/observed items — stable
+    across dict key order; ``1``/``1.0``/``"1"`` stay distinct."""
+    return json.dumps(
+        item, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=True, default=str,
+    )
+
+
+def _display_item(item: Any) -> str:
+    """Human-readable item for details — strings unquoted, the rest canonical."""
+    return item if isinstance(item, str) else _canonical_item(item)
+
+
+def _extract_items(value: Any) -> list[Any]:
+    """Observed field value → item list for ``precision_recall``.
+
+    Lists yield their elements; dicts yield their keys; a string that
+    parses as a JSON list/dict unpacks the same way; any other value
+    (including strings that parse only to JSON scalars) is one item."""
+    if isinstance(value, str):
+        try:
+            parsed: Any = json.loads(value)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, (list, dict)):
+            return _extract_items(parsed)
+        return [value]
+    if isinstance(value, dict):
+        return list(value.keys())
+    if isinstance(value, list):
+        return list(value)
+    return [value]
+
+
+def _tool_names(trace: Trace) -> set[str]:
+    """Semantic tool names actually invoked — ``tool.name`` attribute
+    when observed, else the span name (same convention as allowed_tools)."""
+    return {
+        str(s.attributes.get("tool.name") or s.name)
+        for s in trace.spans
+        if s.kind is SpanKind.TOOL
+    }
+
+
+def _precision_recall(
+    trace: Trace, params: dict[str, Any], now: datetime | None
+) -> EvaluationResult:
+    """Set precision/recall/F1 between observed and ``expected_items``.
+
+    Exactly one observation mode must be declared: ``tool: true``
+    compares the set of tool names invoked (``tool.name`` or span name)
+    against expected names, or ``field: "<attr>"`` extracts an item set
+    from the field's value (see ``_extract_items``). Comparison is on
+    canonical JSON forms; duplicates collapse — this is a set metric.
+
+    Score is the F1 (continuous → Mann-Whitney in compare). A field
+    that is not observed yields ``score=None``; an observed-but-empty
+    item set is real evidence and scores 0.0, as does a trace that
+    invoked no tools while ``expected_items`` was non-empty — the
+    expectation is spec-side evidence, so the miss is measurable."""
+    expected = params["expected_items"]  # KeyError → evaluator_error
+    if not isinstance(expected, list) or not expected:
+        raise TypeError("expected_items must be a non-empty list")
+    tool_sel = params.get("tool", False)
+    if not isinstance(tool_sel, bool):
+        raise TypeError(f"tool must be a boolean, got {type(tool_sel).__name__}")
+    has_field = params.get("field") is not None
+    if has_field and not isinstance(params["field"], str):
+        raise TypeError("field must be a string")
+    if has_field == tool_sel:
+        raise ValueError("declare exactly one mode: 'field' or 'tool'")
+    observed_items: list[Any]
+    details: dict[str, str]
+    if tool_sel:
+        if not all(isinstance(i, str) for i in expected):
+            raise TypeError("tool mode requires expected_items to be strings")
+        observed_items = sorted(_tool_names(trace))
+        details = {"mode": "tool"}
+    else:
+        field = str(params["field"])
+        observed, span_id = _observed_value(trace, field)
+        if span_id is None and observed is None:
+            return _result(
+                "precision_recall",
+                "expected_items_f1",
+                None,
+                trace,
+                now,
+                {"field": field, "reason": "field not observed in trace"},
+            )
+        observed_items = _extract_items(observed)
+        details = {
+            "mode": "field",
+            "field": field,
+            "observed_in": span_id or "resource_attributes",
+        }
+    exp_map = {_canonical_item(i): _display_item(i) for i in expected}
+    obs_map = {_canonical_item(i): _display_item(i) for i in observed_items}
+    tp = len(set(exp_map) & set(obs_map))
+    fp = len(set(obs_map) - set(exp_map))
+    fn = len(set(exp_map) - set(obs_map))
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if precision + recall
+        else 0.0
+    )
+    details.update(
+        {
+            "precision": f"{precision:.6f}",
+            "recall": f"{recall:.6f}",
+            "tp": str(tp),
+            "fp": str(fp),
+            "fn": str(fn),
+            "missing": ",".join(
+                sorted(exp_map[k] for k in set(exp_map) - set(obs_map))
+            ),
+            "extra": ",".join(
+                sorted(obs_map[k] for k in set(obs_map) - set(exp_map))
+            ),
+        }
+    )
+    if not obs_map:
+        details["note"] = "no observed items — precision/recall degenerate to 0"
+    return _result(
+        "precision_recall",
+        "expected_items_f1",
+        round(f1, 6),
+        trace,
+        now,
+        details,
+    )
+
+
+def _claims_grounded(
+    trace: Trace, params: dict[str, Any], now: datetime | None
+) -> EvaluationResult:
+    """Lexical-grounding heuristic for the §06.5 "unsupported claims"
+    gap. **Not** a factuality check — this measures what fraction of the
+    claim's tokens appear in observed source text, nothing more.
+
+    The claim is the resolved ``field`` (default ``output.value``); the
+    sources are every observed value of ``required_source_attr`` across
+    spans plus ``resource_attributes`` (e.g. ``tool.output``,
+    ``retrieval.documents``). ``overlap = |claim ∩ source tokens| /
+    |claim tokens|`` (multiset, same ``_WORD_RE`` convention as
+    token_f1); score is the verdict against ``min_overlap`` (default
+    0.5) so ``pass_rate`` stays truthful, raw overlap in details.
+
+    Honest limits, also stated in ``details.heuristic``: bag-of-words
+    only — no stopword removal, no paraphrase or negation handling, and
+    structured source values contribute keys as well as values as
+    tokens. When no source evidence is observed the score is ``None``,
+    never a fabricated fail — at ``capture=metadata`` content-bearing
+    attributes (``retrieval.documents``, ``tool.parameters``…) are
+    dropped at ingest, so absence of a source attribute is
+    unobservability, not proof the claim was ungrounded."""
+    source_attr = params["required_source_attr"]  # KeyError → evaluator_error
+    if not isinstance(source_attr, str) or not source_attr:
+        raise TypeError("required_source_attr must be a non-empty string")
+    min_overlap = _fraction_param(params, "min_overlap", 0.5)
+    field = _output_field(params)
+    observed, span_id = _observed_value(trace, field)
+    if not isinstance(observed, str):
+        return _result(
+            "claims_grounded",
+            "claims_source_overlap",
+            None,
+            trace,
+            now,
+            {"field": field, "reason": "field not observed as string"},
+        )
+    claim_tokens = Counter(_WORD_RE.findall(observed.lower()))
+    if not claim_tokens:
+        return _result(
+            "claims_grounded",
+            "claims_source_overlap",
+            None,
+            trace,
+            now,
+            {"field": field, "reason": "claim carries no checkable tokens"},
+        )
+    sources: list[tuple[str, str]] = []
+    for s in trace.spans:
+        if source_attr in s.attributes:
+            value = s.attributes[source_attr]
+            sources.append(
+                (s.span_id, value if isinstance(value, str) else _canonical_item(value))
+            )
+    if source_attr in trace.resource_attributes:
+        value = trace.resource_attributes[source_attr]
+        sources.append(
+            (
+                "resource_attributes",
+                value if isinstance(value, str) else _canonical_item(value),
+            )
+        )
+    if not sources:
+        return _result(
+            "claims_grounded",
+            "claims_source_overlap",
+            None,
+            trace,
+            now,
+            {
+                "field": field,
+                "required_source_attr": source_attr,
+                "reason": "no source evidence observed — grounding not checkable",
+            },
+        )
+    src_tokens: Counter[str] = Counter()
+    for _sid, text in sources:
+        src_tokens.update(_WORD_RE.findall(text.lower()))
+    common = sum((claim_tokens & src_tokens).values())
+    total = sum(claim_tokens.values())
+    overlap = common / total
+    return _result(
+        "claims_grounded",
+        "claims_source_overlap",
+        1.0 if overlap >= min_overlap else 0.0,
+        trace,
+        now,
+        {
+            "field": field,
+            "required_source_attr": source_attr,
+            "source_spans": ",".join(sid for sid, _t in sources),
+            "claim_tokens": str(total),
+            "covered_tokens": str(common),
+            "overlap": f"{overlap:.6f}",
+            "min_overlap": f"{min_overlap:g}",
+            "heuristic": "lexical bag-of-words overlap — not a factuality check",
+            "observed_in": span_id or "resource_attributes",
+        },
+    )
+
+
 # name → (fn, binary?) — binary marks metrics whose trace-level pass
 # fraction (score==1.0 counts) supports the proportion z-test in compare
 EVALUATORS: dict[str, tuple[Evaluator, bool]] = {
@@ -544,6 +1097,11 @@ EVALUATORS: dict[str, tuple[Evaluator, bool]] = {
     "contains": (_contains, True),
     "regex": (_regex, True),
     "tool_call_count": (_tool_call_count, True),
+    "schema_validation": (_schema_validation, True),
+    "evidence_coverage": (_evidence_coverage, True),
+    "human_review": (_human_review, False),  # never scores — queue marker
+    "precision_recall": (_precision_recall, False),  # continuous F1
+    "claims_grounded": (_claims_grounded, True),
 }
 """Binary flag: ``True`` = the score is a per-trace pass (1.0)/fail —
 the pass fraction across traces is a proportion the z-test can test."""

@@ -106,7 +106,10 @@ def make_bench_trace(i: int, *, project_id: str = "bench") -> Trace:
                 kind=SpanKind.TOOL,
                 start_time=t0 + timedelta(milliseconds=420 + k * 200),
                 end_time=t0 + timedelta(milliseconds=560 + k * 200),
-                attributes={"tool.name": name},
+                attributes={
+                    "tool.name": name,
+                    "tool.output": f"{name} result for trace {i}",
+                },
                 status=Status(
                     code=StatusCode.ERROR if bad else StatusCode.OK,
                     message="timeout" if bad else None,
@@ -178,5 +181,25 @@ EVAL_SPECS: list[dict[str, object]] = [
     {"name": "contains", "params": {"text": "forged", "field": "output.value"}},
     {"name": "regex", "params": {"pattern": r"answer \d+", "field": "output.value"}},
     {"name": "tool_call_count", "params": {"min": 1, "max": 5}},
+    {
+        "name": "schema_validation",
+        "params": {
+            "field": "output.value",
+            "schema": {"type": "string"},
+        },
+    },
+    {
+        "name": "evidence_coverage",
+        "params": {"required_attrs": ["tool.name", "forge_lens.token_usage"]},
+    },
+    {"name": "human_review", "params": {"rubric": "bench placeholder"}},
+    {
+        "name": "precision_recall",
+        "params": {"tool": True, "expected_items": list(TOOL_NAMES)},
+    },
+    {
+        "name": "claims_grounded",
+        "params": {"required_source_attr": "tool.output", "min_overlap": 0.2},
+    },
 ]
-"""The full 12-evaluator registry, exercised once per stored trace."""
+"""The full 17-evaluator registry, exercised once per stored trace."""

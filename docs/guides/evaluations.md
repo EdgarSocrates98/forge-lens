@@ -1,7 +1,9 @@
 # Guia — Evaluations
 
-> Estado: **backend implementado** (ciclo 06) em `src/forge_lens/eval/` —
-> ver `docs/cycles/cycle-06-final-report.md` e `docs/reference/api.md`.
+> Estado: **backend implementado** (ciclo 06; 17 avaliadores após a
+> wave do ciclo 13) em `src/forge_lens/eval/` — ver
+> `docs/cycles/cycle-06-final-report.md`,
+> `docs/cycles/cycle-13-improvement-wave.md` e `docs/reference/api.md`.
 
 ## O que existe hoje
 
@@ -21,6 +23,11 @@
 | `contains` | 1.0 se `text` aparece na saída observada | params: `text`, `case_sensitive` (default true), `field` (default `output.value`); `score=None` se campo não observado como string |
 | `regex` | 1.0 se `pattern` casa na saída observada | params: `pattern`, `case_sensitive`, `field`; padrão inválido → `evaluator_error` (nunca exception); `match` reportado truncado em ~120 chars |
 | `tool_call_count` | 1.0 se nº de TOOL spans ∈ [`min`, `max`] | params: `min`, `max` int ≥0; `tool` opcional conta só spans com atributo `tool.name` igual; `min > max` → `evaluator_error` |
+| `schema_validation` | 1.0 se o valor JSON de `field` satisfaz `schema` | params: `schema` (obrigatório), `field` (default `output.value`). Subconjunto JSON-Schema honesto: apenas `type` (`object`/`array`/`string`/`number`/`integer`/`boolean`/`null`), `properties`, `required`, `items` — qualquer outro keyword (`minimum`, `additionalProperties`, `enum`, …) → `evaluator_error`, nunca ignorado em silêncio. String que parseia como objeto/array JSON é validada como a estrutura; string não-parseável (ou escalar) valida como string — `"42"` continua string. Campo não observado → `score=None`. `integer` aceita float integral (2.0); `bool` nunca é número; aninhamento >32 níveis → `evaluator_error` |
+| `evidence_coverage` | 1.0 se cobertura de atributos ≥ `min_coverage` | params: `required_attrs` (lista não-vazia de chaves), `min_coverage` ∈ (0,1] (default 1.0). Semântica trace-level: atributo `X` é coberto quando ≥1 span (ou `resource_attributes`) tem chave `X` ou sob o namespace `X.` (`gen_ai.usage` cobre `gen_ai.usage.input_tokens`; `tool` não cobre `toolshed`). Score é o veredito binário do threshold (pass_rate/z-teste corretos); a fração crua vai em `details.coverage` |
+| `human_review` | sempre `score=None` | marcador de fila: `metric=pending_human_review`, `details.reason=pending_human_review`, `verdict=neutral`, `rubric` ecoado — nenhum score fabricado; cai em `nulls` na summary |
+| `precision_recall` | F1 entre conjunto observado e `expected_items` | params: `expected_items` (lista não-vazia) + exatamente um modo: `tool: true` (conjunto de tool names invocados — `tool.name` ou nome do span) ou `field: "<attr>"` (extrai itens: lista→elementos, dict→chaves, string-JSON→desempacota, escalar→singleton). Comparação por forma JSON canônica (`1` ≠ `"1"`). Campo não observado → `score=None`; conjunto observado vazio (ex.: zero tool calls) é evidência real → 0.0. Contínuo — MWU no compare |
+| `claims_grounded` | 1.0 se overlap lexical da saída com fontes ≥ `min_overlap` | params: `required_source_attr` (ex.: `tool.output`, `retrieval.documents`), `min_overlap` ∈ (0,1] (default 0.5), `field`. overlap = \|tokens da saída ∩ tokens das fontes\| / \|tokens da saída\| (multiset, mesmo `_WORD_RE` de `token_f1`). **Heurística documentada, não checagem factual**: bag-of-words sem stopwords, sem paráfrase/negação; fontes estruturadas contribuem chaves+valores como tokens. Sem fonte observada → `score=None` ("not checkable") — em `capture=metadata` atributos de conteúdo são dropped no ingest, ausência é não-observabilidade, nunca prova de claim não suportado |
 
 **Endpoints** (`api/app.py`):
 
@@ -63,6 +70,49 @@
 - **Bounds no boundary**: JSON inválido → 400; shape errado → 422;
   corpos streamed com cap; trace_ids/specs rejeitados acima do cap
   (não truncados silenciosamente).
+- **Cobertura §06.2/§06.5**: `schema_validation` implementa um
+  subconjunto explícito de JSON Schema (`type`/`properties`/`required`/
+  `items`) — keywords fora do subconjunto são `evaluator_error`, nunca
+  relaxadas em silêncio. `evidence_coverage` mede presença trace-level
+  de atributos (prefixo com boundary de `.`); per-span foi rejeitado
+  porque evidência de agente vive distribuída entre spans. `human_review`
+  é um marcador de fila (`score=None` sempre) — o veredito humano entra
+  por outro caminho, não por score fabricado. `precision_recall` mede
+  F1 de conjunto (tools invocadas ou itens do campo) — conjunto
+  observado-vazio é falha mensurável, campo não-observado é `None`.
+  `claims_grounded` é a aproximação determinística honesta de
+  "unsupported claims": overlap lexical bag-of-words entre a saída e
+  fontes observadas — **não** detecta claims facticamente falsos que
+  reusam vocabulário da fonte, nem perdoa paráfrases fiéis; sem fonte
+  observada retorna `None`, nunca fail fabricado.
+
+## Sugestões de cenários a partir de falhas (§12.7)
+
+`forge_lens.investigate.suggest_evaluators(reports)` mapeia categorias
+de `FailureReport` — de uma trace ou de muitas
+(`[classify_failure(t) for t in traces]` para a view *recorrente*) —
+para specs de avaliador e esboços de dataset-case:
+`{kind, name, params, params_required, rationale, evidence,
+classification: "candidate"}`. O `evidence` carrega `traces`, `count` e
+`recurring` (≥2 traces distintas). Mapeamentos:
+
+| Categoria recorrente | Sugestão |
+|---|---|
+| `invalid_arguments` | `allowed_tools` (`allowed` = nomes observados) + dataset case `invalid_args_rejected` |
+| `schema_mismatch` | `regex`/`pattern` guard no output + case `schema_conformance` |
+| `timeout` / `incomplete` / `agent_cancelled` | `latency_budget` (`max_duration_ms` — `params_required` fica com o revisor), `task_completion` |
+| `budget_exceeded` / `llm_error` | `token_budget` (`max_total_tokens`) + case `budget_pressure` |
+| `retry_exhaustion` | `tool_call_count` `{min:0, max:3}` + `error_free` |
+| `rate_limit` / `auth_error` / `missing_permissions` | `error_free` + dataset case do cenário (`provider_throttle`, `expired_or_invalid_credential`, `insufficient_scope`) |
+| `tool_error` / `guardrail` | `tool_success`, `allowed_tools` |
+| `cycle` | dataset case `parentage_integrity` |
+
+`unknown` e traces saudáveis não geram sugestão — recomendar eval para
+causa desconhecida seria inventar o que se recusou a classificar.
+**Datasets nunca são modificados** — as sugestões são `candidate`,
+revisadas e aplicadas à mão; aparecem no bundle `/incident` e nos
+findings do specialist `failure_investigator`. Detalhe completo em
+`docs/guides/failure-investigation.md`.
 
 ## Não implementado (roadmap)
 
@@ -73,3 +123,14 @@
 - **Evaluators custom/declarativos definidos pelo usuário** — hoje o
   registry é built-in; specs com nome desconhecido degradam para
   `score=None` + reason, não para extensão.
+- **LLM-as-judge** — fora do engine por regra (núcleo determinístico,
+  sem chamadas de LLM); o spec §06.2 o lista como opcional e exige que
+  nunca seja a única evidência — os evaluators determinísticos acima
+  são esse primeiro sinal. Uma integração futura viveria fora de
+  `eval/` (boundary), não no core.
+- **Fila de human review** — `human_review` emite o marcador
+  `pending_human_review`; a UI/fila que consome o marcador e registra
+  o veredito humano não existe ainda.
+- **Detecção factual de unsupported claims** — `claims_grounded` cobre
+  o sinal lexical; grounding factual (entailment) não é verificável
+  deterministicamente e não foi fabricado.
