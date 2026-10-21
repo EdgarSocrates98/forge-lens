@@ -20,6 +20,11 @@ scopes + parent integration. Every claim below is backed by tests in
   `GROUP BY session_id` (NULL excluded), `last_activity_at` =
   max(ended/started) por sessão — nunca NULL enquanto houver ≥1 trace.
   Ordenação determinística `last_activity DESC, session_id ASC`.
+- `GET /v1/tools` + `SQLiteTraceStore.list_tools`: roll-up de frota
+  sobre spans `kind=tool` via `json_extract(tool.name)` — calls,
+  traces, errors, avg_duration_ms; spans sem `tool.name` caem em
+  `(unnamed)` em vez de sumir da contagem. Coberto na matriz de
+  tenancy 403.
 
 ## MCP observer — 3 → 10 tools
 
@@ -44,6 +49,10 @@ binary=True)` — elegíveis ao z-test de `eval/compare`. Trace sem
   (deep-linkável) e round-trips em saved views.
 - Nova rota `/sessions`: tabela com prefix-search, paginação por offset
   (50/página, dedupe em live-ingest), link → `/traces?session_id=…`.
+- Trace detail: painel de eval — GET `/traces/{id}/eval` no load +
+  runner via checkboxes sobre os 12 avaliadores do registry →
+  `POST /v1/eval/run` (`{trace_ids:[id], evaluators:[{name}]}`);
+  `score:null` renderiza `n/a` + reason — nunca veredito inventado.
 
 ## Docs
 
@@ -57,5 +66,5 @@ binary=True)` — elegíveis ao z-test de `eval/compare`. Trace sem
 - `lens.sessions` MCP: `limit` >500 clamps (API também); paginação por
   `offset` existe na store/API mas o tool MCP só expõe `limit`.
 - Saved views legadas: toleradas, campos novos ausentes → defaults.
-- `GET /v1/tools` (stats de ferramentas por frota) não existe —
-  stats de tool saem por-trace via `efficiency`/`cost`.
+- Studio eval runner: avaliadores que exigem params rodam com `{}` →
+  `evaluator_error`/`n/a` honesto; UI de params é trabalho futuro.
