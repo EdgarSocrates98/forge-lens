@@ -1,0 +1,137 @@
+{
+  "$defs": {
+    "MeasurementSource": {
+      "description": "Where token counts came from.",
+      "enum": [
+        "provider",
+        "estimated",
+        "unknown"
+      ],
+      "title": "MeasurementSource",
+      "type": "string"
+    },
+    "Provenance": {
+      "description": "How a piece of information arrived at the platform.",
+      "enum": [
+        "observed",
+        "imported",
+        "derived",
+        "inferred",
+        "unknown"
+      ],
+      "title": "Provenance",
+      "type": "string"
+    }
+  },
+  "$id": "https://forge-lens.dev/schemas/v1/token-usage.json",
+  "additionalProperties": true,
+  "description": "Token counters for one model invocation.\n\nAbsent counters stay ``None`` \u2014 never invent precision the provider\ndid not report.",
+  "properties": {
+    "cached_input_tokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cached Input Tokens"
+    },
+    "input_tokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Input Tokens"
+    },
+    "measurement_source": {
+      "$ref": "#/$defs/MeasurementSource",
+      "default": "unknown"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model"
+    },
+    "output_tokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Output Tokens"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance",
+      "default": "observed"
+    },
+    "provider": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Provider"
+    },
+    "reasoning_tokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reasoning Tokens"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "total_tokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Total Tokens"
+    }
+  },
+  "title": "TokenUsage",
+  "type": "object",
+  "x-schema-version": "1.0.0"
+}

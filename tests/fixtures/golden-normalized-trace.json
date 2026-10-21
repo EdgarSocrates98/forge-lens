@@ -1,0 +1,83 @@
+[
+  {
+    "ended_at": "2026-01-01T10:40:00.500000Z",
+    "project_id": "golden",
+    "provenance": "observed",
+    "resource_attributes": {
+      "service.name": "otlp-test-svc",
+      "telemetry.sdk.language": "python"
+    },
+    "root_span_id": "dddddddddddddddd",
+    "schema_version": "1.0.0",
+    "session_id": null,
+    "source": {
+      "host": null,
+      "language": "python",
+      "runtime": "python",
+      "sdk_name": "test-lib",
+      "sdk_version": "0.0.1",
+      "system": "otlp-test-svc"
+    },
+    "spans": [
+      {
+        "attributes": {
+          "openinference.span.kind": "AGENT"
+        },
+        "end_time": "2026-01-01T10:40:00.500000Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "agent",
+        "links": [],
+        "name": "root-op",
+        "parent_span_id": null,
+        "provenance": "observed",
+        "schema_version": "1.0.0",
+        "span_id": "dddddddddddddddd",
+        "start_time": "2026-01-01T10:40:00Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      {
+        "attributes": {
+          "forge_lens.token_usage": {
+            "input_tokens": 512,
+            "measurement_source": "provider",
+            "model": "claude-test",
+            "output_tokens": 64,
+            "provenance": "observed",
+            "schema_version": "1.0.0"
+          },
+          "llm.model_name": "claude-test",
+          "llm.token_count.completion": 64,
+          "llm.token_count.prompt": 512,
+          "openinference.span.kind": "LLM"
+        },
+        "end_time": "2026-01-01T10:40:00.200000Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "llm",
+        "links": [],
+        "name": "llm-call",
+        "parent_span_id": "dddddddddddddddd",
+        "provenance": "observed",
+        "schema_version": "1.0.0",
+        "span_id": "eeeeeeeeeeeeeeee",
+        "start_time": "2026-01-01T10:40:00.010000Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ],
+    "started_at": "2026-01-01T10:40:00Z",
+    "status": {
+      "code": "ok",
+      "message": null
+    },
+    "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+]

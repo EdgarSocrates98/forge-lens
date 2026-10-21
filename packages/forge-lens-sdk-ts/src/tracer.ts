@@ -1,0 +1,292 @@
+/** LensTracer — accumulate spans per trace and flush through an exporter. */
+
+import type {
+  SCHEMA_VERSION,
+  Span,
+  SpanEvent,
+  SpanKind,
+  StatusCode,
+  Trace,
+  TraceIngest,
+  TraceSource,
+} from "./contracts.js";
+import {
+  isValidTraceId,
+  newSpanId,
+  newTraceId,
+  type SpanContext,
+} from "./ids.js";
+import { currentSpan, withSpan } from "./context.js";
+
+export interface Exporter {
+  export(traces: Trace[], source?: TraceSource): Promise<unknown> | unknown;
+}
+
+export class InMemoryExporter implements Exporter {
+  readonly traces: Trace[] = [];
+  export(traces: Trace[]): { accepted_spans: number; traces: string[] } {
+    this.traces.push(...traces);
+    return {
+      accepted_spans: traces.reduce((n, t) => n + t.spans.length, 0),
+      traces: traces.map((t) => t.trace_id),
+    };
+  }
+}
+
+export interface HTTPExporterOptions {
+  endpoint?: string;
+  apiKey?: string;
+  projectId?: string;
+  fetchImpl?: typeof fetch;
+}
+
+/** POSTs TraceIngest envelopes via fetch (Node 18+, zero deps). */
+export class HTTPExporter implements Exporter {
+  private readonly endpoint: string;
+  private readonly apiKey?: string;
+  private readonly projectId: string;
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(opts: HTTPExporterOptions = {}) {
+    this.endpoint = (opts.endpoint ?? "http://127.0.0.1:7777").replace(/\/+$/, "");
+    this.apiKey = opts.apiKey;
+    this.projectId = opts.projectId ?? "default";
+    this.fetchImpl = opts.fetchImpl ?? fetch;
+  }
+
+  async export(traces: Trace[], source?: TraceSource): Promise<unknown> {
+    const envelope: TraceIngest = {
+      schema_version: "1.0.0",
+      project_id: this.projectId,
+      source: source ?? null,
+      traces,
+      sent_at: new Date().toISOString(),
+    };
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (this.apiKey) headers["x-forge-lens-key"] = this.apiKey;
+    const resp = await this.fetchImpl(`${this.endpoint}/v1/traces`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(envelope),
+    });
+    if (!resp.ok) {
+      const detail = (await resp.text()).slice(0, 500);
+      throw new Error(`forge-lens export failed HTTP ${resp.status}: ${detail}`);
+    }
+    return resp.json();
+  }
+}
+
+export interface TokenUsage {
+  provider?: string;
+  model?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cached_input_tokens?: number;
+  reasoning_tokens?: number;
+  total_tokens?: number;
+  measurement_source?: "provider" | "estimated" | "unknown";
+}
+
+export interface LensTracerOptions {
+  serviceName: string;
+  sdkVersion?: string;
+  exporter?: Exporter;
+  autoFlush?: boolean;
+  sessionId?: string;
+  projectId?: string;
+  onFlush?: (trace: Trace) => void;
+}
+
+export class LensTracer {
+  readonly source: TraceSource;
+  readonly projectId: string;
+  private readonly exporter: Exporter;
+  private readonly autoFlush: boolean;
+  private readonly sessionId?: string;
+  private readonly onFlush?: (trace: Trace) => void;
+  private readonly pending = new Map<string, Trace>();
+  private readonly roots = new Map<string, string>();
+
+  constructor(opts: LensTracerOptions) {
+    this.source = {
+      system: opts.serviceName,
+      sdk_name: "forge-lens-sdk-typescript",
+      sdk_version: opts.sdkVersion ?? "0.1.0",
+      runtime: `node-${process.version}`,
+      language: "typescript",
+    };
+    this.exporter = opts.exporter ?? new InMemoryExporter();
+    this.autoFlush = opts.autoFlush ?? true;
+    this.sessionId = opts.sessionId;
+    this.projectId = opts.projectId ?? "default";
+    this.onFlush = opts.onFlush;
+  }
+
+  /** Run `fn` inside a new span. Sync or async `fn` both supported. */
+  span<T>(
+    name: string,
+    fn: (span: Span) => T,
+    opts: { kind?: SpanKind; attributes?: Record<string, unknown>; remoteParent?: SpanContext } = {},
+  ): T {
+    const parent = opts.remoteParent ?? currentSpan();
+    const traceId =
+      parent && isValidTraceId(parent.traceId) ? parent.traceId : newTraceId();
+    const ctx: SpanContext = { traceId, spanId: newSpanId(), sampled: true };
+    const span: Span = {
+      schema_version: "1.0.0",
+      trace_id: ctx.traceId,
+      span_id: ctx.spanId,
+      parent_span_id: parent?.spanId ?? null,
+      name,
+      kind: opts.kind ?? "internal",
+      start_time: new Date().toISOString(),
+      end_time: null,
+      attributes: opts.attributes ?? {},
+      events: [],
+      links: [],
+      status: { code: "unset" },
+      provenance: "observed",
+      integrity_flags: [],
+    };
+    const trace = this.traceFor(ctx, parent === undefined || opts.remoteParent !== undefined);
+    trace.spans.push(span);
+
+    return withSpan(ctx, () => {
+      try {
+        const result = fn(span);
+        if (result instanceof Promise) {
+          return result
+            .then((v) => {
+              this.finish(span, null);
+              this.maybeFlush(trace, ctx);
+              return v;
+            })
+            .catch((err) => {
+              this.finish(span, err);
+              this.maybeFlush(trace, ctx);
+              throw err;
+            }) as T;
+        }
+        this.finish(span, null);
+        this.maybeFlush(trace, ctx);
+        return result;
+      } catch (err) {
+        this.finish(span, err);
+        this.maybeFlush(trace, ctx);
+        throw err;
+      }
+    });
+  }
+
+  agent<T>(name: string, fn: (span: Span) => T, attributes: Record<string, unknown> = {}): T {
+    return this.span(name, fn, { kind: "agent", attributes });
+  }
+
+  llmCall<T>(model: string, fn: (span: Span) => T, attributes: Record<string, unknown> = {}): T {
+    return this.span(`llm ${model}`, fn, {
+      kind: "llm",
+      attributes: { "llm.model_name": model, ...attributes },
+    });
+  }
+
+  toolCall<T>(toolName: string, fn: (span: Span) => T, attributes: Record<string, unknown> = {}): T {
+    return this.span(`tool ${toolName}`, fn, {
+      kind: "tool",
+      attributes: { "tool.name": toolName, ...attributes },
+    });
+  }
+
+  recordUsage(span: Span, usage: TokenUsage): void {
+    span.attributes["forge_lens.token_usage"] = {
+      schema_version: "1.0.0",
+      measurement_source: usage.measurement_source ?? "provider",
+      ...usage,
+    };
+  }
+
+  private finish(span: Span, err: unknown): void {
+    span.end_time = new Date().toISOString();
+    if (err !== null && err !== undefined) {
+      span.status = {
+        code: "error",
+        message: err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500),
+      };
+      const event: SpanEvent = {
+        name: "exception",
+        time: new Date().toISOString(),
+        attributes: {
+          "exception.type": err instanceof Error ? err.name : typeof err,
+          "exception.message": String(err).slice(0, 1000),
+        },
+      };
+      span.events.push(event);
+    } else if (span.status.code === "unset") {
+      span.status = { code: "ok" };
+    }
+  }
+
+  private traceFor(ctx: SpanContext, isRoot: boolean): Trace {
+    let trace = this.pending.get(ctx.traceId);
+    if (!trace) {
+      trace = {
+        schema_version: "1.0.0",
+        trace_id: ctx.traceId,
+        project_id: this.projectId,
+        session_id: this.sessionId ?? null,
+        root_span_id: null,
+        started_at: new Date().toISOString(),
+        ended_at: null,
+        status: { code: "unset" },
+        source: this.source,
+        resource_attributes: {},
+        spans: [],
+        provenance: "observed",
+      };
+      this.pending.set(ctx.traceId, trace);
+    }
+    if (isRoot) {
+      this.roots.set(ctx.traceId, ctx.spanId);
+      trace.root_span_id = ctx.spanId;
+    }
+    return trace;
+  }
+
+  private maybeFlush(trace: Trace, ctx: SpanContext): void {
+    if (this.autoFlush && this.roots.get(ctx.traceId) === ctx.spanId) {
+      void this.flush(ctx.traceId);
+    }
+  }
+
+  async flush(traceId?: string): Promise<unknown> {
+    const ids = traceId ? [traceId] : [...this.pending.keys()];
+    const batch: Trace[] = [];
+    for (const id of ids) {
+      const t = this.pending.get(id);
+      if (t) {
+        this.pending.delete(id);
+        this.roots.delete(id);
+        finalize(t);
+        batch.push(t);
+      }
+    }
+    if (batch.length === 0) return undefined;
+    const result = await this.exporter.export(batch, this.source);
+    if (this.onFlush) for (const t of batch) this.onFlush(t);
+    return result;
+  }
+}
+
+function finalize(trace: Trace): void {
+  if (trace.spans.length > 0) {
+    trace.started_at = trace.spans
+      .map((s) => s.start_time)
+      .sort()[0];
+    const ended = trace.spans.filter((s) => s.end_time).map((s) => s.end_time as string).sort();
+    trace.ended_at = ended.length > 0 ? ended[ended.length - 1] : null;
+  }
+  const codes = new Set<StatusCode>(trace.spans.map((s) => s.status.code));
+  if (codes.has("error")) trace.status = { code: "error" };
+  else if (codes.size === 1 && codes.has("ok")) trace.status = { code: "ok" };
+  else trace.status = { code: "unset" };
+}

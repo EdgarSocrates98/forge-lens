@@ -1,0 +1,474 @@
+{
+  "$defs": {
+    "IntegrityFlag": {
+      "description": "Data-quality markers computed at ingestion or query time.",
+      "enum": [
+        "missing_parent",
+        "orphan",
+        "out_of_order",
+        "duplicate",
+        "partial_trace",
+        "clock_skew",
+        "truncated",
+        "unknown_tokens",
+        "missing_end"
+      ],
+      "title": "IntegrityFlag",
+      "type": "string"
+    },
+    "Provenance": {
+      "description": "How a piece of information arrived at the platform.",
+      "enum": [
+        "observed",
+        "imported",
+        "derived",
+        "inferred",
+        "unknown"
+      ],
+      "title": "Provenance",
+      "type": "string"
+    },
+    "Span": {
+      "additionalProperties": true,
+      "description": "A single unit of work inside a trace.",
+      "properties": {
+        "attributes": {
+          "additionalProperties": true,
+          "title": "Attributes",
+          "type": "object"
+        },
+        "end_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Time"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/SpanEvent"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "integrity_flags": {
+          "items": {
+            "$ref": "#/$defs/IntegrityFlag"
+          },
+          "title": "Integrity Flags",
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/SpanKind",
+          "default": "internal"
+        },
+        "links": {
+          "items": {
+            "$ref": "#/$defs/SpanLink"
+          },
+          "title": "Links",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "parent_span_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{16}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Span Id"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance",
+          "default": "observed"
+        },
+        "schema_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "span_id": {
+          "pattern": "^[0-9a-f]{16}$",
+          "title": "Span Id",
+          "type": "string"
+        },
+        "start_time": {
+          "format": "date-time",
+          "title": "Start Time",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/Status",
+          "default": {
+            "code": "unset",
+            "message": null
+          }
+        },
+        "trace_id": {
+          "pattern": "^[0-9a-f]{32}$",
+          "title": "Trace Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trace_id",
+        "span_id",
+        "name",
+        "start_time"
+      ],
+      "title": "Span",
+      "type": "object"
+    },
+    "SpanEvent": {
+      "additionalProperties": true,
+      "properties": {
+        "attributes": {
+          "additionalProperties": true,
+          "title": "Attributes",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "time": {
+          "format": "date-time",
+          "title": "Time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "time"
+      ],
+      "title": "SpanEvent",
+      "type": "object"
+    },
+    "SpanKind": {
+      "description": "Unified span kind.\n\nOpenInference conceptual kinds (AGENT, CHAIN, LLM, TOOL, RETRIEVER,\nEMBEDDING, RERANKER) coexist with the OpenTelemetry wire kinds\n(INTERNAL, SERVER, CLIENT, PRODUCER, CONSUMER). ``OTHER`` is the\nhonest fallback \u2014 never guess a kind we did not observe.",
+      "enum": [
+        "internal",
+        "server",
+        "client",
+        "producer",
+        "consumer",
+        "agent",
+        "chain",
+        "llm",
+        "tool",
+        "retriever",
+        "embedding",
+        "reranker",
+        "guardrail",
+        "evaluator",
+        "other"
+      ],
+      "title": "SpanKind",
+      "type": "string"
+    },
+    "SpanLink": {
+      "additionalProperties": true,
+      "properties": {
+        "attributes": {
+          "additionalProperties": true,
+          "title": "Attributes",
+          "type": "object"
+        },
+        "span_id": {
+          "title": "Span Id",
+          "type": "string"
+        },
+        "trace_id": {
+          "title": "Trace Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trace_id",
+        "span_id"
+      ],
+      "title": "SpanLink",
+      "type": "object"
+    },
+    "Status": {
+      "additionalProperties": true,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/StatusCode",
+          "default": "unset"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
+        }
+      },
+      "title": "Status",
+      "type": "object"
+    },
+    "StatusCode": {
+      "enum": [
+        "unset",
+        "ok",
+        "error"
+      ],
+      "title": "StatusCode",
+      "type": "string"
+    },
+    "Trace": {
+      "additionalProperties": true,
+      "description": "A complete (or partial) execution tree.",
+      "properties": {
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ended At"
+        },
+        "project_id": {
+          "default": "default",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance",
+          "default": "observed"
+        },
+        "resource_attributes": {
+          "additionalProperties": true,
+          "title": "Resource Attributes",
+          "type": "object"
+        },
+        "root_span_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{16}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root Span Id"
+        },
+        "schema_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Id"
+        },
+        "source": {
+          "$ref": "#/$defs/TraceSource",
+          "default": {
+            "host": null,
+            "language": null,
+            "runtime": null,
+            "sdk_name": null,
+            "sdk_version": null,
+            "system": "unknown"
+          }
+        },
+        "spans": {
+          "items": {
+            "$ref": "#/$defs/Span"
+          },
+          "title": "Spans",
+          "type": "array"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/Status",
+          "default": {
+            "code": "unset",
+            "message": null
+          }
+        },
+        "trace_id": {
+          "pattern": "^[0-9a-f]{32}$",
+          "title": "Trace Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trace_id",
+        "started_at"
+      ],
+      "title": "Trace",
+      "type": "object"
+    },
+    "TraceSource": {
+      "additionalProperties": true,
+      "description": "Where a trace was produced.",
+      "properties": {
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Host"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime"
+        },
+        "sdk_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sdk Name"
+        },
+        "sdk_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sdk Version"
+        },
+        "system": {
+          "title": "System",
+          "type": "string"
+        }
+      },
+      "required": [
+        "system"
+      ],
+      "title": "TraceSource",
+      "type": "object"
+    }
+  },
+  "$id": "https://forge-lens.dev/schemas/v1/trace-ingest.json",
+  "additionalProperties": true,
+  "description": "Native ingestion envelope for ``POST /v1/traces``.",
+  "properties": {
+    "project_id": {
+      "default": "default",
+      "title": "Project Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "sent_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sent At"
+    },
+    "source": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TraceSource"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "traces": {
+      "items": {
+        "$ref": "#/$defs/Trace"
+      },
+      "title": "Traces",
+      "type": "array"
+    }
+  },
+  "required": [
+    "traces"
+  ],
+  "title": "TraceIngest",
+  "type": "object",
+  "x-schema-version": "1.0.0"
+}

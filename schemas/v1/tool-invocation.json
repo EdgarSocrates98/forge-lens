@@ -1,0 +1,235 @@
+{
+  "$defs": {
+    "BlobKind": {
+      "description": "Where a referenced payload physically lives.",
+      "enum": [
+        "inline",
+        "uri",
+        "sha256",
+        "artifact",
+        "dropped"
+      ],
+      "title": "BlobKind",
+      "type": "string"
+    },
+    "BlobRef": {
+      "additionalProperties": true,
+      "description": "A reference to a payload.\n\nThe platform prefers references over inline content so prompts, tool\narguments and outputs are captured only under an explicit capture level.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/BlobKind"
+        },
+        "media_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Media Type"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "size_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size Bytes"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "title": "BlobRef",
+      "type": "object"
+    },
+    "Provenance": {
+      "description": "How a piece of information arrived at the platform.",
+      "enum": [
+        "observed",
+        "imported",
+        "derived",
+        "inferred",
+        "unknown"
+      ],
+      "title": "Provenance",
+      "type": "string"
+    },
+    "Status": {
+      "additionalProperties": true,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/StatusCode",
+          "default": "unset"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
+        }
+      },
+      "title": "Status",
+      "type": "object"
+    },
+    "StatusCode": {
+      "enum": [
+        "unset",
+        "ok",
+        "error"
+      ],
+      "title": "StatusCode",
+      "type": "string"
+    }
+  },
+  "$id": "https://forge-lens.dev/schemas/v1/tool-invocation.json",
+  "additionalProperties": true,
+  "description": "One call from an agent to a tool.",
+  "properties": {
+    "duration_ms": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Duration Ms"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "input_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BlobRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "output_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BlobRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "permissions_metadata": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Permissions Metadata",
+      "type": "object"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance",
+      "default": "observed"
+    },
+    "retry_count": {
+      "default": 0,
+      "title": "Retry Count",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "started_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Started At"
+    },
+    "status": {
+      "$ref": "#/$defs/Status",
+      "default": {
+        "code": "unset",
+        "message": null
+      }
+    },
+    "tool_call_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tool Call Id"
+    },
+    "tool_name": {
+      "title": "Tool Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tool_name"
+  ],
+  "title": "ToolInvocation",
+  "type": "object",
+  "x-schema-version": "1.0.0"
+}

@@ -1,0 +1,111 @@
+{
+  "$defs": {
+    "DataClassification": {
+      "description": "Sensitivity classes used by the privacy pipeline.",
+      "enum": [
+        "metadata",
+        "tool_arguments",
+        "tool_outputs",
+        "user_prompt",
+        "model_response",
+        "personal_data",
+        "credentials",
+        "sensitive_code",
+        "unknown"
+      ],
+      "title": "DataClassification",
+      "type": "string"
+    },
+    "Provenance": {
+      "description": "How a piece of information arrived at the platform.",
+      "enum": [
+        "observed",
+        "imported",
+        "derived",
+        "inferred",
+        "unknown"
+      ],
+      "title": "Provenance",
+      "type": "string"
+    },
+    "SanitizationStatus": {
+      "enum": [
+        "none",
+        "redacted",
+        "hashed",
+        "truncated",
+        "dropped"
+      ],
+      "title": "SanitizationStatus",
+      "type": "string"
+    }
+  },
+  "$id": "https://forge-lens.dev/schemas/v1/evidence.json",
+  "additionalProperties": true,
+  "description": "A verifiable artifact that supports a claim.",
+  "properties": {
+    "classification": {
+      "$ref": "#/$defs/DataClassification",
+      "default": "unknown"
+    },
+    "evidence_id": {
+      "title": "Evidence Id",
+      "type": "string"
+    },
+    "hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Hash"
+    },
+    "origin_type": {
+      "$ref": "#/$defs/Provenance",
+      "default": "observed"
+    },
+    "reference": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reference"
+    },
+    "sanitization_status": {
+      "$ref": "#/$defs/SanitizationStatus",
+      "default": "none"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source": {
+      "title": "Source",
+      "type": "string"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    }
+  },
+  "required": [
+    "evidence_id",
+    "source",
+    "timestamp"
+  ],
+  "title": "Evidence",
+  "type": "object",
+  "x-schema-version": "1.0.0"
+}

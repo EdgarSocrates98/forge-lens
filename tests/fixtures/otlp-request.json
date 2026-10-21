@@ -1,0 +1,89 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "otlp-test-svc"
+            }
+          },
+          {
+            "key": "telemetry.sdk.language",
+            "value": {
+              "stringValue": "python"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "test-lib",
+            "version": "0.0.1"
+          },
+          "spans": [
+            {
+              "attributes": [
+                {
+                  "key": "openinference.span.kind",
+                  "value": {
+                    "stringValue": "AGENT"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1767264000500000000",
+              "kind": 2,
+              "name": "root-op",
+              "spanId": "dddddddddddddddd",
+              "startTimeUnixNano": "1767264000000000000",
+              "status": {
+                "code": 1
+              },
+              "traceId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "openinference.span.kind",
+                  "value": {
+                    "stringValue": "LLM"
+                  }
+                },
+                {
+                  "key": "llm.token_count.prompt",
+                  "value": {
+                    "intValue": "512"
+                  }
+                },
+                {
+                  "key": "llm.token_count.completion",
+                  "value": {
+                    "intValue": 64
+                  }
+                },
+                {
+                  "key": "llm.model_name",
+                  "value": {
+                    "stringValue": "claude-test"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1767264000200000000",
+              "kind": 1,
+              "name": "llm-call",
+              "parentSpanId": "dddddddddddddddd",
+              "spanId": "eeeeeeeeeeeeeeee",
+              "startTimeUnixNano": "1767264000010000000",
+              "status": {
+                "code": 1
+              },
+              "traceId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

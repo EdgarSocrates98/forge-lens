@@ -1,0 +1,150 @@
+{
+  "$defs": {
+    "Provenance": {
+      "description": "How a piece of information arrived at the platform.",
+      "enum": [
+        "observed",
+        "imported",
+        "derived",
+        "inferred",
+        "unknown"
+      ],
+      "title": "Provenance",
+      "type": "string"
+    }
+  },
+  "$id": "https://forge-lens.dev/schemas/v1/evaluation-result.json",
+  "additionalProperties": true,
+  "description": "One metric produced by one evaluator for one target.",
+  "properties": {
+    "confidence": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Confidence"
+    },
+    "dataset": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Dataset"
+    },
+    "dataset_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Dataset Version"
+    },
+    "details": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Details",
+      "type": "object"
+    },
+    "evaluated_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Evaluated At"
+    },
+    "evaluator": {
+      "title": "Evaluator",
+      "type": "string"
+    },
+    "evaluator_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Evaluator Version"
+    },
+    "ground_truth_reference": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ground Truth Reference"
+    },
+    "metric": {
+      "title": "Metric",
+      "type": "string"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance",
+      "default": "derived"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "score": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Score"
+    },
+    "trace_reference": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Trace Reference"
+    }
+  },
+  "required": [
+    "evaluator",
+    "metric"
+  ],
+  "title": "EvaluationResult",
+  "type": "object",
+  "x-schema-version": "1.0.0"
+}

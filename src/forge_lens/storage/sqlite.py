@@ -1,0 +1,382 @@
+"""SQLite backend — the local-first default store.
+
+Design notes:
+- WAL mode + ``busy_timeout`` for concurrent writer/reader.
+- Spans and events stored as rows; attributes serialized as canonical
+  JSON (queryable via ``json_extract`` when needed).
+- Upsert semantics are deterministic: a span is identified by
+  ``(trace_id, span_id)``; re-ingesting an identical span is a
+  duplicate, not an error.
+- The schema is versioned via ``lens_meta.schema_version`` so future
+  migrations have a hook.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from forge_lens.contracts.provenance import Provenance
+from forge_lens.contracts.v1.trace import (
+    Span,
+    SpanEvent,
+    SpanLink,
+    Status,
+    StatusCode,
+    Trace,
+    TraceSource,
+)
+from forge_lens.core.time import to_unix_nano
+
+SCHEMA_VERSION = "1.0.0"
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS lens_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS traces (
+    trace_id TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT 'default',
+    session_id TEXT,
+    root_span_id TEXT,
+    started_ns INTEGER NOT NULL,
+    ended_ns INTEGER,
+    status_code TEXT NOT NULL DEFAULT 'unset',
+    status_message TEXT,
+    source_json TEXT NOT NULL,
+    resource_attributes_json TEXT NOT NULL DEFAULT '{}',
+    provenance TEXT NOT NULL DEFAULT 'observed',
+    span_count INTEGER NOT NULL DEFAULT 0,
+    error_count INTEGER NOT NULL DEFAULT 0,
+    first_seen_ns INTEGER NOT NULL,
+    last_seen_ns INTEGER NOT NULL,
+    PRIMARY KEY (project_id, trace_id)
+);
+CREATE INDEX IF NOT EXISTS idx_traces_session ON traces(project_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_traces_started ON traces(project_id, started_ns DESC);
+CREATE INDEX IF NOT EXISTS idx_traces_status ON traces(project_id, status_code);
+
+CREATE TABLE IF NOT EXISTS spans (
+    trace_id TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT 'default',
+    span_id TEXT NOT NULL,
+    parent_span_id TEXT,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'internal',
+    started_ns INTEGER NOT NULL,
+    ended_ns INTEGER,
+    duration_ms REAL,
+    status_code TEXT NOT NULL DEFAULT 'unset',
+    status_message TEXT,
+    attributes_json TEXT NOT NULL DEFAULT '{}',
+    events_json TEXT NOT NULL DEFAULT '[]',
+    links_json TEXT NOT NULL DEFAULT '[]',
+    integrity_flags_json TEXT NOT NULL DEFAULT '[]',
+    provenance TEXT NOT NULL DEFAULT 'observed',
+    span_hash TEXT,
+    PRIMARY KEY (project_id, trace_id, span_id)
+);
+CREATE INDEX IF NOT EXISTS idx_spans_name ON spans(project_id, name);
+CREATE INDEX IF NOT EXISTS idx_spans_kind ON spans(project_id, kind);
+CREATE INDEX IF NOT EXISTS idx_spans_status ON spans(project_id, status_code);
+"""
+
+
+def _ns(dt: datetime | None) -> int | None:
+    return to_unix_nano(dt) if dt is not None else None
+
+
+def _dt(ns: int | None) -> datetime | None:
+    if ns is None:
+        return None
+    return datetime.fromtimestamp(ns / 1_000_000_000, tz=UTC)
+
+
+class SQLiteTraceStore:
+    """Thread-safe SQLite trace store (WAL)."""
+
+    def __init__(self, path: Path | str) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(
+            str(self.path), check_same_thread=False, isolation_level=None
+        )
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._conn.execute("PRAGMA foreign_keys=ON")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self.init_schema()
+
+    # -- schema ---------------------------------------------------------
+
+    def init_schema(self) -> None:
+        with self._lock, self._conn:
+            self._conn.executescript(_SCHEMA)
+            self._conn.execute(
+                "INSERT OR REPLACE INTO lens_meta(key, value) VALUES('schema_version', ?)",
+                (SCHEMA_VERSION,),
+            )
+
+    # -- write ----------------------------------------------------------
+
+    def upsert_trace(self, trace: Trace) -> tuple[int, int]:
+        inserted, duplicates = 0, 0
+        now_ns = to_unix_nano(datetime.now(tz=UTC))
+        with self._lock, self._conn:
+            for span in trace.spans:
+                row = self._conn.execute(
+                    "SELECT span_hash FROM spans WHERE project_id=? AND trace_id=? AND span_id=?",
+                    (trace.project_id, span.trace_id, span.span_id),
+                ).fetchone()
+                if row is not None:
+                    duplicates += 1
+                    continue
+                span_hash = json.dumps(
+                    span.model_dump(mode="json", exclude={"integrity_flags"}),
+                    sort_keys=True,
+                    default=str,
+                )
+                import hashlib
+
+                digest = hashlib.sha256(span_hash.encode()).hexdigest()
+                self._conn.execute(
+                    """
+                    INSERT INTO spans (
+                        trace_id, project_id, span_id, parent_span_id, name, kind,
+                        started_ns, ended_ns, duration_ms,
+                        status_code, status_message,
+                        attributes_json, events_json, links_json,
+                        integrity_flags_json, provenance, span_hash
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        span.trace_id,
+                        trace.project_id,
+                        span.span_id,
+                        span.parent_span_id,
+                        span.name,
+                        span.kind.value,
+                        _ns(span.start_time),
+                        _ns(span.end_time),
+                        span.duration_ms,
+                        span.status.code.value,
+                        span.status.message,
+                        json.dumps(span.attributes, sort_keys=True, default=str),
+                        json.dumps(
+                            [e.model_dump(mode="json") for e in span.events],
+                            sort_keys=True,
+                            default=str,
+                        ),
+                        json.dumps(
+                            [lk.model_dump(mode="json") for lk in span.links],
+                            sort_keys=True,
+                            default=str,
+                        ),
+                        json.dumps([f.value for f in span.integrity_flags]),
+                        span.provenance.value,
+                        digest,
+                    ),
+                )
+                inserted += 1
+
+            error_count = sum(
+                1 for s in trace.spans if s.status.code == StatusCode.ERROR
+            )
+            self._conn.execute(
+                """
+                INSERT INTO traces (
+                    trace_id, project_id, session_id, root_span_id,
+                    started_ns, ended_ns, status_code, status_message,
+                    source_json, resource_attributes_json, provenance,
+                    span_count, error_count, first_seen_ns, last_seen_ns
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(project_id, trace_id) DO UPDATE SET
+                    ended_ns = MAX(
+                        COALESCE(excluded.ended_ns, traces.ended_ns), traces.ended_ns),
+                    started_ns = MIN(
+                        COALESCE(excluded.started_ns, traces.started_ns), traces.started_ns),
+                    status_code = CASE
+                        WHEN excluded.status_code = 'error' OR traces.status_code = 'error'
+                            THEN 'error'
+                        WHEN excluded.status_code = 'ok' AND traces.status_code = 'ok'
+                            THEN 'ok'
+                        ELSE 'unset' END,
+                    span_count = (
+                        SELECT COUNT(*) FROM spans
+                        WHERE project_id=traces.project_id
+                          AND trace_id=traces.trace_id),
+                    error_count = (
+                        SELECT COUNT(*) FROM spans
+                        WHERE project_id=traces.project_id
+                          AND trace_id=traces.trace_id
+                          AND status_code='error'),
+                    last_seen_ns = excluded.last_seen_ns
+                """,
+                (
+                    trace.trace_id,
+                    trace.project_id,
+                    trace.session_id,
+                    trace.root_span_id,
+                    _ns(trace.started_at),
+                    _ns(trace.ended_at),
+                    trace.status.code.value,
+                    trace.status.message,
+                    trace.source.model_dump_json(),
+                    json.dumps(trace.resource_attributes, sort_keys=True, default=str),
+                    trace.provenance.value,
+                    len(trace.spans),
+                    error_count,
+                    now_ns,
+                    now_ns,
+                ),
+            )
+        return inserted, duplicates
+
+    # -- read -----------------------------------------------------------
+
+    def _span_from_row(self, row: sqlite3.Row) -> Span:
+        events = [
+            SpanEvent(
+                name=e.get("name", ""),
+                time=datetime.fromisoformat(e["time"]),
+                attributes=e.get("attributes", {}),
+            )
+            for e in json.loads(row["events_json"] or "[]")
+        ]
+        links = [
+            SpanLink(
+                trace_id=lk.get("trace_id", ""),
+                span_id=lk.get("span_id", ""),
+                attributes=lk.get("attributes", {}),
+            )
+            for lk in json.loads(row["links_json"] or "[]")
+        ]
+        flags_raw = json.loads(row["integrity_flags_json"] or "[]")
+        return Span(
+            trace_id=row["trace_id"],
+            span_id=row["span_id"],
+            parent_span_id=row["parent_span_id"],
+            name=row["name"],
+            kind=row["kind"],
+            start_time=_dt(row["started_ns"]) or datetime.now(tz=UTC),
+            end_time=_dt(row["ended_ns"]),
+            attributes=json.loads(row["attributes_json"] or "{}"),
+            events=events,
+            links=links,
+            status=Status(
+                code=StatusCode(row["status_code"]),
+                message=row["status_message"],
+            ),
+            provenance=Provenance(row["provenance"]),
+            integrity_flags=flags_raw,
+        )
+
+    def get_trace(self, trace_id: str, project_id: str | None = None) -> Trace | None:
+        with self._lock:
+            if project_id:
+                trow = self._conn.execute(
+                    "SELECT * FROM traces WHERE project_id=? AND trace_id=?",
+                    (project_id, trace_id),
+                ).fetchone()
+            else:
+                trow = self._conn.execute(
+                    "SELECT * FROM traces WHERE trace_id=? ORDER BY last_seen_ns DESC LIMIT 1",
+                    (trace_id,),
+                ).fetchone()
+            if trow is None:
+                return None
+            srows = self._conn.execute(
+                "SELECT * FROM spans WHERE project_id=? AND trace_id=? ORDER BY started_ns",
+                (trow["project_id"], trace_id),
+            ).fetchall()
+        spans = [self._span_from_row(r) for r in srows]
+        return Trace(
+            trace_id=trace_id,
+            project_id=trow["project_id"],
+            session_id=trow["session_id"],
+            root_span_id=trow["root_span_id"],
+            started_at=_dt(trow["started_ns"]) or datetime.now(tz=UTC),
+            ended_at=_dt(trow["ended_ns"]),
+            status=Status(
+                code=StatusCode(trow["status_code"]),
+                message=trow["status_message"],
+            ),
+            source=TraceSource.model_validate_json(trow["source_json"]),
+            resource_attributes=json.loads(trow["resource_attributes_json"] or "{}"),
+            spans=spans,
+            provenance=Provenance(trow["provenance"]),
+        )
+
+    def list_traces(
+        self,
+        *,
+        project_id: str | None = None,
+        session_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        clauses, params = [], []
+        if project_id:
+            clauses.append("project_id = ?")
+            params.append(project_id)
+        if session_id:
+            clauses.append("session_id = ?")
+            params.append(session_id)
+        if status:
+            clauses.append("status_code = ?")
+            params.append(status)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._lock:
+            rows = self._conn.execute(
+                f"""SELECT trace_id, project_id, session_id, root_span_id,
+                           started_ns, ended_ns, status_code, span_count, error_count
+                    FROM traces {where}
+                    ORDER BY started_ns DESC LIMIT ? OFFSET ?""",
+                (*params, limit, offset),
+            ).fetchall()
+        return [
+            {
+                "trace_id": r["trace_id"],
+                "project_id": r["project_id"],
+                "session_id": r["session_id"],
+                "root_span_id": r["root_span_id"],
+                "started_at": (s.isoformat() if (s := _dt(r["started_ns"])) else None),
+                "ended_at": (e.isoformat() if (e := _dt(r["ended_ns"])) else None),
+                "status": r["status_code"],
+                "span_count": r["span_count"],
+                "error_count": r["error_count"],
+            }
+            for r in rows
+        ]
+
+    def stats(self) -> dict[str, Any]:
+        with self._lock:
+            traces = self._conn.execute("SELECT COUNT(*) c FROM traces").fetchone()["c"]
+            spans = self._conn.execute("SELECT COUNT(*) c FROM spans").fetchone()["c"]
+            errors = self._conn.execute(
+                "SELECT COUNT(*) c FROM spans WHERE status_code='error'"
+            ).fetchone()["c"]
+            db_size = self.path.stat().st_size if self.path.exists() else 0
+            schema = self._conn.execute(
+                "SELECT value FROM lens_meta WHERE key='schema_version'"
+            ).fetchone()
+        return {
+            "traces": traces,
+            "spans": spans,
+            "error_spans": errors,
+            "db_size_bytes": db_size,
+            "schema_version": schema["value"] if schema else None,
+        }
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()

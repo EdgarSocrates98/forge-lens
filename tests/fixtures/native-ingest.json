@@ -1,0 +1,52 @@
+{
+  "project_id": "fixture",
+  "schema_version": "1.0.0",
+  "sent_at": null,
+  "source": null,
+  "traces": [
+    {
+      "ended_at": "2026-01-01T12:00:00.100000Z",
+      "project_id": "default",
+      "provenance": "observed",
+      "resource_attributes": {},
+      "root_span_id": "ffffffffffffffff",
+      "schema_version": "1.0.0",
+      "session_id": null,
+      "source": {
+        "host": null,
+        "language": null,
+        "runtime": null,
+        "sdk_name": "forge-lens-sdk-python",
+        "sdk_version": null,
+        "system": "fixture"
+      },
+      "spans": [
+        {
+          "attributes": {},
+          "end_time": "2026-01-01T12:00:00.100000Z",
+          "events": [],
+          "integrity_flags": [],
+          "kind": "agent",
+          "links": [],
+          "name": "root",
+          "parent_span_id": null,
+          "provenance": "observed",
+          "schema_version": "1.0.0",
+          "span_id": "ffffffffffffffff",
+          "start_time": "2026-01-01T12:00:00Z",
+          "status": {
+            "code": "ok",
+            "message": null
+          },
+          "trace_id": "cccccccccccccccccccccccccccccccc"
+        }
+      ],
+      "started_at": "2026-01-01T12:00:00Z",
+      "status": {
+        "code": "ok",
+        "message": null
+      },
+      "trace_id": "cccccccccccccccccccccccccccccccc"
+    }
+  ]
+}

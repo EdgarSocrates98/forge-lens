@@ -1,0 +1,176 @@
+"""Default sanitization for ingested attributes.
+
+Runs on every ingestion path (OTLP and native) before persistence:
+
+1. Attribute keys matching sensitive patterns are replaced by
+   ``[REDACTED]`` (key preserved, value destroyed).
+2. String values matching credential patterns (API keys, bearer tokens,
+   PEM blocks, e-mail addresses at level=metadata) are replaced inline.
+3. ``capture=metadata`` drops content-bearing attributes (prompts,
+   tool I/O bodies) and replaces them with ``{"_dropped": <bytes>}``.
+4. Values longer than ``max_attr_value_chars`` are truncated with an
+   explicit marker — never silently.
+
+All replacements are countable: ``SanitizeReport`` feeds self-metrics.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+from forge_lens.contracts.v1.trace import Trace
+from forge_lens.core.config import CaptureLevel
+from forge_lens.core.metrics import M_ATTRS_REDACTED, M_ATTRS_TRUNCATED, METRICS
+from forge_lens.otlp.openinference import CONTENT_ATTRIBUTES
+
+# Explicit credential-key patterns. Deliberately *not* a bare "token" match:
+# observability keys like ``llm.token_count.prompt``, ``gen_ai.usage.input_tokens``
+# and ``forge_lens.token_usage`` are metrics, not secrets. Token-type keys are
+# enumerated (access/refresh/id/session/auth/api/bearer/csrf).
+SENSITIVE_KEY_RE = re.compile(
+    r"(?i)(api[-_.]?key|secret|password|passwd|pwd|authorization|"
+    r"auth[-_.]?header|credential|private[-_.]?key|client[-_.]?secret|"
+    r"access[-_.]?key|session[-_.]?token|access[-_.]?token|"
+    r"refresh[-_.]?token|id[-_.]?token|auth[-_.]?token|api[-_.]?token|"
+    r"bearer[-_.]?token|csrf[-_.]?token|xsrf[-_.]?token|cookie|set-cookie|"
+    r"ssn|credit[-_.]?card|bearer$|x-api-key|private-key)"
+)
+
+VALUE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"sk-ant-[A-Za-z0-9\-_]{20,}"), "[REDACTED:anthropic-key]"),
+    (re.compile(r"sk-[A-Za-z0-9]{20,}"), "[REDACTED:openai-key]"),
+    (re.compile(r"AIza[0-9A-Za-z\-_]{20,}"), "[REDACTED:gcp-key]"),
+    (re.compile(r"AKIA[0-9A-Z]{16}"), "[REDACTED:aws-access-key]"),
+    (re.compile(r"ghp_[A-Za-z0-9]{20,}"), "[REDACTED:github-pat]"),
+    (re.compile(r"github_pat_[A-Za-z0-9_]{20,}"), "[REDACTED:github-pat]"),
+    (re.compile(r"xox[baprs]-[A-Za-z0-9\-]{10,}"), "[REDACTED:slack-token]"),
+    (
+        re.compile(
+            r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S
+        ),
+        "[REDACTED:pem]",
+    ),
+    (re.compile(r"(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*"), "Bearer [REDACTED]"),
+    (re.compile(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*"), "[REDACTED:jwt]"),
+)
+
+EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
+
+TRUNCATION_MARKER = "...[TRUNCATED]"
+DROPPED_MARKER = "_forge_lens.dropped"
+
+
+@dataclass
+class SanitizeReport:
+    redacted_keys: int = 0
+    redacted_values: int = 0
+    dropped_content: int = 0
+    truncated_values: int = 0
+    emails_masked: int = 0
+    details: list[str] = field(default_factory=list)
+
+
+def _is_sensitive_key(key: str) -> bool:
+    return bool(SENSITIVE_KEY_RE.search(key))
+
+
+def _redact_string(value: str, report: SanitizeReport) -> str:
+    out = value
+    for pattern, replacement in VALUE_PATTERNS:
+        out, n = pattern.subn(replacement, out)
+        report.redacted_values += n
+    return out
+
+
+def _sanitize_value(
+    value: Any,
+    report: SanitizeReport,
+    *,
+    capture: CaptureLevel,
+    max_chars: int,
+    mask_emails: bool,
+    depth: int = 0,
+) -> Any:
+    if depth > 8:
+        return "[DROPPED:depth-limit]"
+    if isinstance(value, str):
+        value = _redact_string(value, report)
+        if mask_emails:
+            value, n = EMAIL_RE.subn("[MASKED:email]", value)
+            report.emails_masked += n
+        if len(value) > max_chars:
+            report.truncated_values += 1
+            value = value[: max_chars] + TRUNCATION_MARKER
+        return value
+    if isinstance(value, dict):
+        out: dict[Any, Any] = {}
+        for k, v in value.items():
+            if _is_sensitive_key(str(k)):
+                report.redacted_keys += 1
+                out[k] = "[REDACTED:key]"
+            else:
+                out[k] = _sanitize_value(
+                    v, report, capture=capture, max_chars=max_chars,
+                    mask_emails=mask_emails, depth=depth + 1,
+                )
+        return out
+    if isinstance(value, list):
+        return [
+            _sanitize_value(
+                v, report, capture=capture, max_chars=max_chars,
+                mask_emails=mask_emails, depth=depth + 1,
+            )
+            for v in value[:10_000]
+        ]
+    return value
+
+
+def sanitize_attributes(
+    attributes: dict[str, Any],
+    report: SanitizeReport,
+    *,
+    capture: CaptureLevel,
+    max_chars: int,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in attributes.items():
+        if _is_sensitive_key(key):
+            report.redacted_keys += 1
+            out[key] = "[REDACTED:key]"
+            continue
+        if capture == CaptureLevel.METADATA and key in CONTENT_ATTRIBUTES:
+            report.dropped_content += 1
+            approx = len(str(value)) if value is not None else 0
+            out[key] = {DROPPED_MARKER: True, "_approx_bytes": approx}
+            continue
+        out[key] = _sanitize_value(
+            value, report, capture=capture, max_chars=max_chars,
+            mask_emails=(capture == CaptureLevel.METADATA),
+        )
+    return out
+
+
+def sanitize_trace(
+    trace: Trace,
+    *,
+    capture: CaptureLevel = CaptureLevel.METADATA,
+    max_chars: int = 4_096,
+) -> SanitizeReport:
+    """Sanitize all spans of a trace in place. Returns what was touched."""
+    report = SanitizeReport()
+    for span in trace.spans:
+        span.attributes = sanitize_attributes(
+            span.attributes, report, capture=capture, max_chars=max_chars
+        )
+        for event in span.events:
+            event.attributes = sanitize_attributes(
+                event.attributes, report, capture=capture, max_chars=max_chars
+            )
+    trace.resource_attributes = sanitize_attributes(
+        trace.resource_attributes, report, capture=capture, max_chars=max_chars
+    )
+    METRICS.inc(M_ATTRS_REDACTED, report.redacted_keys + report.redacted_values)
+    METRICS.inc(M_ATTRS_TRUNCATED, report.truncated_values)
+    return report

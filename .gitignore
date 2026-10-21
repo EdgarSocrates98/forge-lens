@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtualenvs
+.venv/
+venv/
+
+# Tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Data Sentinel local state
+.data-sentinel/
+data/sentinel.db
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+graphify-out/
+prompt_evo*md
+prompt_inicial.md
+
+# Frontend (Angular)
+node_modules/
+frontend/dist/
+frontend/.angular/
+frontend/coverage/
+# Forge Lens runtime state
+.forge-lens/
