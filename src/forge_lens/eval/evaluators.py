@@ -24,6 +24,10 @@ Evaluator = Callable[[Trace, dict[str, Any], datetime | None], EvaluationResult]
 
 _EVALUATOR_VERSION = "1.0.0"
 
+_SPAN_KIND_VALUES = frozenset(k.value for k in SpanKind)
+"""Closed ``SpanKind`` value set — ``has_span``'s ``kind`` filter is
+validated against it so a typo'd kind is a spec bug, not a silent miss."""
+
 
 def _result(
     name: str,
@@ -136,14 +140,26 @@ def _token_budget(
     raw_budget = params["max_total_tokens"]
     # bool is a subclass of int — True would silently become budget 1;
     # strings parse fine through int() but a wire string is not a
-    # number the caller verified. Both are invalid params → no verdict.
-    if isinstance(raw_budget, (bool, str)):
+    # number the caller verified; dicts/lists would fail int() anyway.
+    # All are invalid params → no verdict (same convention as
+    # latency_budget and _count_bound).
+    if isinstance(raw_budget, (bool, str)) or not isinstance(
+        raw_budget, (int, float)
+    ):
         raise TypeError(
             f"max_total_tokens must be a number, got {type(raw_budget).__name__}"
         )
-    if isinstance(raw_budget, float) and not math.isfinite(raw_budget):
-        raise ValueError("max_total_tokens must be finite")
+    if isinstance(raw_budget, float) and (
+        not math.isfinite(raw_budget) or not raw_budget.is_integer()
+    ):
+        # a fractional budget would silently truncate through int() —
+        # the same not-a-silent-truncation rule as _count_bound
+        raise ValueError("max_total_tokens must be a finite integer")
     budget = int(raw_budget)
+    if budget < 0:
+        # a negative budget can only ever fail — reporting score 0 for
+        # it would masquerade a malformed spec as a trace verdict
+        raise ValueError("max_total_tokens must be ≥ 0")
     total = 0
     known = 0
     for s in trace.spans:
@@ -201,6 +217,18 @@ def _has_span(
 ) -> EvaluationResult:
     name = params.get("name")
     kind = params.get("kind")
+    # malformed filters must not degrade to a silent "span absent" — a
+    # non-string name/kind can never match, so it is a spec bug; a kind
+    # outside the closed SpanKind enum can never be produced either
+    if name is not None and not isinstance(name, str):
+        raise TypeError(f"name must be a string, got {type(name).__name__}")
+    if kind is not None:
+        if not isinstance(kind, str):
+            raise TypeError(
+                f"kind must be a string, got {type(kind).__name__}"
+            )
+        if kind not in _SPAN_KIND_VALUES:
+            raise ValueError(f"kind must be a known span kind, got {kind!r}")
     hits = [
         s for s in trace.spans
         if (name is None or s.name == name)
@@ -220,26 +248,31 @@ def _has_span(
     )
 
 
-def _observed_value(trace: Trace, field: str) -> tuple[Any, str | None]:
+def _observed_value(trace: Trace, field: str) -> tuple[Any, str | None, bool]:
     """Resolve ``field`` to the first span attribute carrying it.
 
-    Returns ``(value, span_id)``; ``(None, None)`` when unobserved —
-    an absent field is evidence, never an implicit match."""
+    Returns ``(value, span_id, found)``; ``found=False`` when unobserved —
+    an absent field is evidence, never an implicit match. ``span_id`` is
+    ``None`` for a hit in ``resource_attributes``: a key observed there
+    with a JSON ``null`` value still counts as observed (presence is not
+    non-nullity), so callers check ``found``, not ``value is None``."""
     for s in trace.spans:
         if field in s.attributes:
-            return s.attributes[field], s.span_id
+            return s.attributes[field], s.span_id, True
     if field in trace.resource_attributes:
-        return trace.resource_attributes[field], None
-    return None, None
+        return trace.resource_attributes[field], None, True
+    return None, None, False
 
 
 def _exact_match(
     trace: Trace, params: dict[str, Any], now: datetime | None
 ) -> EvaluationResult:
-    field = str(params["field"])
+    field = params["field"]  # KeyError → evaluator_error
+    if not isinstance(field, str) or not field:
+        raise TypeError("field must be a non-empty string")
     expected = params.get("expected")
-    observed, span_id = _observed_value(trace, field)
-    if span_id is None and observed is None:
+    observed, span_id, found = _observed_value(trace, field)
+    if not found:
         return _result(
             "exact_match",
             "field_exact_match",
@@ -274,11 +307,13 @@ def _token_f1(
 
     Continuous metric — precision/recall when the expected answer is
     free text; never a binary verdict on approximate match."""
-    field = str(params["field"])
+    field = params["field"]  # KeyError → evaluator_error
+    if not isinstance(field, str) or not field:
+        raise TypeError("token_f1 'field' must be a non-empty string")
     expected = params.get("expected")
     if not isinstance(expected, str):
         raise TypeError("token_f1 'expected' must be a string")
-    observed, span_id = _observed_value(trace, field)
+    observed, span_id, _found = _observed_value(trace, field)
     if not isinstance(observed, str):
         return _result(
             "token_f1",
@@ -392,8 +427,15 @@ def _bool_param(params: dict[str, Any], key: str, default: bool) -> bool:
 
 def _output_field(params: dict[str, Any]) -> str:
     """Field carrying the trace's final output — ``output.value`` is the
-    OpenInference convention; ``field`` overrides for other producers."""
-    return str(params.get("field") or "output.value")
+    OpenInference convention; ``field`` overrides for other producers.
+    A present-but-malformed override (non-string, empty) is a spec bug —
+    ``evaluator_error``, never a silent lookup under a coerced name."""
+    raw = params.get("field")
+    if raw is None:
+        return "output.value"
+    if not isinstance(raw, str) or not raw:
+        raise TypeError("field must be a non-empty string")
+    return raw
 
 
 def _contains(
@@ -405,7 +447,7 @@ def _contains(
         raise TypeError("contains 'text' must be a string")
     field = _output_field(params)
     case_sensitive = _bool_param(params, "case_sensitive", True)
-    observed, span_id = _observed_value(trace, field)
+    observed, span_id, _found = _observed_value(trace, field)
     if not isinstance(observed, str):
         return _result(
             "contains",
@@ -450,7 +492,7 @@ def _regex(
         # evaluator_error path reports it instead of letting it escape
         raise ValueError(f"invalid pattern: {exc}") from exc
     field = _output_field(params)
-    observed, span_id = _observed_value(trace, field)
+    observed, span_id, _found = _observed_value(trace, field)
     if not isinstance(observed, str):
         return _result(
             "regex",
@@ -505,8 +547,10 @@ def _tool_call_count(
     if lo > hi:
         raise ValueError(f"min ({lo}) must be ≤ max ({hi})")
     tool = params.get("tool")
-    if tool is not None and not isinstance(tool, str):
-        raise TypeError(f"tool must be a string, got {type(tool).__name__}")
+    if tool is not None and (not isinstance(tool, str) or not tool):
+        raise TypeError(
+            f"tool must be a non-empty string, got {type(tool).__name__}"
+        )
     tools = [s for s in trace.spans if s.kind is SpanKind.TOOL]
     counted = (
         tools
@@ -698,8 +742,8 @@ def _schema_validation(
     schema = params["schema"]  # KeyError → evaluator_error
     _check_schema_node(schema, "$", 0)
     field = _output_field(params)
-    observed, span_id = _observed_value(trace, field)
-    if span_id is None and observed is None:
+    observed, span_id, found = _observed_value(trace, field)
+    if not found:
         return _result(
             "schema_validation",
             "field_schema_valid",
@@ -712,8 +756,11 @@ def _schema_validation(
     decoded = "raw"
     if isinstance(observed, str):
         try:
+            # RecursionError joins ValueError here: a string nested past
+            # the interpreter's parse depth is unparseable input, not a
+            # crash — the runner never lets it escape
             parsed: Any = json.loads(observed)
-        except ValueError:
+        except (ValueError, RecursionError):
             parsed = None
         if isinstance(parsed, (dict, list)):
             instance = parsed
@@ -866,8 +913,10 @@ def _extract_items(value: Any) -> list[Any]:
     (including strings that parse only to JSON scalars) is one item."""
     if isinstance(value, str):
         try:
+            # same RecursionError guard as schema_validation — a string
+            # nested past the parse depth is unparseable, not a crash
             parsed: Any = json.loads(value)
-        except ValueError:
+        except (ValueError, RecursionError):
             parsed = None
         if isinstance(parsed, (list, dict)):
             return _extract_items(parsed)
@@ -912,8 +961,10 @@ def _precision_recall(
     if not isinstance(tool_sel, bool):
         raise TypeError(f"tool must be a boolean, got {type(tool_sel).__name__}")
     has_field = params.get("field") is not None
-    if has_field and not isinstance(params["field"], str):
-        raise TypeError("field must be a string")
+    if has_field and (
+        not isinstance(params["field"], str) or not params["field"]
+    ):
+        raise TypeError("field must be a non-empty string")
     if has_field == tool_sel:
         raise ValueError("declare exactly one mode: 'field' or 'tool'")
     observed_items: list[Any]
@@ -925,8 +976,8 @@ def _precision_recall(
         details = {"mode": "tool"}
     else:
         field = str(params["field"])
-        observed, span_id = _observed_value(trace, field)
-        if span_id is None and observed is None:
+        observed, span_id, found = _observed_value(trace, field)
+        if not found:
             return _result(
                 "precision_recall",
                 "expected_items_f1",
@@ -1008,7 +1059,7 @@ def _claims_grounded(
         raise TypeError("required_source_attr must be a non-empty string")
     min_overlap = _fraction_param(params, "min_overlap", 0.5)
     field = _output_field(params)
-    observed, span_id = _observed_value(trace, field)
+    observed, span_id, _found = _observed_value(trace, field)
     if not isinstance(observed, str):
         return _result(
             "claims_grounded",

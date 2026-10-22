@@ -1,0 +1,128 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Exemplo copiável — gate de regressão de avaliação com forge-lens em CI
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Este arquivo vive em docs/ de propósito: ele NÃO é um workflow ativo.
+# Para adotar no SEU projeto:
+#
+#   1. Copie este arquivo para .github/workflows/eval-gate.yml
+#   2. Copie scripts/eval_gate.py deste repositório para o seu (ex.:
+#      tools/eval_gate.py) — o script usa apenas stdlib + forge_lens
+#      instalado, então vendor é a opção hermética. Alternativa: clonar
+#      este repo num ref fixo e chamar scripts/eval_gate.py de lá.
+#   3. Ajuste os caminhos marcados com `# <<<` abaixo.
+#
+# Contrato do gate (docs/eval-gate.md):
+#   exit 0  = passou   · evidência observada, nenhum critério falhou
+#   exit 1  = regressão · ao menos uma falha com evidência observada
+#   exit 2  = dados insuficientes · nunca reprova, nunca aprova em silêncio
+#   exit 64 = erro de uso/config  · exit 70 = falha interna do engine
+#
+# O JSON completo vai ao stdout (salvamos como artefato); o resumo humano
+# vai ao stderr (aparece no log do job).
+
+name: eval-gate
+
+on:
+  pull_request:            # o gate roda em PR — um push comum basta
+  # workflow_dispatch:     # descomente se quiser disparo manual
+
+permissions:
+  contents: read           # o gate só lê o checkout e o store local
+
+jobs:
+  eval-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Instala forge-lens — o pacote traz o engine de eval, o store
+      # SQLite e o CLI `forge-lens`. <<< ajuste a ref/fonte.
+      - name: Install forge-lens
+        run: |
+          pip install "forge-lens @ git+https://github.com/EdgarSocrates98/forge-lens.git@main"
+
+      # ── 1. Produza as traces da coorte candidata ─────────────────────
+      # Seu harness de teste roda o agente instrumentado e exporta as
+      # traces no formato forge-lens (JSON/JSONL). Depois, `forge-lens
+      # ingest` as grava no store que o gate vai ler. <<< ajuste.
+      - name: Run instrumented agent suite
+        run: |
+          python tools/run_agent_suite.py --out build/traces-candidate.jsonl
+
+      - name: Ingest candidate traces
+        run: |
+          forge-lens ingest build/traces-candidate.jsonl --db build/lens.db
+
+      # ── 2. Ingerir a baseline ────────────────────────────────────────
+      # Opções comuns:
+      #   a) artefato da última release aprovada (baixe via
+      #      actions/download-artifact e repita o ingest acima);
+      #   b) coorte baseline commitada — arquivo de ids em
+      #      eval/baseline.json apontando traces já no store;
+      #   c) rerodar a suite na ref base (merge-base) e ingerir.
+      # Abaixo: arquivo de ids commitado + traces baseline ingeridas de
+      # um artefato do próprio repo. <<< ajuste ao seu fluxo.
+      - name: Ingest baseline traces
+        run: |
+          forge-lens ingest eval/baseline-traces.jsonl --db build/lens.db
+
+      # ── 3. Gate ──────────────────────────────────────────────────────
+      # --dataset   : bateria de avaliadores — arquivo eval/suite.json
+      #               {"evaluators": [{"name": "error_free"}, ...]} ou
+      #               id de dataset armazenado (specs em
+      #               metadata.evaluators).
+      # --baseline  : {"trace_ids": [...]} — ids das traces de referência.
+      # --candidate : gerado na etapa acima (ou fixe ids commitados).
+      # --gate      : critérios — aqui: reprova qualquer regressão
+      #               estatisticamente significativa e exige pass_rate
+      #               ≥ 0.9 em error_free. <<< ajuste os critérios.
+      #
+      # O exit code É o veredito: 2 (dados finos) falha o job como
+      # qualquer exit != 0 — se quiser tratar insufficient-data como
+      # warning em vez de falha, veja o passo "Veredito" abaixo.
+      - name: Eval gate
+        id: gate
+        run: |
+          python tools/eval_gate.py \
+            --db build/lens.db \
+            --dataset eval/suite.json \
+            --baseline eval/baseline-cohort.json \
+            --candidate eval/candidate-cohort.json \
+            --gate '{
+              "metrics": {
+                "error_free/no_error_spans": {"min_pass_rate_b": 0.9,
+                                            "max_drop": 0.05}
+              },
+              "fail_on_significant_regression": true
+            }' \
+            > build/eval-gate-report.json
+        # stderr (resumo humano) vai direto para o log do job.
+
+      # ── 4. Artefato de evidência ─────────────────────────────────────
+      # O relatório JSON é determinístico — mesmas traces ⇒ mesmo bytes.
+      # Guarde-o: é a evidência auditável do veredito.
+      - name: Upload gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-gate-report
+          path: build/eval-gate-report.json
+
+      # ── 5. (Opcional) Tratamento explícito do veredito ───────────────
+      # Sem este passo, exit != 0 já falha o job — correto para 1 e 64+.
+      # Para NÃO falhar em dados insuficientes (exit 2), troque o passo
+      # "Eval gate" por `continue-on-error: true` + o bloco abaixo:
+      #
+      #   - name: Verdict
+      #     run: |
+      #       code="${{ steps.gate.outcome }}"
+      #       # insufficient_data → warning anotado, job segue verde
+      #       # regression/usage/internal → falha explícita
+      #
+      # Regra de ouro: nunca converta 1 (regressão com evidência) em
+      # warning — é exatamente o que o gate existe para bloquear.

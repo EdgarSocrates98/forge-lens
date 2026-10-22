@@ -36,6 +36,25 @@
 - `POST /v1/eval/compare` — `{a: {trace_ids|project_id}, b: {...}}`; side
   pode declarar `project_id` próprio (A/B cross-project explícito).
 
+**Gate de CI** (`scripts/eval_gate.py`): gate determinístico de
+regressão sobre traces armazenadas — mesma cadeia
+`evaluate_traces` → `compare_runs` → `apply_gate` dos endpoints, rodável
+offline (`python scripts/eval_gate.py`, stdlib + forge_lens). Saída JSON
+determinística no stdout, resumo humano no stderr, exit codes 0/1/2/64/70
+que distinguem pass, regressão com evidência, dados insuficientes, erro
+de uso e falha interna. Contrato completo em `docs/eval-gate.md`;
+workflow GitHub Actions copiável em
+`docs/eval-gate-workflow-example.yml`.
+
+**Datasets** (`storage/sqlite.py` + `api/app.py`): CRUD completo —
+`PUT/GET /v1/datasets/{id}`, `PUT/GET /v1/datasets/{id}/versions/{v}`,
+listagens; versões são append-only e carregam cases
+(`input`/`expected`/`allowed_tools`/`constraints`/`rubric`) + metadata.
+`EvaluationResult.dataset`/`ground_truth_reference` já são populados.
+O mapeamento case→spec de avaliador **não é inventado pelo engine** —
+convenção do gate: a bateria fica em `metadata.evaluators` do dataset
+(ou da versão).
+
 ## Semântica honesta
 
 - **`score=None` nunca é zero**: param inválido, spec malformado, trace
@@ -116,10 +135,12 @@ findings do specialist `failure_investigator`. Detalhe completo em
 
 ## Não implementado (roadmap)
 
-- **Datasets persistidos/ground truth** — `EvaluationResult` já carrega
-  `dataset`/`ground_truth_reference`, mas não há CRUD de datasets;
-  evals rodam sobre traces armazenadas.
-- **CI evaluation gates** — bloquear merge por regressão de métrica.
+- **Case→spec mapping automático** — datasets persistem cases
+  (`input`/`expected`/`allowed_tools`/`constraints`/`rubric`), mas o
+  engine nunca inventa qual avaliador verifica qual case; a bateria é
+  declarada em `metadata.evaluators` (convenção do eval-gate) e os
+  campos `expected`/`allowed_tools`/`rubric` são ainda payload
+  armazenado, não params derivados.
 - **Evaluators custom/declarativos definidos pelo usuário** — hoje o
   registry é built-in; specs com nome desconhecido degradam para
   `score=None` + reason, não para extensão.
