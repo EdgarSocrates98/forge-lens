@@ -58,6 +58,9 @@ def forge_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(os, "environ", dict(os.environ))
     monkeypatch.setenv("FORGE_HOME_OVERRIDE", str(home))
     monkeypatch.setenv("HOME", str(home))
+    # Path.home() honors USERPROFILE (not HOME) on Windows — without this
+    # _posix_env_paths would leak the rc-file write into the real profile.
+    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / "xdg"))
     monkeypatch.setenv("SHELL", "/bin/bash")
     for var in ("FORGE_PYTHON", "MSYSTEM", "OSTYPE"):
@@ -358,7 +361,7 @@ def test_install_package_dist_sends_verbatim_spec_to_pip(
     fb.install_package(tmp_path, venv, ["server"], False, False, lambda m: None, dist=spec)
     assert len(calls) == 1
     cmd = calls[0]
-    assert cmd[:3] == [str(venv / "bin" / "python"), "-m", "pip"]
+    assert cmd[:3] == [str(fb._venv_python(venv)), "-m", "pip"]
     assert cmd[3:] == [
         "install",
         "--upgrade",
@@ -660,15 +663,16 @@ def test_managed_files_exact_owned_set(fb: Any, forge_home: Path) -> None:
     cfg = {"forge_id": "forge-lens", "cli": "forge-lens"}
     root = Path("/install/root")
     files = fb.managed_files(cfg, root, persist_env=False, no_launcher=False)
-    expected = sorted(
-        {
-            str(root),
-            str(forge_home / ".forge" / "installations" / "forge-lens.json"),
-            str(forge_home / ".forge" / "installations" / ".forge-lens-bootstrap.json"),
-            str(forge_home / ".local" / "bin" / "forge-lens"),
-        }
-    )
-    assert files == expected
+    expected = {
+        str(root),
+        str(forge_home / ".forge" / "installations" / "forge-lens.json"),
+        str(forge_home / ".forge" / "installations" / ".forge-lens-bootstrap.json"),
+        str(forge_home / ".local" / "bin" / "forge-lens"),
+    }
+    if os.name == "nt":
+        # write_launcher ships both a .cmd and an sh shim on Windows.
+        expected.add(str(forge_home / ".local" / "bin" / "forge-lens.cmd"))
+    assert files == sorted(expected)
 
 
 def test_managed_files_no_launcher_drops_shim(fb: Any, forge_home: Path) -> None:
@@ -680,7 +684,13 @@ def test_managed_files_no_launcher_drops_shim(fb: Any, forge_home: Path) -> None
 def test_managed_files_persist_env_adds_env_file(fb: Any, forge_home: Path) -> None:
     cfg = {"forge_id": "forge-lens", "cli": "forge-lens"}
     files = fb.managed_files(cfg, Path("/r"), persist_env=True, no_launcher=False)
-    assert str(forge_home / "xdg" / "forjas" / "env.sh") in files
+    env_file = str(forge_home / "xdg" / "forjas" / "env.sh")
+    if os.name == "nt" and not fb._is_git_bash():
+        # Native Windows persists via HKCU\Environment — no shell env
+        # file is owned; the env.sh entry appears only under Git Bash.
+        assert env_file not in files
+    else:
+        assert env_file in files
 
 
 def test_managed_files_never_lists_shell_rc(fb: Any, forge_home: Path) -> None:
@@ -823,8 +833,12 @@ def test_find_python_explicit_unusable_refused(
 
 
 def test_find_python_path_scan_hit(fb: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The scan order differs per OS: `py -3.x` launches on Windows,
+    # `python3.x` on POSIX — stub whichever the platform probes first.
+    hit = "py" if os.name == "nt" else "python3.12"
+    needle = "py -3.9" if os.name == "nt" else "python3.12"
     monkeypatch.setattr(
-        fb.shutil, "which", lambda exe: "/usr/bin/" + exe if exe == "python3.12" else None
+        fb.shutil, "which", lambda exe: "/usr/bin/" + exe if exe == hit else None
     )
     monkeypatch.setattr(fb, "_run", _version_ok_run("3.12.4", "/resolved/py3.12"))
     prov: dict[str, Any] = {}
@@ -833,7 +847,7 @@ def test_find_python_path_scan_hit(fb: Any, monkeypatch: pytest.MonkeyPatch) -> 
     assert out == "/resolved/py3.12"
     assert prov["source"] == "path"
     assert prov["version"] == "3.12.4"
-    assert any("python3.12" in m for m in logged)
+    assert any(needle in m for m in logged)
 
 
 def test_find_python_no_candidate_requires_allow_download(
@@ -950,9 +964,10 @@ def pipeline(
         return "/fake/python3.12"
 
     def fake_create_venv(root: Path, python: str, log: Any) -> Path:
-        (venv / "bin").mkdir(parents=True, exist_ok=True)
-        (venv / "bin" / "python").write_text("x", encoding="utf-8")
-        (venv / "bin" / "forge-lens").write_text("x", encoding="utf-8")
+        bindir = fb._venv_bin(venv)
+        bindir.mkdir(parents=True, exist_ok=True)
+        fb._venv_python(venv).write_text("x", encoding="utf-8")
+        (bindir / "forge-lens").write_text("x", encoding="utf-8")
         return venv
 
     def fake_install_package(
@@ -1205,8 +1220,9 @@ def test_create_venv_reuses_existing(fb: Any, tmp_path: Path, monkeypatch) -> No
     for i, name in enumerate((".venv", "venv")):
         root = tmp_path / f"root{i}"
         cand = root / name
-        (cand / "bin").mkdir(parents=True)
-        (cand / "bin" / "python").write_text("x", encoding="utf-8")
+        py = fb._venv_python(cand)
+        py.parent.mkdir(parents=True)
+        py.write_text("x", encoding="utf-8")
         monkeypatch.setattr(
             fb, "_run", lambda cmd, timeout=300, **kw: pytest.fail("must not spawn")
         )
@@ -1221,8 +1237,9 @@ def test_create_venv_delegates_explicit_python(
 
     def fake_run(cmd: list[str], timeout: int = 300, **kw: Any) -> subprocess.CompletedProcess:
         calls.append(cmd)
-        (venv_dir / "bin").mkdir(parents=True, exist_ok=True)
-        (venv_dir / "bin" / "python").write_text("x", encoding="utf-8")
+        py = fb._venv_python(venv_dir)
+        py.parent.mkdir(parents=True, exist_ok=True)
+        py.write_text("x", encoding="utf-8")
         return _cp(cmd)
 
     monkeypatch.setattr(fb, "_run", fake_run)
@@ -1257,16 +1274,30 @@ def test_write_launcher_writes_executable_shim(
     fb: Any, tmp_path: Path, forge_home: Path
 ) -> None:
     venv = tmp_path / "v"
-    real = venv / "bin" / "forge-lens"
+    real = fb._venv_bin(venv) / "forge-lens"
     real.parent.mkdir(parents=True)
     real.write_text("#!/bin/sh\n", encoding="utf-8")
     out = fb.write_launcher("forge-lens", venv, False, lambda m: None)
-    expected = forge_home / ".local" / "bin" / "forge-lens"
-    assert out == expected
-    text = expected.read_text(encoding="utf-8")
-    assert text.startswith("#!/bin/sh")
-    assert f'exec "{real}"' in text
-    assert expected.stat().st_mode & 0o777 == 0o755
+    if os.name == "nt":
+        # The .cmd is the returned launcher; the LF sh shim serves Git Bash.
+        cmd = forge_home / ".local" / "bin" / "forge-lens.cmd"
+        assert out == cmd
+        raw = cmd.read_bytes()
+        assert raw.startswith(b"@echo off\r\n")
+        assert raw.endswith(b"\r\n")
+        assert b"\r\r\n" not in raw
+        assert str(real).encode() in raw
+        shim = (forge_home / ".local" / "bin" / "forge-lens").read_bytes()
+        assert shim.startswith(b"#!/bin/sh\n")
+        assert b"\r" not in shim
+        assert f'exec "{real}"'.encode() in shim
+    else:
+        expected = forge_home / ".local" / "bin" / "forge-lens"
+        assert out == expected
+        text = expected.read_text(encoding="utf-8")
+        assert text.startswith("#!/bin/sh")
+        assert f'exec "{real}"' in text
+        assert expected.stat().st_mode & 0o777 == 0o755
 
 
 # --------------------------------------------------------------------------
@@ -1330,7 +1361,9 @@ def test_environment_contract_variables(fb: Any, tmp_path: Path) -> None:
     assert values["FORGE_LENS_HOME"] == str((tmp_path / "repo").resolve())
     assert values["FORGE_LENS_VENV"] == str(venv.resolve())
     assert values["FORGE_LENS_LAUNCHER"] == str((tmp_path / "shim").resolve())
-    assert doc["execution_environment"] == "posix"
+    assert doc["execution_environment"] == (
+        "windows" if os.name == "nt" else "posix"
+    )
 
 
 def test_environment_contract_dist_drops_home(fb: Any, tmp_path: Path) -> None:
@@ -1350,24 +1383,27 @@ def test_env_prefix_shell_safe(fb: Any) -> None:
 def test_persist_posix_writes_marked_env_block(
     fb: Any, forge_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    env_file = fb._persist_posix({"FORGE_LENS_VENV": "/v env"}, Path("/shimdir"))
+    shim = Path("C:/shimdir") if os.name == "nt" else Path("/shimdir")
+    env_file = fb._persist_posix({"FORGE_LENS_VENV": "/v env"}, shim)
     env_path = Path(env_file)
     text = env_path.read_text(encoding="utf-8")
     assert text.count("# >>> forjas account environment >>>") == 1
     assert "export FORGE_LENS_VENV='/v env'" in text
-    assert "/shimdir" in text
+    assert str(shim) in text
     assert "PATH" in text
-    assert env_path.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert env_path.stat().st_mode & 0o777 == 0o600
     rc = (forge_home / ".bashrc").read_text(encoding="utf-8")
     assert rc.count("forjas-account-environment") == 1
     # process env + PATH are updated for the current session (patched dict)
     assert os.environ["FORGE_LENS_VENV"] == "/v env"
-    assert "/shimdir" in os.environ["PATH"].split(os.pathsep)
+    assert str(shim) in os.environ["PATH"].split(os.pathsep)
 
 
 def test_persist_posix_is_idempotent(fb: Any, forge_home: Path) -> None:
-    fb._persist_posix({"FORGE_LENS_VENV": "/v1"}, Path("/shimdir"))
-    env_file = fb._persist_posix({"FORGE_LENS_VENV": "/v2"}, Path("/shimdir"))
+    shim = Path("C:/shimdir") if os.name == "nt" else Path("/shimdir")
+    fb._persist_posix({"FORGE_LENS_VENV": "/v1"}, shim)
+    env_file = fb._persist_posix({"FORGE_LENS_VENV": "/v2"}, shim)
     text = Path(env_file).read_text(encoding="utf-8")
     assert text.count("# >>> forjas account environment >>>") == 1
     assert "FORGE_LENS_VENV=/v2" in text
@@ -1380,9 +1416,26 @@ def test_persist_environment_posix_marks_shell_init(
     fb: Any, forge_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     env = {"variables": {"FORGE_LENS_VENV": "/v"}, "windows_aliases": {}}
-    out = fb.persist_environment(env, None, lambda m: None)
-    assert out["persistence"] == "shell-init"
-    assert out["shell_init"].endswith("env.sh")
+    if os.name == "nt":
+        # Native Windows persists via HKCU\Environment — stub the seam so
+        # the unit test asserts the dispatch without a real registry write.
+        seen: dict[str, Any] = {}
+        monkeypatch.setattr(
+            fb,
+            "_persist_windows",
+            lambda values, aliases, shim: seen.update(
+                values=values, aliases=aliases, shim=shim
+            ),
+        )
+        out = fb.persist_environment(env, None, lambda m: None)
+        assert seen["values"] == {"FORGE_LENS_VENV": "/v"}
+        assert out["persistence"].startswith("HKCU\\Environment")
+        if not fb._is_git_bash():
+            assert out["shell_init"] is None
+    else:
+        out = fb.persist_environment(env, None, lambda m: None)
+        assert out["persistence"] == "shell-init"
+        assert out["shell_init"].endswith("env.sh")
 
 
 def test_persist_environment_checked_wraps_os_errors(

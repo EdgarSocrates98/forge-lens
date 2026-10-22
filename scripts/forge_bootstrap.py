@@ -457,8 +457,10 @@ def write_launcher(cli: str, venv: Path, no_launcher: bool, log) -> Path | None:
     d = shim_dir()
     d.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
-        (d / f"{cli}.cmd").write_text(f'@echo off\r\n"{real}" %*\r\n')
-        (d / cli).write_text(f'#!/bin/sh\nexec "{real}" "$@"\n')
+        # newline="" keeps the bytes exact — text mode would turn the
+        # .cmd's \r\n into \r\r\n and CRLF the sh shim Git Bash needs.
+        (d / f"{cli}.cmd").write_text(f'@echo off\r\n"{real}" %*\r\n', newline="", encoding="utf-8")
+        (d / cli).write_text(f'#!/bin/sh\nexec "{real}" "$@"\n', newline="", encoding="utf-8")
         path = d / f"{cli}.cmd"
     else:
         path = d / cli

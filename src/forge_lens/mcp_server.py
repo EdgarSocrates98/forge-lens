@@ -25,6 +25,8 @@ from typing import Any, NoReturn
 
 from forge_lens import __version__
 from forge_lens.contracts.v1.trace import Trace
+from forge_lens.core.jsonutil import MAX_JSON_DEPTH as _MAX_JSON_DEPTH
+from forge_lens.core.jsonutil import json_depth as _json_depth
 from forge_lens.storage.sqlite import SQLiteTraceStore
 
 # The one MCP protocol revision this server speaks. Negotiation follows
@@ -267,10 +269,16 @@ def serve(db_path: str) -> int:
         if not line:
             continue
         try:
+            if _json_depth(line) > _MAX_JSON_DEPTH:
+                # Reject hostile nesting lexically — json.loads recursion
+                # tolerance differs per CPython build, so the bound lives
+                # here where it is identical on every platform.
+                raise ValueError("JSON nesting too deep")
             req = json.loads(line, parse_constant=_reject_constant)
         except (ValueError, RecursionError):
-            # Parse error — malformed JSON and stack-overflow nesting
-            # land here; the id is unknowable, JSON-RPC says null.
+            # Parse error — malformed JSON, over-deep nesting and
+            # stack-overflow all land here; the id is unknowable,
+            # JSON-RPC says null.
             _err(None, -32700, "parse error")
             continue
         if not isinstance(req, dict):

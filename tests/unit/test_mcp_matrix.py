@@ -41,7 +41,7 @@ def test_doc_is_in_sync_with_generator() -> None:
     assert _DOC.exists(), (
         "docs/reference/mcp-tools.md ausente — rode gen_mcp_matrix.py"
     )
-    assert _DOC.read_text() == gen.render()
+    assert _DOC.read_text(encoding="utf-8") == gen.render()
 
 
 def test_generator_is_deterministic() -> None:
@@ -63,7 +63,7 @@ def test_check_mode_reports_drift(tmp_path: Path) -> None:
     """--check exits non-zero on a stale file, zero on the real one."""
     gen = _load()
     stale = tmp_path / "stale.md"
-    stale.write_text("# outdated\n")
+    stale.write_text("# outdated\n", encoding="utf-8")
     assert gen.main(["--check", "--out", str(stale)]) == 1
     assert gen.main(["--check", "--out", str(_DOC)]) == 0
 

@@ -30,6 +30,8 @@ from forge_lens.core.errors import (
     RateLimitedError,
     ValidationError,
 )
+from forge_lens.core.jsonutil import MAX_JSON_DEPTH as _MAX_JSON_DEPTH
+from forge_lens.core.jsonutil import json_depth as _json_depth
 from forge_lens.core.metrics import (
     M_API_ERRORS,
     M_API_REQUESTS,
@@ -85,44 +87,6 @@ def _bounded_validation_detail(exc: PydanticValidationError) -> str:
 
 
 _I64_MAX = 2**63 - 1
-
-# Documented JSON nesting bound for every request body we parse.
-# Parser recursion depth is platform-dependent (C stack + build flags —
-# the same 80k-deep body is a clean parse on macOS but a RecursionError
-# on Windows), so the bound is enforced lexically on the raw bytes before
-# any parser runs: identical on Linux, Windows and macOS. 512 sits far
-# above the semantic caps (AnyValue flattens at 32) and far below every
-# supported interpreter's parse-recursion limit.
-_MAX_JSON_DEPTH = 512
-
-
-def _json_depth(raw: bytes) -> int:
-    """Maximum ``{``/``[`` nesting outside strings — O(n), no recursion.
-
-    Brace/bracket characters inside string literals (and their escapes)
-    don't count; unbalanced closers can't push depth negative.
-    """
-    depth = max_depth = 0
-    in_str = esc = False
-    for b in raw:
-        if in_str:
-            if esc:
-                esc = False
-            elif b == 0x5C:  # backslash
-                esc = True
-            elif b == 0x22:  # "
-                in_str = False
-        elif b == 0x22:
-            in_str = True
-        elif b == 0x7B or b == 0x5B:  # { [
-            depth += 1
-            if depth > max_depth:
-                max_depth = depth
-        elif b == 0x7D or b == 0x5D:  # } ]
-            depth -= 1
-            if depth < 0:
-                depth = 0
-    return max_depth
 
 
 def _check_declared_size(

@@ -562,8 +562,10 @@ class TestSqliteWAL:
         self, tmp_path: Path
     ) -> None:
         """'?' and '%' must stay literal — an unencoded path would be
-        parsed as URI query and silently open a different file."""
-        db = tmp_path / "q%20?.db"
+        parsed as URI query and silently open a different file. On
+        Windows '?' can't exist in a filename at all, so the literal-'%'
+        half carries the coverage there."""
+        db = tmp_path / ("q%20x.db" if os.name == "nt" else "q%20?.db")
         store = SQLiteTraceStore(db)
         store.upsert_trace(_mk_trace())
         store.close()
