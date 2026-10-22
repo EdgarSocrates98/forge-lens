@@ -35,3 +35,10 @@ prompt_inicial.md
 
 # Local graph tooling output (not part of the shipped repo)
 graphify-out/
+
+# Homologation scratch dirs (committed evidence lives in homolog/evidence/)
+homolog/.work/
+
+# Playwright scratch (Studio e2e)
+apps/studio/test-results/
+apps/studio/playwright-report/

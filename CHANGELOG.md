@@ -5,6 +5,134 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 
 ## [Unreleased]
 
+### Fixed — ciclo 13.1 (hardening & homologação)
+
+**P0 — falhas cross-platform do CI:**
+- **JSON depth determinístico**: `_json_depth` (scanner lexical O(n) sobre
+  os bytes crus, ignora chaves dentro de strings) + `_MAX_JSON_DEPTH=512`
+  aplicado antes de qualquer parser em ingest nativo, ingest OTLP e
+  `_eval_body` — a mesma resposta `400` em Linux, Windows e macOS (a
+  profundidade de recursão do `json.loads` varia por plataforma). Erros
+  `json_invalid` do Pydantic classificam `400` (malformado/recursão do
+  parser); violações de contrato seguem `422`. Fixture OTLP de 2 000
+  níveis virou raw-bytes (sem `json.dumps` recursivo no teste).
+- **`tests/unit/test_ops.py`**: split entre encoding de URI (`%`, espaços,
+  Unicode — cross-platform) e caracteres reservados de filesystem (`?` —
+  skip quando o FS não permite, ex.: Windows).
+- **SDK TS test discovery**: `node --test "dist/test/*.test.js"` não
+  expandia glob quoted no Node 20 → `test/run-tests.mjs` enumera e
+  importa os testes compilados (funciona em Node ≥18).
+
+**API/store/CLI:**
+- `POST /v1/intel/correlate` `limit` não-inteiro → `422` (era coerção
+  silenciosa ao default); `alerts/evaluate` `use_saved` exige `bool`
+  (string `"false"` não liga mais a fusão de regras).
+- `_bounded_validation_detail`: `detail` de `422` limitado a 25 erros ×
+  200 chars de input (elimina a amplificação ~35× documentada no threat
+  model — "média → eliminada").
+- Store: `readonly` usa `mode=ro&immutable=1` quando não há WAL (sem
+  ghosts `-shm`/`-wal`); `Path.expanduser().resolve()` no bind;
+  `_require_utf8` rejeita surrogates solitários em writes com
+  `ValidationError` limpa e reads com valores não-encodáveis devolvem
+  ausência honesta (`[]`/`None`) em vez de `UnicodeEncodeError`.
+- CLI (homologação de 130 testes): trace inexistente → exit 2 uniforme
+  (`traces show`/`graph`/`cost`/`incident`/`eval` via `_get_trace_or_exit`);
+  `traces list --limit <0` → exit 2 (antes clamp silencioso) e validação
+  de flags antes de abrir a store (sem leak de conexão); `--db`
+  inválido → `cannot open store …` + exit 2 em ~25 comandos;
+  `FORGE_LENS_*`/`config.toml` malformado → `invalid configuration:` +
+  exit 2; `doctor` sobrevive a config quebrada (é o que ele diagnostica);
+  `serve --port` fora de 0–65535 → exit 2; `archive`/`prune --before`
+  fora da faixa int64-ns → exit 2 (era traceback `ValidationError`).
+
+**MCP** (`mcp_server.py`, matriz real de 12 tools):
+- Parse errors → `-32700` com `id:null` (antes derrubados); JSON
+  profundamente aninhado (`RecursionError`) capturado → `-32700`; JSON
+  não-estrito (`NaN`/`Infinity`) rejeitado; frames não-objeto → `-32600`;
+  `id` sem `method` string → `-32600`; `tools/call` sem `name` → `-32602`;
+  `arguments` falsy-não-objeto (`[]`, `0`, `false`, `""`) → `-32602`
+  uniforme; floats não-finitos (`1e999`) → `-32602`; `initialize` faz
+  negociação real de `protocolVersion` + anuncia `capabilities.tools`.
+- `scripts/gen_mcp_matrix.py` gera `docs/reference/mcp-tools.md` do
+  registry real (single source of truth, sync verificado em teste).
+
+**Segurança (auditoria ofensiva, 27 testes novos):**
+- `sanitize/redact.py`: três padrões de valor novos — `Authorization:
+  <scheme> <cred>` (scheme-aware), userinfo de URL
+  `scheme://user:pass@host` (preserva scheme+host para correlação) e
+  formas `key=value`/`key: value`/`"k": "v"` para nomes sensíveis
+  enumerados (`password`, `token`, `api_key`, `x-api-key`…).
+- `create_app` falha no boot para `auth_mode` desconhecido (typo de
+  config não degrada mais silenciosamente a reads abertas).
+- Baterias: ingestão (413/400/415/422/bombas/surrogates/overflow),
+  sanitização em todas as leituras (API, incident, SSE, CLI, MCP),
+  autorização `keys` (matriz de papéis, cross-tenant 403, chave forjada
+  fail-closed), MCP lifecycle. `docs/security/threat-model.md`
+  reescrito com riscos eliminados/decisões/resíduos.
+
+**Avaliação:** `eval/` — `RecursionError` em evaluators JSON vira
+`evaluator_error`; `evidence_coverage` não colapsa `resource_attributes`
+nulos; bounds de `token_budget`; typing de `has_span`/`output_field`.
+`scripts/eval_gate.py` — gate CI determinístico (exit 0 pass / 1
+regressão / 2 dados insuficientes; 64/70 sysexits) +
+`docs/eval-gate-workflow-example.yml` para adoção por outros projetos
++ 38 testes de auditoria de stats (Wilson/MWU/z-test verificados à mão).
+
+**Integração real:** `examples/forge-integration/` — ponte `the-forge`
+→ Lens: spans nativos de `telemetry.json` (`theforge/RunTelemetry/v1`)
+importados com provenance honesto (`observed` no root medido pelo
+harness, `imported` nas fases nativas), transporte `HTTPExporter` real,
+falha real (`provider_failure` → `tool_error`), fixtures capturadas
+para ambientes sem o sibling; 7 testes E2E + `docs/integration/forge.md`
++ evidências sanitizadas.
+
+**Studio graph @ escala:** cap BFS-prefix de 500 nós com `revealed`
+(busca/expandir nunca perde nó requisitado), culling por viewport,
+clamp de pan, stubs deduplicados com direção, busca com find/next +
+centro de câmera, painel de seleção com traverse/expand-neighbors,
+arestas de critical-path destacadas; fixtures determinísticas até 10k
+nós; `docs/graph-scale.md` com limites medidos reais.
+
+**Release engineering:** `release.yml` — `uv sync` sem `--extra server`
+quebrava todo o pipeline (CRÍTICO); `id-token: write` movido para o
+job de publish; SBOM só com deps de runtime (21 componentes, era 57);
+gate de versão via `tomllib`. `ci.yml` — matriz OS × Python 3.11–3.14
+real, `permissions: contents: read`, concurrency, timeouts.
+`dependabot.yml` — cobre `npm` de `apps/studio`. `gen_sbom.py` — purl
+com normalização PEP 503. `pyproject` — `license-files` (LICENSE no
+wheel+sdist), classifier 3.14. SDK `engines.node >=20` (match com a
+matriz testada; Node 18 EOL) + LICENSE no pacote.
+`docs/release-audit.md` — auditoria completa com outputs reais.
+
+**Contratos:** `docs/capability-matrix.md` — 19 capacidades × 7
+superfícies (Core/HTTP/CLI/SDK-Py/SDK-TS/MCP/Studio) com estados
+justificados; 47 rotas/52 operações conferidas contra o OpenAPI real;
+`tests/unit/test_contract_parity.py` (docs↔rotas↔OpenAPI mecânico).
+Gaps declarados: SDKs sem `/v1/experiments*` (Studio cobre), CLI sem
+verbos experiments/alerts/specialists (roadmap).
+
+**Homologação operacional:** `homolog/run_scenarios.py` — cenários A–J
+contra a superfície instalada (CLI real, `serve` subprocess, MCP stdio):
+init→doctor→serve→inspect; ingest→traces→detail→cost→graph→MCP;
+failure→replay→incident; graph 1200 spans; eval baseline×candidato;
+sanitização ponta-a-ponta (secrets seedados via ingest real nunca vazam);
+export incident; retenção archive+prune; backup WAL+restore readonly;
+operação 100% offline (proxies mortos). **10/10 PASS** com evidências em
+`homolog/evidence/` + registro `docs/homologation.md` regenerável.
+
+**Plataforma/confiabilidade:** 64 testes novos
+(`test_platform_reliability.py`) — paths (aninhados, espaços, `~`, cwd),
+unicode (NFC/NFD, emoji, CJK, surrogates), permissões, WAL (reader-
+durante-writer, contenção dupla, busy_timeout), close/cleanup,
+concorrência leitura+escrita, timeouts, bordas JSON, env-config.
+
+**Benchmarks de escala:** `tests/bench/` agora mede 1k/10k/100k spans
+corpus real (`capture=full`), latências por filtro, grafos 10k, WAL sob
+leitores concorrentes — `docs/benchmarks/cycle-13-scale.md` com deltas
+honestos vs ciclo 09 (box compartilhado, loadavg 10–33 registrado;
+regressões aparentes marcadas para rerodada ociosa; 1M spans documentado
+como inviável no orçamento de tempo).
+
 ### Added — portable installer (Forge parity)
 
 - **`install.sh` / `install.ps1` / `install.windows.sh` / `setup.sh` /
