@@ -59,7 +59,70 @@ def _reject_request(status_code: int, detail: str) -> HTTPException:
     return HTTPException(status_code=status_code, detail=detail)
 
 
+_MAX_VALIDATION_ERRORS = 25
+_MAX_VALIDATION_INPUT = 200
+
+
+def _bounded_validation_detail(exc: PydanticValidationError) -> str:
+    """422 detail with bounded size — ``str(exc)`` serializes *every*
+    Pydantic error with its offending input echoed; a hostile body can
+    amplify a ~500KB request into tens of MB of response. Cap the error
+    count and the echoed input, and keep the true total honest."""
+    errors = exc.errors()
+    parts: list[str] = []
+    for e in errors[:_MAX_VALIDATION_ERRORS]:
+        loc = ".".join(str(p) for p in e.get("loc", ()))
+        msg = e.get("msg", "")
+        inp = repr(e.get("input", ""))
+        if len(inp) > _MAX_VALIDATION_INPUT:
+            inp = inp[:_MAX_VALIDATION_INPUT] + "…"
+        parts.append(
+            f"{loc}: {msg} (input={inp})" if loc else f"{msg} (input={inp})")
+    detail = f"{len(errors)} validation error(s): " + "; ".join(parts)
+    if len(errors) > _MAX_VALIDATION_ERRORS:
+        detail += f"; … and {len(errors) - _MAX_VALIDATION_ERRORS} more"
+    return detail
+
+
 _I64_MAX = 2**63 - 1
+
+# Documented JSON nesting bound for every request body we parse.
+# Parser recursion depth is platform-dependent (C stack + build flags —
+# the same 80k-deep body is a clean parse on macOS but a RecursionError
+# on Windows), so the bound is enforced lexically on the raw bytes before
+# any parser runs: identical on Linux, Windows and macOS. 512 sits far
+# above the semantic caps (AnyValue flattens at 32) and far below every
+# supported interpreter's parse-recursion limit.
+_MAX_JSON_DEPTH = 512
+
+
+def _json_depth(raw: bytes) -> int:
+    """Maximum ``{``/``[`` nesting outside strings — O(n), no recursion.
+
+    Brace/bracket characters inside string literals (and their escapes)
+    don't count; unbalanced closers can't push depth negative.
+    """
+    depth = max_depth = 0
+    in_str = esc = False
+    for b in raw:
+        if in_str:
+            if esc:
+                esc = False
+            elif b == 0x5C:  # backslash
+                esc = True
+            elif b == 0x22:  # "
+                in_str = False
+        elif b == 0x22:
+            in_str = True
+        elif b == 0x7B or b == 0x5B:  # { [
+            depth += 1
+            if depth > max_depth:
+                max_depth = depth
+        elif b == 0x7D or b == 0x5D:  # } ]
+            depth -= 1
+            if depth < 0:
+                depth = 0
+    return max_depth
 
 
 def _check_declared_size(
@@ -167,6 +230,15 @@ def create_app(
     # effective mode: explicit auth_mode, else `api_key` implies "key",
     # else local-first "none"
     _mode = cfg.auth_mode if cfg.auth_mode != "none" else ("key" if cfg.api_key else "none")
+    if _mode not in ("none", "key", "keys"):
+        # An unrecognized mode must never boot: it would fall through
+        # _resolve into the keys branch (writes denied) while read_deps
+        # stays open — a typo silently degrading to open reads is the
+        # worst possible posture. Fail at startup instead.
+        raise ValueError(
+            f"auth_mode={cfg.auth_mode!r} is not one of none|key|keys — "
+            "refusing to boot with an ambiguous policy"
+        )
     if _mode == "key" and not cfg.api_key:
         raise ValueError(
             "auth_mode='key' requires api_key — every write would be a "
@@ -296,10 +368,20 @@ def create_app(
         """Native ingest endpoint — accepts the versioned TraceIngest contract."""
         _check_declared_size(request, cfg.max_payload_bytes)
         raw = await _read_capped_body(request, cfg.max_payload_bytes)
+        if _json_depth(raw) > _MAX_JSON_DEPTH:
+            raise _reject_ingest(
+                400, f"JSON nesting exceeds {_MAX_JSON_DEPTH} levels")
         try:
             body = TraceIngest.model_validate_json(raw)
         except PydanticValidationError as exc:
-            raise _reject_ingest(422, str(exc)) from exc
+            # json_invalid = malformed JSON or the parser's own recursion
+            # cap → 400 (bad body); contract violations → 422.
+            code = (
+                400 if any(e["type"] == "json_invalid" for e in exc.errors())
+                else 422
+            )
+            raise _reject_ingest(
+                code, _bounded_validation_detail(exc)) from exc
         _require_scope(request, body.project_id or cfg.project_id)
         for trace in body.traces:
             # The envelope project fills traces that didn't name one;
@@ -349,6 +431,9 @@ def create_app(
             )
         _check_declared_size(request, cfg.max_payload_bytes)
         body = await _read_capped_body(request, cfg.max_payload_bytes)
+        if _json_depth(body) > _MAX_JSON_DEPTH:
+            raise _reject_ingest(
+                400, f"JSON nesting exceeds {_MAX_JSON_DEPTH} levels")
         try:
             payload = json.loads(body)
         except Exception as exc:
@@ -844,12 +929,14 @@ def create_app(
 
     async def _eval_body(request: Request) -> dict[str, Any]:
         _check_declared_size(request, cfg.max_payload_bytes, _reject_request)
+        raw = await _read_capped_body(
+            request, cfg.max_payload_bytes, _reject_request
+        )
+        if _json_depth(raw) > _MAX_JSON_DEPTH:
+            raise _reject_request(
+                400, f"JSON nesting exceeds {_MAX_JSON_DEPTH} levels")
         try:
-            body = json.loads(
-                await _read_capped_body(
-                    request, cfg.max_payload_bytes, _reject_request
-                )
-            )
+            body = json.loads(raw)
         except (ValueError, RecursionError) as exc:
             # json.loads(bytes) failure classes: JSONDecodeError and
             # UnicodeDecodeError are ValueError subclasses; a plain
@@ -1009,9 +1096,9 @@ def create_app(
 
         body = await _eval_body(request)
         pid = _resolve_pid(request, _eval_project_id(body))
-        limit_raw = body.get("limit", 200)
-        limit = limit_raw if isinstance(limit_raw, int) and not isinstance(
-            limit_raw, bool) else 200
+        limit = body.get("limit", 200)
+        if not isinstance(limit, int) or isinstance(limit, bool):
+            raise _reject_request(422, "limit: integer expected")
         return correlate_fleet(get_store(), pid,
                                limit=max(0, min(limit, 500)))
 
@@ -1742,7 +1829,10 @@ def create_app(
             raise _reject_request(422, "rules must be a list of <=100 objects")
         pid = _resolve_pid(request, _eval_project_id(body))
         rules: list[Any] = list(raw_rules or [])
-        if body.get("use_saved"):
+        use_saved = body.get("use_saved", False)
+        if not isinstance(use_saved, bool):
+            raise _reject_request(422, "use_saved: boolean expected")
+        if use_saved:
             from forge_lens.ops.alerts import load_rules
 
             rules += load_rules(cfg.data_dir / "alert-rules.json")

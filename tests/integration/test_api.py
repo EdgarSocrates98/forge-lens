@@ -334,21 +334,47 @@ def test_ingest_rejections_count_as_ingest_errors(
     assert after == before + 1
 
 
+def _otlp_body_with_deep_attr(nesting: int) -> bytes:
+    """OTLP envelope + one ``deep`` attribute nested ``nesting`` levels —
+    built as raw bytes so the fixture itself never recurses (the
+    RecursionError the CI saw on Windows was the *fixture's* json.dumps,
+    not the server)."""
+    deep = (
+        b'{"arrayValue":{"values":[' * nesting
+        + b'{"stringValue":"bottom"}'
+        + b']}}' * nesting
+    )
+    return (
+        b'{"resourceSpans":[{"scopeSpans":[{"spans":[{'
+        b'"traceId":"' + b"a" * 32 + b'",'
+        b'"spanId":"' + b"b" * 16 + b'",'
+        b'"name":"s","startTimeUnixNano":"1","endTimeUnixNano":"2",'
+        b'"attributes":[{"key":"deep","value":' + deep + b"}]"
+        b"}]}]}]}"
+    )
+
+
 def test_otlp_deeply_nested_anyvalue_not_500(client: TestClient) -> None:
-    """A ~2000-deep nested AnyValue used to RecursionError → HTTP 500.
-    The depth cap makes it a bounded parse with an explicit marker."""
-    deep: dict = {"stringValue": "bottom"}
-    for _ in range(2_000):
-        deep = {"arrayValue": {"values": [deep]}}
+    """A ~2000-deep nested AnyValue is over the transport depth bound —
+    deterministic 400 on every platform, never a RecursionError-500."""
     r = client.post(
         "/v1/otlp/traces",
-        json={
-            "resourceSpans": [{"scopeSpans": [{"spans": [{
-                "traceId": "a" * 32, "spanId": "b" * 16, "name": "s",
-                "startTimeUnixNano": "1", "endTimeUnixNano": "2",
-                "attributes": [{"key": "deep", "value": deep}],
-            }]}]}]
-        },
+        content=_otlp_body_with_deep_attr(2_000),
+        headers={"Content-Type": "application/json"},
+    )
+    assert r.status_code == 400
+    assert "nesting" in r.json()["detail"]
+
+
+def test_otlp_nested_anyvalue_within_limit_accepted(
+    client: TestClient,
+) -> None:
+    """Depth within the transport bound parses fine; the semantic
+    AnyValue cap (32) still marks deep content ``[DROPPED:depth-limit]``."""
+    r = client.post(
+        "/v1/otlp/traces",
+        content=_otlp_body_with_deep_attr(100),
+        headers={"Content-Type": "application/json"},
     )
     assert r.status_code == 200
     assert r.json()["accepted_spans"] == 1
@@ -826,8 +852,9 @@ def test_eval_boundary_invalid_utf8_is_400_not_500(client: TestClient) -> None:
 
 
 def test_eval_boundary_deep_nesting_is_400_not_500(client: TestClient) -> None:
-    """Deeply-nested *valid* JSON raises RecursionError in json.loads —
-    a distinct failure class from malformed JSON, same 400 class."""
+    """Deeply-nested *valid* JSON is over the documented depth bound —
+    deterministic 400 on every platform (the lexical check runs before
+    any parser, so no platform's recursion limit is in play)."""
     body = b"[" * 80_000 + b"]" * 80_000  # ~160KB, under the byte cap
     for url in ("/v1/eval/run", "/v1/eval/compare"):
         r = client.post(
@@ -835,6 +862,31 @@ def test_eval_boundary_deep_nesting_is_400_not_500(client: TestClient) -> None:
             headers={"Content-Type": "application/json"},
         )
         assert r.status_code == 400, (url, r.status_code, r.text)
+        assert "nesting" in r.json()["detail"]
+
+
+def test_json_depth_boundary_is_consistent(client: TestClient) -> None:
+    """Depth exactly at the bound parses; one level over → 400 — on all
+    platforms, since the check is lexical, not parser recursion."""
+    at = b"[" * 512 + b"]" * 512          # exactly _MAX_JSON_DEPTH
+    over = b"[" * 513 + b"]" * 513
+    r = client.post(
+        "/v1/eval/run", content=at,
+        headers={"Content-Type": "application/json"},
+    )
+    # parses fine → reaches the body-shape check → 422 (a list ≠ object)
+    assert r.status_code == 422
+    r = client.post(
+        "/v1/eval/run", content=over,
+        headers={"Content-Type": "application/json"},
+    )
+    assert r.status_code == 400
+    # ingest paths reject with the same class
+    r = client.post(
+        "/v1/otlp/traces", content=over,
+        headers={"Content-Type": "application/json"},
+    )
+    assert r.status_code == 400
 
 
 def test_eval_run_validates_dataset_before_trace_lookup(
