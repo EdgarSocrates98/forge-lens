@@ -5,8 +5,10 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { JsonPipe, KeyValuePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import {
-  Api, EvalResult, EvalSpec, ReplayEntry, ReplayTimeline, Span, Trace,
-  TraceEval,
+  AnalysisRun, Api, CorrelateReport, EfficiencyReport, EvalResult,
+  EvalSpec, EvalSuggestion, IncidentBundle, Recommendation,
+  RecommendationReport, ReplayEntry, ReplayTimeline, SecurityReport,
+  Span, Trace, TraceEval,
 } from './api';
 
 /** `left`/`width` are the waterfall bar percentages — precomputed in
@@ -75,6 +77,98 @@ interface EvalParam {
       }
     }
     @if (tab() === 'evidence') {
+      <details class="panel incident" open>
+        <summary>incident{{ incidentSummary() }}</summary>
+        @switch (extraState('incident')) {
+          @case ('loading') { <p class="muted">loading…</p> }
+          @case ('unavailable') { <p class="muted">incident bundle unavailable</p> }
+          @default {
+            @if (incident(); as inc) {
+              <p class="muted">
+                status {{ inc.status }} ·
+                category <b>{{ inc.failure['category'] ?? '—' }}</b>
+                @if (inc.failure['detail']; as fd) { · {{ fd }} }
+                @if (inc.bundle_version) { · bundle v{{ inc.bundle_version }} }
+              </p>
+              @if (inc.hypotheses.length) {
+                <h4>hypotheses</h4>
+                @for (h of inc.hypotheses; track h.hypothesis_id) {
+                  <details class="hyp">
+                    <summary><b>{{ h.label }}</b> — {{ h.status }}
+                      ({{ h.confidence }})</summary>
+                    <p class="muted">{{ h.symptom }}</p>
+                    @if (h.supporting_evidence.length) {
+                      <div class="ev"><b>supporting</b><ul>
+                        @for (e of h.supporting_evidence; track e) {
+                          <li>{{ e }}</li> }
+                      </ul></div> }
+                    @if (h.contradictory_evidence.length) {
+                      <div class="ev"><b>contradictory</b><ul>
+                        @for (e of h.contradictory_evidence; track e) {
+                          <li>{{ e }}</li> }
+                      </ul></div> }
+                    @if (h.missing_evidence.length) {
+                      <div class="ev"><b>missing evidence</b><ul>
+                        @for (e of h.missing_evidence; track e) {
+                          <li>{{ e }}</li> }
+                      </ul></div> }
+                    @if (h.suggested_verification.length) {
+                      <div class="ev"><b>verify by</b><ul>
+                        @for (e of h.suggested_verification; track e) {
+                          <li>{{ e }}</li> }
+                      </ul></div> }
+                  </details>
+                }
+              }
+              @if (inc.eval_suggestions.length) {
+                <h4>eval suggestions
+                  <span class="muted">candidate — review &amp; apply by hand</span></h4>
+                <table class="eval-sugg">
+                  <thead><tr>
+                    <th>kind</th><th>name</th><th>params</th>
+                    <th>fill in</th><th>rationale</th><th>evidence</th>
+                  </tr></thead>
+                  <tbody>
+                    @for (s of inc.eval_suggestions; track $index) {
+                      <tr>
+                        <td>{{ s.kind }}</td>
+                        <td><code>{{ s.name }}</code></td>
+                        <td><code>{{ s.params | json }}</code></td>
+                        <td>{{ s.params_required.join(', ') || '—' }}</td>
+                        <td>{{ s.rationale }}</td>
+                        <td>{{ suggEvidence(s) }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              }
+              @if (inc.waste.length) {
+                <h4>waste</h4>
+                <table class="waste">
+                  <thead><tr>
+                    <th>kind</th><th>spans</th><th>est usd</th><th>detail</th>
+                  </tr></thead>
+                  <tbody>
+                    @for (w of inc.waste; track $index) {
+                      <tr>
+                        <td>{{ w.kind }}</td>
+                        <td><code>{{ w.span_ids.join(', ') }}</code></td>
+                        <td>{{ w.estimated_usd === null ? '—' : w.estimated_usd }}</td>
+                        <td>{{ w.detail }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              }
+              @if (!inc.hypotheses.length && !inc.eval_suggestions.length
+                   && !inc.waste.length) {
+                <p class="muted">no hypotheses, eval suggestions or waste —
+                  nothing flagged beyond the classification above.</p>
+              }
+            }
+          }
+        }
+      </details>
       @for (sec of sections; track sec[0]) {
         <h3>{{ sec[0] }}</h3><pre>{{ sec[1]() | json }}</pre>
       }
@@ -212,6 +306,148 @@ interface EvalParam {
           }
         }
       </details>
+      <details class="panel intel-security">
+        <summary>security{{ securitySummary() }}</summary>
+        @switch (extraState('security')) {
+          @case ('loading') { <p class="muted">loading…</p> }
+          @case ('unavailable') { <p class="muted">security report unavailable</p> }
+          @default {
+            @if (security(); as r) {
+              @if (r.observations.length === 0) {
+                <p class="muted">no observations — {{ r.mode }} mode</p>
+              } @else {
+                <table>
+                  <thead><tr>
+                    <th>severity</th><th>kind</th><th>span</th><th>detail</th>
+                  </tr></thead>
+                  <tbody>
+                    @for (o of r.observations; track $index) {
+                      <tr [class.err]="o.severity === 'high'">
+                        <td>{{ o.severity }}</td>
+                        <td>{{ o.kind }}</td>
+                        <td><code>{{ o.span_id }}</code></td>
+                        <td>{{ o.detail }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+                <p class="muted">{{ r.mode }} mode — reports only, nothing blocked</p>
+              }
+            }
+          }
+        }
+      </details>
+      <details class="panel intel-efficiency">
+        <summary>efficiency{{ efficiencySummary() }}</summary>
+        @switch (extraState('efficiency')) {
+          @case ('loading') { <p class="muted">loading…</p> }
+          @case ('unavailable') { <p class="muted">efficiency report unavailable</p> }
+          @default {
+            @if (efficiency(); as e) {
+              <dl>
+                <dt>outcome</dt>
+                <dd>{{ e.outcome }} ({{ e.succeeded ? 'succeeded' : 'not ok' }})</dd>
+                <dt>tool calls</dt><dd>{{ e.tool_calls }}</dd>
+                <dt>llm calls</dt><dd>{{ e.llm_calls }}</dd>
+                <dt>tokens</dt>
+                <dd>{{ e.input_tokens }} in · {{ e.output_tokens }} out</dd>
+                <dt>usage coverage</dt><dd>{{ e.usage_coverage }}</dd>
+                <dt>error spans</dt><dd>{{ e.error_spans }}</dd>
+                <dt>retries observed</dt><dd>{{ e.retries_observed }}</dd>
+              </dl>
+            }
+          }
+        }
+      </details>
+      <details class="panel intel-recs">
+        <summary>recommendations{{ recsSummary() }}</summary>
+        @switch (extraState('recommendations')) {
+          @case ('loading') { <p class="muted">loading…</p> }
+          @case ('unavailable') { <p class="muted">recommendations unavailable</p> }
+          @default {
+            @if (recommendations(); as r) {
+              @if (r.recommendations.length === 0) {
+                <p class="muted">{{ r.note }}</p>
+              } @else {
+                <table>
+                  <thead><tr>
+                    <th>kind</th><th>evidence</th><th>detail</th>
+                  </tr></thead>
+                  <tbody>
+                    @for (rec of r.recommendations; track $index) {
+                      <tr>
+                        <td>{{ rec.kind }}</td>
+                        <td>{{ recEvidence(rec) }}</td>
+                        <td>{{ rec.detail }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+                <p class="muted">{{ r.note }}</p>
+              }
+            }
+          }
+        }
+      </details>
+      <details class="panel intel-correlate">
+        <summary>correlate{{ corrSummary() }}</summary>
+        @switch (extraState('correlate')) {
+          @case ('loading') { <p class="muted">loading…</p> }
+          @case ('unavailable') { <p class="muted">correlation report unavailable</p> }
+          @default {
+            @if (correlate(); as r) {
+              @if (r.correlations.length === 0) {
+                <p class="muted">{{ r.note }}</p>
+              } @else {
+                <table>
+                  <thead><tr>
+                    <th>kind</th><th>detail</th><th>evidence spans</th>
+                  </tr></thead>
+                  <tbody>
+                    @for (c of r.correlations; track $index) {
+                      <tr>
+                        <td>{{ c.kind }}</td>
+                        <td>{{ c.detail }}<br>
+                          <span class="muted">{{ c.caveat }}</span></td>
+                        <td><code>{{ c.evidence_span_ids.join(', ') }}</code></td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+                <p class="muted">{{ r.note }}</p>
+              }
+            }
+          }
+        }
+      </details>
+      <details class="panel analyze">
+        <summary>analyze — run a specialist</summary>
+        <div class="filters" style="display:flex; gap:.5rem;
+             flex-wrap:wrap; align-items:center">
+          <input list="lens-specialists" size="30" [value]="specialistSel"
+                 (input)="specialistSel = $any($event.target).value"
+                 placeholder="specialist name" aria-label="specialist name" />
+          <datalist id="lens-specialists">
+            @for (s of specialists() ?? []; track s) {
+              <option [value]="s"></option> }
+          </datalist>
+          <button (click)="runAnalysis()"
+                  [disabled]="analysisRunning() || !specialistSel.trim()">
+            {{ analysisRunning() ? 'running…' : 'run' }}</button>
+          <span class="muted">POST /v1/analyze/&lt;specialist&gt;/&lt;trace&gt;
+            — default budgets</span>
+        </div>
+        @if (analysisErr()) { <p class="err-banner">{{ analysisErr() }}</p> }
+        @if (analysisRun(); as ar) {
+          <p class="muted">{{ ar.stop_reason }} ·
+            {{ ar.iterations }} iteration(s) ·
+            {{ ar.tokens_observed }} tokens observed{{
+              ar.cancelled ? ' · cancelled' : '' }}</p>
+          @for (fd of ar.findings; track $index) {
+            <pre>{{ fd | json }}</pre> }
+          @if (!ar.findings.length) { <p class="muted">no findings</p> }
+        }
+      </details>
     }
   } @else { <p class="muted">loading…</p> }`,
 })
@@ -233,6 +469,100 @@ export class TraceDetailComponent implements OnInit, OnDestroy {
     ['loops', () => this.extras()['loops']],
     ['graph analysis', () => this.extras()['graph']],
   ];
+
+  // -- intelligence pulls (incident bundle + per-endpoint reports) ----
+  /** null until the pull resolves and whenever it failed — use
+   *  `extraState` to tell "still loading" from "unavailable". */
+  incident = computed<IncidentBundle | null>(() =>
+    this.extraAs<IncidentBundle>('incident'));
+  security = computed<SecurityReport | null>(() =>
+    this.extraAs<SecurityReport>('security'));
+  efficiency = computed<EfficiencyReport | null>(() =>
+    this.extraAs<EfficiencyReport>('efficiency'));
+  recommendations = computed<RecommendationReport | null>(() =>
+    this.extraAs<RecommendationReport>('recommendations'));
+  correlate = computed<CorrelateReport | null>(() =>
+    this.extraAs<CorrelateReport>('correlate'));
+
+  // -- analyze (specialist runner, POST /v1/analyze/{spec}/{trace}) ---
+  specialists = signal<string[] | null>(null);
+  specialistSel = '';
+  analysisRun = signal<AnalysisRun | null>(null);
+  analysisRunning = signal(false);
+  analysisErr = signal<string | null>(null);
+
+  /** extras[key] → typed payload, or null on `{error}` placeholders. */
+  private extraAs<T>(key: string): T | null {
+    const v = this.extras()[key];
+    if (!v || (v as { error?: string }).error !== undefined) return null;
+    return v as T;
+  }
+  extraState(key: string): 'loading' | 'unavailable' | 'ready' {
+    const v = this.extras()[key];
+    if (v === undefined) return 'loading';
+    return (v as { error?: string }).error !== undefined
+      ? 'unavailable' : 'ready';
+  }
+  incidentSummary = computed(() => {
+    const i = this.incident();
+    if (!i) return this.extraState('incident') === 'unavailable'
+      ? ' — unavailable' : '';
+    const parts: string[] = [];
+    if (i.hypotheses?.length) parts.push(`${i.hypotheses.length} hypotheses`);
+    if (i.eval_suggestions?.length) {
+      parts.push(`${i.eval_suggestions.length} eval suggestion(s)`);
+    }
+    if (i.waste?.length) parts.push(`${i.waste.length} waste`);
+    return ' — ' + (parts.length ? parts.join(' · ') : 'clean');
+  });
+  securitySummary = computed(() => {
+    const r = this.security();
+    return r ? ` — ${r.observations.length} observation(s)` : '';
+  });
+  efficiencySummary = computed(() => {
+    const e = this.efficiency();
+    return e ? ` — ${e.llm_calls} llm · ${e.tool_calls} tool` : '';
+  });
+  recsSummary = computed(() => {
+    const r = this.recommendations();
+    return r ? ` — ${r.recommendations.length} candidate` : '';
+  });
+  corrSummary = computed(() => {
+    const r = this.correlate();
+    return r ? ` — ${r.correlations.length} association(s)` : '';
+  });
+  /** Evidence column for an eval_suggestion row: `category · n trace(s)`
+   *  plus ' recurring' when the server flagged ≥2 distinct traces. */
+  suggEvidence(s: EvalSuggestion): string {
+    const cat = s.evidence?.['category'] ?? s.evidence?.['categories'];
+    const count = s.evidence?.['count'];
+    const base = `${cat ?? '—'} · ${count ?? '?'} trace(s)`;
+    return s.evidence?.['recurring'] === true ? base + ' · recurring' : base;
+  }
+  /** Evidence column for a recommendation — tool name, spans, or the
+   *  counters the specific rule fired on. */
+  recEvidence(r: Recommendation): string {
+    if (r.tool) return r.failures ? `${r.tool} ×${r.failures}` : r.tool;
+    if (r.spans?.length) return r.spans.join(', ');
+    if (r.tool_calls) return `${r.tool_calls} calls`;
+    return '—';
+  }
+
+  runAnalysis(): void {
+    const sp = this.specialistSel.trim();
+    if (!sp || this.analysisRunning()) return;
+    this.analysisRunning.set(true);
+    this.analysisErr.set(null);
+    this.analysisRun.set(null);
+    this.api.runAnalysis(this.id, sp).subscribe({
+      next: r => { this.analysisRunning.set(false); this.analysisRun.set(r); },
+      error: (e: HttpErrorResponse) => {
+        this.analysisRunning.set(false);
+        this.analysisErr.set(`analysis failed (${e.status || e.message})`);
+      },
+    });
+  }
+
   /** Mirrors forge_lens.eval.evaluators.EVALUATORS — checking a
    *  param-taking evaluator reveals its form row below. */
   readonly evaluatorNames = [
@@ -475,6 +805,17 @@ export class TraceDetailComponent implements OnInit, OnDestroy {
     pull('loops', this.api.getLoops(this.id));
     pull('graph', this.api.getGraphAnalysis(this.id));
     pull('eval', this.api.getTraceEval(this.id));
+    pull('incident', this.api.getIncident(this.id));
+    pull('security', this.api.getSecurityReport(this.id));
+    pull('efficiency', this.api.getEfficiency(this.id));
+    pull('recommendations', this.api.getRecommendations(this.id));
+    pull('correlate', this.api.getCorrelate(this.id));
+    // datalist suggestions for the specialist runner — a failure only
+    // means an empty dropdown, the name field stays free-text
+    this.api.listSpecialists().subscribe({
+      next: s => this.specialists.set(s),
+      error: () => this.specialists.set([]),
+    });
     this.api.getReplay(this.id).subscribe({
       next: r => { this.replay.set(r); this.replayLoaded.set(true); },
       error: (e: HttpErrorResponse) => {

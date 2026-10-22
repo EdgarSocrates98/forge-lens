@@ -1,0 +1,25 @@
+# Text normalization — LF on every platform for files git treats as text.
+* text=auto eol=lf
+
+# Explicitly binary — never line-ending-normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.whl binary
+*.tar.gz binary
+*.zip binary
+*.db binary
+*.sqlite binary
+uv.lock binary
+package-lock.json binary
+
+# Corpus + evidence + captured fixtures are byte-pinned: scenarios,
+# homologation evidence and recorded theforge runs must materialize
+# with LF bytes on every platform or golden assertions drift on Windows.
+tests/golden/**      text eol=lf
+tests/fixtures/**    text eol=lf
+homolog/**           text eol=lf
+examples/forge-integration/fixtures/** text eol=lf

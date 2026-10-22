@@ -5,7 +5,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { RouterLink } from '@angular/router';
 import {
   Api, CompareReport, CompareRequest, DatasetCaseInput, DatasetDetail,
-  DatasetRow, DatasetVersionRow, EvalSpec,
+  DatasetRow, DatasetVersionDetail, DatasetVersionRow, EvalSpec,
 } from './api';
 import { CompareReportComponent } from './compare-report';
 import { parseIds } from './ids';
@@ -106,8 +106,9 @@ const blankCase = (): CaseFormRow => ({ case_id: '', input: '', expected: '' });
             </tr></thead>
             <tbody>
               @for (v of vs; track v.version) {
-                <tr>
-                  <td>{{ v.version }}</td>
+                <tr [class.sel]="verSel() === v.version">
+                  <td><button class="link" (click)="openVersion(v)"
+                              [title]="'cases in ' + v.version">{{ v.version }}</button></td>
                   <td>{{ v.description ?? '—' }}</td>
                   <td>{{ v.case_count }}</td>
                   <td>{{ v.created_at ? (v.created_at | date:'yyyy-MM-dd HH:mm') : '—' }}</td>
@@ -115,6 +116,36 @@ const blankCase = (): CaseFormRow => ({ case_id: '', input: '', expected: '' });
               }
             </tbody>
           </table>
+          @if (verSel(); as vsel) {
+            <h4>{{ vsel }} — cases
+              <span class="muted">append-only, ordered by case_id</span></h4>
+            @if (verDetailErr()) { <p class="err-banner">{{ verDetailErr() }}</p> }
+            @if (verDetail(); as vd) {
+              @if (vd.description) { <p class="muted">{{ vd.description }}</p> }
+              @if (vd.cases.length === 0) {
+                <p class="muted">no cases in this version.</p>
+              } @else {
+                <table class="cases">
+                  <thead><tr>
+                    <th>case_id</th><th>input</th><th>expected</th>
+                    <th>allowed tools</th><th>rubric</th>
+                  </tr></thead>
+                  <tbody>
+                    @for (c of vd.cases; track c.case_id) {
+                      <tr>
+                        <td><code>{{ c.case_id }}</code></td>
+                        <td><code>{{ c.input | json }}</code></td>
+                        <td><code>{{ c.expected | json }}</code></td>
+                        <td>{{ (c.allowed_tools ?? []).join(', ') || '—' }}</td>
+                        <td><code>{{ c.rubric | json }}</code></td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              }
+              @if (hasMetadata(vd)) { <pre>{{ vd.metadata | json }}</pre> }
+            } @else if (!verDetailErr()) { <p class="muted">loading…</p> }
+          }
         }
       } @else if (!versionsErr()) { <p class="muted">loading…</p> }
 
@@ -216,6 +247,10 @@ export class DatasetsComponent implements OnInit {
   detailErr = signal<string | null>(null);
   versions = signal<DatasetVersionRow[] | null>(null);
   versionsErr = signal<string | null>(null);
+  /** version the cases table is open for (null = none picked). */
+  verSel = signal<string | null>(null);
+  verDetail = signal<DatasetVersionDetail | null>(null);
+  verDetailErr = signal<string | null>(null);
 
   // create-dataset form
   newId = ''; newName = ''; newTask = '';
@@ -288,6 +323,7 @@ export class DatasetsComponent implements OnInit {
     this.selected.set(d);
     this.detail.set(null); this.detailErr.set(null);
     this.versions.set(null); this.versionsErr.set(null);
+    this.verSel.set(null); this.verDetail.set(null); this.verDetailErr.set(null);
     this.cmp.set(null); this.cmpErr.set(null);
     this.verMsg.set(null); this.verErr.set(null);
     this.api.getDataset(d.dataset_id).subscribe({
@@ -411,7 +447,17 @@ export class DatasetsComponent implements OnInit {
     });
   }
 
-  hasMetadata(d: DatasetDetail): boolean {
+  openVersion(v: DatasetVersionRow): void {
+    this.verSel.set(v.version);
+    this.verDetail.set(null); this.verDetailErr.set(null);
+    this.api.getDatasetVersion(v.dataset_id, v.version).subscribe({
+      next: d => this.verDetail.set(d),
+      error: (e: HttpErrorResponse) =>
+        this.verDetailErr.set(this.httpErr(e, 'cannot load version')),
+    });
+  }
+
+  hasMetadata(d: { metadata?: Record<string, unknown> }): boolean {
     return !!d.metadata && Object.keys(d.metadata).length > 0;
   }
 

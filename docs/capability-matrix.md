@@ -140,8 +140,8 @@ Tier de auth: **W** = writer (`check_auth`), **R** = reader
   · `evaluators` 1..100 · regras de alerta ≤100 (inline+salvas
   combinadas; arquivo salvo também tem cap de 100).
 - `POST /v1/intel/correlate` `limit`: clampa a **0..500**, default 200;
-  valor não-inteiro cai silenciosamente no default (única coerção
-  leniente do grupo — ver Divergências pendentes).
+  valor não-inteiro (incluindo `bool`) é rejeitado com `422`
+  (`app.py:1073-1075`) — mesma postura do grupo eval/intel.
 - Corpo: `max_payload_bytes` (default 8 MiB) lido em **streaming** —
   aborta no primeiro byte excedente (`413`); `Content-Length` é só
   fast-path. Profundidade JSON: bound **lexical de 512 níveis** de
@@ -268,16 +268,22 @@ Tier de auth: **W** = writer (`check_auth`), **R** = reader
     "não coberto de propósito" omitia que `/v1/experiments*`, os writes
     `PUT /v1/datasets/*` e `POST|DELETE /v1/alerts/rules` também não
     têm método — lacuna real agora declarada.
+12. **`POST /v1/intel/correlate` — `limit` não-inteiro rejeitado**
+    (`app.py:1073-1075`): `422 "limit: integer expected"` — `bool`
+    também rejeitado; a coerção leniente para o default 200 deixou de
+    existir. Fix de código.
+13. **`POST /v1/alerts/evaluate` — `use_saved` exige `bool`**
+    (`app.py:1806-1808`): `422 "use_saved: boolean expected"` —
+    truthy arbitrário (`"yes"`, `1`) não ativa mais o merge de regras
+    salvas. Fix de código.
+14. **MCP `lens.list_traces` — `limit` fracionário rejeitado**
+    (`mcp_server.py`, `_num(integer=True)`): `1.9` → `-32602` em vez de
+    truncar via `int()`; floats/strings integrais ainda normalizam.
+    Fix de código.
 
 ## 5. Divergências pendentes (registradas, NÃO corrigidas aqui)
 
-1. **`POST /v1/intel/correlate` — `limit` leniente**
-   (`app.py:1072-1075`): um `limit` não-inteiro (`"abc"`, `1.5`,
-   `true`) cai silenciosamente no default 200 em vez de `422` — único
-   parâmetro do grupo eval/intel que não rejeita entrada malformada.
-   Candidato a decisão de política (rejeitar vs. coagir), não a bug
-   corrigível pelo auditor.
-2. **`docs/reference/cli.md` — assinatura do `archive` desatualizada**
+1. **`docs/reference/cli.md` — assinatura do `archive` desatualizada**
    (fora do meu escopo): o doc mostra `forge-lens archive <trace_id>
    [--out file]` "exporta JSONL por trace", mas o comando real é
    `forge-lens archive --before ISO --out FILE [--delete --yes]
@@ -285,25 +291,18 @@ Tier de auth: **W** = writer (`check_auth`), **R** = reader
    `--before` e `--out` obrigatórios, e exporta a **janela** de traces
    encerradas antes do cutoff (não uma trace). Encaminhar ao dono de
    `cli.md`.
-3. **SDKs (Py e TS) sem superfície de experiments**: as 4 rotas
+2. **SDKs (Py e TS) sem superfície de experiments**: as 4 rotas
    `/v1/experiments*` não têm método em `LensClient`/`LensClient` TS —
    lacuna de paridade (Studio cobre; SDK não). Registrado; adicionar
    métodos é decisão de produto, não drift de doc.
-4. **CLI sem verbos para experiments, alerts, specialists, frota**
+3. **CLI sem verbos para experiments, alerts, specialists, frota**
    (`intel/efficiency|correlate|regress`), `eval run`/`compare` e
    `audit`: o acesso existe via API/SDKs, mas a CLI local (que opera
    sem servidor) não expõe essas capacidades — `import-claude`/
    `import-otel`/`archive`/`install` são CLI-only na direção oposta.
    Assimetria registrada para avaliação de roadmap.
-5. **Studio sem páginas para tools, security, efficiency,
+4. **Studio sem páginas para tools, security, efficiency,
    recommendations, correlate, incident, specialists, admin, alerts
    (edição de regras), metrics/health**: `api.ts` nem sequer chama
    essas rotas — cobertura deliberada do MVP ou lacuna de UI a
    decidir.
-6. **`alerts_evaluate` — `use_saved` por truthiness** (`app.py:1806`):
-   qualquer valor truthy (`"yes"`, `1`) ativa o merge de regras salvas;
-   não há validação `isinstance(bool)`. Leniente como (2), menor.
-7. **MCP `lens.list_traces` coage `limit` via `int()`**
-   (`mcp_server.py:179`): `1.9` trunca silenciosamente; valores
-   não-numéricos → `TypeError` → `-32602`. Consistente com o contrato
-   de erro do servidor, apenas menos estrito que a API.

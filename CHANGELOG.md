@@ -5,6 +5,122 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 
 ## [Unreleased]
 
+### Added — wave de paridade e maturação (pós-13.1)
+
+Wave de melhoria ampla sobre 5 frentes: paridade de superfícies CLI/
+Studio, jobs de CI, paridade de processo FORGE e performance do
+storage. Toda superfície nova reusa os mesmos engines do servidor —
+a CLI continua 100% local (store direto, nunca HTTP).
+
+**CLI — superfícies que existiam só na API/engine agora são comandos:**
+
+- `forge-lens analyze --list` e `analyze <specialist> <trace_id>` —
+  os 11 especialistas determinísticos (`ops/agents.py`) eram
+  inalcançáveis fora da API.
+- `forge-lens audit [--action --actor --limit --offset]` — trilha de
+  auditoria legível fora do endpoint admin.
+- `forge-lens experiments create|list|show|run` — ciclo de vida
+  completo de experimentos persistidos (cohorts a/b, evaluators,
+  gate opcional, histórico de runs) espelhando `/v1/experiments`.
+- `forge-lens alerts list|save|delete|evaluate` — gestão das regras
+  em `<data-dir>/alert-rules.json` + avaliação sob demanda, paridade
+  com `/v1/alerts/*`.
+- `forge-lens eval-suggest <trace_id>...` — superfície multi-report
+  de `suggest_evaluators`: com ≥2 traces, `evidence.recurring` passa
+  a ser alcançável (antes era dead surface — só singletons eram
+  passados pelos call sites).
+- `forge-lens intel efficiency|correlate|regress` — inteligência de
+  frota (`fleet_efficiency`, `correlate_fleet`, `compare_cohorts`)
+  em comandos.
+- `forge-lens eval --evaluator NAME --params-json` — acesso a
+  qualquer um dos avaliadores do registry (antes só 3 fixos).
+- `forge-lens traces list --offset N` — paginação que a API já
+  aceitava.
+- `forge-lens install/uninstall` — falha de escrita do receipt
+  retorna `ok:false` → exit 1 sem traceback (antes `OSError` nu).
+
+**Studio — paridade com API/CLI no detalhe de trace e listas:**
+
+- `api.ts`: `getIncident`, `getSecurityReport`, `getEfficiency`,
+  `getRecommendations`, `getCorrelate`, `listSpecialists`,
+  `runAnalysis`, `getDatasetVersion`; `TraceFilter` ganha `model`,
+  `agent`, `host`, `min_total_tokens`, `project_id`, `offset`.
+- trace-detail: painel **Incident** renderiza `eval_suggestions`,
+  `hypotheses` e `waste` (campos que só o texto da CLI mostrava);
+  painéis colapsáveis security/efficiency/recommendations/correlate;
+  runner de especialista (`POST /v1/analyze/{specialist}/{id}`).
+- datasets: casos de uma versão (`GET /v1/datasets/{id}/versions/{v}`).
+- traces list: filtros model/agent/host/min_total_tokens/project_id +
+  paginação server-side via `offset` (load-more), com round-trip em
+  query params e saved views.
+
+**CI — cobertura que só existia localmente vira gate:**
+
+- `studio-e2e` (ubuntu, 30min): seed + `forge-lens serve` + build de
+  produção + Playwright **chromium+firefox+webkit** — suíte E2E que
+  nunca rodava em CI. Report como artefato em falha.
+- `eval-gate`: `scripts/eval_gate.py` agora é check real — fixtures
+  commitadas em `tests/fixtures/eval-gate/`; caso pass → exit 0,
+  caso fail → exit 1 assertivo (prova que o gate não é vacuoso).
+- `wheel-smoke`: `uv build` → wheel instalada em venv limpo →
+  `--version`/`init`/`doctor` + `serve` sem extra server falha
+  limpo (exit 2, sem traceback).
+- `minimal`: `uv sync` sem extras → smoke CLI + subset pytest sem
+  fastapi/uvicorn (prova a degradação por extras documentada).
+
+**Paridade de processo FORGE:**
+
+- `forge.json` bloco `"lab"` + `scripts/lab/forge_lens_lab.py` —
+  emitter `forge/BenchmarkResult/v1` (única forja que faltava; roda
+  o corpus `tests/golden` via pytest→junit→receipt).
+- `tests/unit/test_boundary.py` — scan AST que **enforça
+  mecanicamente** as hard rules: zero imports de rede
+  (socket/urllib/http/requests/httpx/aiohttp/subprocess/asyncio) e
+  zero wall-clock (`time.time`, `datetime.now`…) em
+  `core/ contracts/ otlp/ sanitize/ storage/ ingest/` — exceções
+  pinadas (`core/metrics.py`, `ingest/pipeline.py` duração-only).
+- `tests/conftest.py` — bloqueio de sockets frescos +
+  DNS (`create_connection`/`getaddrinfo`/…) em `tests/unit` +
+  `tests/contract`; opt-out via `pytest.mark.network`.
+- `factory/` skeleton (specs inbox/active/archive, runs,
+  quality-gate) — convenção Loop Factory dos irmãos.
+- Housekeeping: PR template, CODE_OF_CONDUCT, SUPPORT,
+  `.gitattributes` (eol=lf em fixtures — bytes não derivam no
+  Windows), `.editorconfig`; `CONTRIBUTING.md` referência morta
+  → `docs/roadmap.md`.
+
+**Segurança de dependência:**
+
+- `apps/studio`: `overrides.vite ^8.3.5` deduplica o vite aninhado
+  (pin `8.3.0` vulnerável via `@angular/build`) — `npm audit` 0
+  vulns.
+
+### Changed — storage/API
+
+- **`get_traces` batch no store** (`storage/base.py` + `sqlite.py`):
+  endpoints de coorte/janela faziam N+1 hidratação — `regress` worst
+  case ~2001 queries serializadas num único lock. Agora uma
+  aquisição de lock + queries `IN` em chunks de 500 (limite de vars
+  do SQLite). Rewired: session graph, eval run/compare, fleet
+  efficiency, regress, experiment runs, `correlate_fleet`,
+  alerts `_build_window`. Semântica preservada: 404 por id ausente
+  nos paths de eval/compare; wildcard `project_id=None` pega a row
+  mais recente por id sem misturar tenants.
+- **`upsert_trace` prefetch**: um `SELECT` por trace substitui o
+  SELECT por span (~N queries → 1); `delivered`-set reproduz a
+  re-leitura ao vivo do segundo `span_id` repetido no mesmo
+  envelope — dedup/merge/`_union_flags` idênticos.
+- **Paginação consistente**: `limit<1`/`offset<0` agora **rejeita
+  422** em `traces`/`sessions`/`tools`/`experiments`/runs/session
+  graph (antes clampava silenciosamente enquanto o resto da rota
+  422ava malformados — inconsistência interna). `limit>500` segue
+  clampando; `admin/audit` já rejeitava fora de 1..500.
+- `docs/reference/api.md` e `capability-matrix.md` atualizados;
+  itens "pendentes" 1/6/7 da matriz movidos para corrigidos
+  (use_saved bool, correlate limit int, MCP limit fracionário).
+- `docs/roadmap.md`: §12.7 eval-suggest e c06 experiments/eval-gate
+  → `SHIPPED`; filtros server-side do Studio atualizados.
+
 ### Fixed — ciclo 13.1 (review r6)
 
 - **MCP stdin reconfigurado para UTF-8**: o loop lia

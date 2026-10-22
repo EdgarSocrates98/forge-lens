@@ -25,7 +25,7 @@ cd packages/forge-lens-sdk-ts && npm install && npm test
 
 ## Estrutura de um ciclo
 
-O roadmap avança em ciclos com quality gates (ver `prompt_evo_inicial.md` e
+O roadmap avança em ciclos com quality gates (ver `docs/roadmap.md` e
 `docs/cycles/`). Cada ciclo fecha com relatório incluindo escopo, evidências,
 findings P0/P1/P2 e status (`VERIFIED`, `BLOCKED_EXTERNAL`, …).
 

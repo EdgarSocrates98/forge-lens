@@ -83,6 +83,119 @@ const REPLAY_TOOL = {
   ],
 };
 
+// mirrors GET /v1/traces/{id}/incident — a clean trace: classification
+// only, no hypotheses/suggestions/waste
+const INCIDENT_EMPTY = {
+  trace_id: 't1', project_id: 'default', session_id: null, status: 'ok',
+  failure: { trace_id: 't1', failed: false, category: 'unknown',
+             confidence: 'observed', evidence: {}, detail: '' },
+  hypotheses: [], eval_suggestions: [],
+  graph: { stats: {}, critical_path: { path: [], total_ms: 0, cycles: [] },
+           bottlenecks: [] },
+  cost: {}, waste: [], replay: { trace_id: 't1', entries: [],
+    span_count: 0, total_ms: 0, unclosed_spans: 0 },
+  bundle_version: '1.0.0',
+  export_sanitize: { redacted_keys: 0, redacted_values: 0,
+                     emails_masked: 0, dropped_content: false },
+};
+
+// a failed-trace bundle: one supported hypothesis, two candidate eval
+// suggestions and one waste finding — the content the CLI prints and
+// Studio previously never showed
+const INCIDENT = {
+  ...INCIDENT_EMPTY,
+  status: 'error',
+  failure: { trace_id: 't1', failed: true, category: 'tool_error',
+             confidence: 'observed', evidence: { span_ids: ['s2'] },
+             detail: 'tool span errored' },
+  hypotheses: [{
+    hypothesis_id: 't1:tool_error', label: 'tool_error',
+    symptom: 'primary cause candidate tool_error — 1 span(s)',
+    supporting_evidence: ['s2: exception_type:HttpError'],
+    contradictory_evidence: [],
+    missing_evidence: ['tool input/output not captured'],
+    suggested_verification: ['re-run the tool with the captured args'],
+    confidence: 'observed', status: 'supported',
+  }],
+  eval_suggestions: [
+    { kind: 'evaluator_spec', name: 'allowed_tools',
+      params: { allowed: ['search'] }, params_required: [],
+      rationale: 'restricting the allowed surface removes the failure mode',
+      evidence: { category: 'tool_error', traces: ['t1'], count: 1,
+                  recurring: false, categories: ['tool_error'] },
+      classification: 'candidate' },
+    { kind: 'evaluator_spec', name: 'tool_success', params: {},
+      params_required: [],
+      rationale: 'tool_success tracks the failing fraction directly',
+      evidence: { category: 'tool_error', traces: ['t1'], count: 1,
+                  recurring: false, categories: ['tool_error'] },
+      classification: 'candidate' },
+  ],
+  waste: [{
+    kind: 'retry_amplification', span_ids: ['s2'], evidence: {},
+    estimated_usd: null, detail: 'same tool+args repeated',
+  }],
+};
+
+// mirrors GET /v1/traces/{id}/security — one review observation
+const SECURITY = {
+  trace_id: 't1',
+  observations: [{
+    kind: 'risky_tool', severity: 'review', span_id: 's2',
+    detail: "tool name 'exec' matches the risky-verb watchlist",
+  }],
+  counts: { risky_tool: 1 }, mode: 'observer',
+};
+const SECURITY_EMPTY = { trace_id: 't1', observations: [],
+                         counts: {}, mode: 'observer' };
+
+// mirrors GET /v1/traces/{id}/efficiency
+const EFFICIENCY = {
+  trace_id: 't1', outcome: 'error', tool_calls: 3, llm_calls: 2,
+  error_spans: 1, retries_observed: 2, input_tokens: 120, output_tokens: 40,
+  usage_coverage: '2/2 llm spans', succeeded: false,
+};
+
+// mirrors GET /v1/traces/{id}/recommendations
+const RECS = {
+  trace_id: 't1',
+  recommendations: [{
+    kind: 'unstable_tool', classification: 'candidate', tool: 'search',
+    failures: 2, detail: "tool 'search' failed 2x — flag for retry review",
+  }],
+  note: 'candidate recommendations — gains require experimental validation',
+};
+const RECS_EMPTY = { trace_id: 't1', recommendations: [],
+  note: 'candidate recommendations — gains require experimental validation' };
+
+// mirrors GET /v1/traces/{id}/correlate
+const CORRELATE = {
+  trace_id: 't1',
+  correlations: [{
+    kind: 'tool_failure_cluster', classification: 'temporal_association',
+    signals: [
+      { type: 'failed_invocations', span_ids: ['s2', 's3'], value: 2 },
+      { type: 'all_invocations', span_ids: ['s2', 's3'], value: 2 },
+    ],
+    strength: { failed_invocations: 2, invocations: 2, failure_share: 1 },
+    evidence_span_ids: ['s2', 's3'],
+    caveat: 'the cluster is descriptive; a shared cause is unproven',
+    detail: "tool 'search' failed 2 of 2 invocations in this trace",
+  }],
+  signal_inventory: { spans: 2, error_spans: 2 },
+  classification: 'temporal_association',
+  note: 'correlation is not causation',
+};
+const CORRELATE_EMPTY = {
+  trace_id: 't1', correlations: [], signal_inventory: {},
+  classification: 'temporal_association',
+  note: 'correlation is not causation',
+};
+
+const SPECIALISTS = { specialists: [
+  'cost_analyst', 'failure_investigator', 'loop_detection_specialist',
+] };
+
 describe('TraceDetailComponent', () => {
   let http: HttpTestingController;
 
@@ -109,8 +222,24 @@ describe('TraceDetailComponent', () => {
     f.detectChanges();
     return f;
   };
+  /** The intel pulls fired by ngOnInit — flushed with sane defaults so
+   *  tests can reach the panels; override per-test where needed. */
+  const flushIntel = (incident: object = INCIDENT_EMPTY) => {
+    http.expectOne(r => r.url.endsWith('/traces/t1/incident')).flush(incident);
+    http.expectOne(r => r.url.endsWith('/traces/t1/security'))
+      .flush(SECURITY_EMPTY);
+    http.expectOne(r => r.url.endsWith('/traces/t1/efficiency'))
+      .flush(EFFICIENCY);
+    http.expectOne(r => r.url.endsWith('/traces/t1/recommendations'))
+      .flush(RECS_EMPTY);
+    http.expectOne(r => r.url.endsWith('/traces/t1/correlate'))
+      .flush(CORRELATE_EMPTY);
+    http.expectOne(r => r.url.endsWith('/analyze/specialists'))
+      .flush(SPECIALISTS);
+  };
   /** Flush the trace fetch + the lazy extras pulls fired by ngOnInit. */
-  const flushInit = (replay: object = REPLAY, trace: Trace = TRACE) => {
+  const flushInit = (replay: object = REPLAY, trace: Trace = TRACE,
+                   incident: object = INCIDENT_EMPTY) => {
     http.expectOne(r => r.url.endsWith('/traces/t1')
       && r.method === 'GET').flush(trace);
     http.expectOne(r => r.url.endsWith('/traces/t1/cost')).flush({});
@@ -120,6 +249,7 @@ describe('TraceDetailComponent', () => {
     http.expectOne(r => r.url.endsWith('/graph/traces/t1/analysis')).flush({});
     http.expectOne(r => r.url.endsWith('/traces/t1/eval')).flush(EVAL_GET);
     http.expectOne(r => r.url.endsWith('/traces/t1/replay')).flush(replay);
+    flushIntel(incident);
   };
   const evalPanel = (f: { nativeElement: HTMLElement }) =>
     f.nativeElement.querySelector('.panel.eval')!;
@@ -220,6 +350,7 @@ describe('TraceDetailComponent', () => {
     http.expectOne(r => r.url.endsWith('/traces/t1/eval'))
       .flush('down', { status: 500, statusText: 'Server Error' });
     http.expectOne(r => r.url.endsWith('/traces/t1/replay')).flush(REPLAY);
+    flushIntel();
     f.componentInstance.tab.set('evidence');
     f.detectChanges();
     const panel = evalPanel(f);
@@ -371,6 +502,7 @@ describe('TraceDetailComponent', () => {
     http.expectOne(r => r.url.endsWith('/traces/t1/eval')).flush(EVAL_GET);
     http.expectOne(r => r.url.endsWith('/traces/t1/replay'))
       .flush('down', { status: 500, statusText: 'Server Error' });
+    flushIntel();
     f.componentInstance.tab.set('evidence');
     f.detectChanges();
     const banner = replayPanel(f).querySelector('.err-banner')!.textContent!;
@@ -554,5 +686,139 @@ describe('TraceDetailComponent', () => {
     expect(c.replayShown()).toBe(3);
     expect(panel.querySelectorAll('.replay-table tbody tr').length).toBe(3);
     expect(panel.querySelector('tr.cur')!.textContent).toContain('span_end');
+  });
+
+  // -- incident + intelligence panels ---------------------------------
+
+  const incidentPanel = (f: { nativeElement: HTMLElement }) =>
+    f.nativeElement.querySelector('details.incident')!;
+
+  it('incident renders eval_suggestions, hypotheses and waste', () => {
+    const f = make();
+    flushInit(REPLAY, TRACE, INCIDENT);
+    f.componentInstance.tab.set('evidence');
+    f.detectChanges();
+    const panel = incidentPanel(f);
+    // summary counts the evidence buckets
+    expect(panel.querySelector('summary')!.textContent)
+      .toContain('1 hypotheses');
+    expect(panel.querySelector('summary')!.textContent)
+      .toContain('2 eval suggestion(s)');
+    expect(panel.querySelector('summary')!.textContent)
+      .toContain('1 waste');
+    // classification line
+    expect(panel.textContent).toContain('tool_error');
+    expect(panel.textContent).toContain('tool span errored');
+    // hypothesis ledger — status/confidence plus the evidence lists
+    expect(panel.textContent).toContain('supported');
+    expect(panel.textContent).toContain('s2: exception_type:HttpError');
+    expect(panel.textContent).toContain('tool input/output not captured');
+    // the CLI-visible suggestions the audit found missing in Studio
+    const rows = panel.querySelectorAll('.eval-sugg tbody tr');
+    expect(rows.length).toBe(2);
+    const sugg = panel.querySelector('.eval-sugg')!.textContent!;
+    expect(sugg).toContain('allowed_tools');
+    expect(sugg).toContain('tool_success');
+    expect(sugg).toContain('evaluator_spec');
+    expect(sugg).toContain('tool_error · 1 trace(s)');
+    // waste row
+    const waste = panel.querySelector('.waste')!.textContent!;
+    expect(waste).toContain('retry_amplification');
+    expect(waste).toContain('s2');
+    expect(waste).toContain('—');   // estimated_usd null → honest dash
+  });
+
+  it('a clean incident bundle says so instead of empty tables', () => {
+    const f = make();
+    flushInit();                 // INCIDENT_EMPTY
+    f.componentInstance.tab.set('evidence');
+    f.detectChanges();
+    const panel = incidentPanel(f);
+    expect(panel.querySelector('summary')!.textContent).toContain('clean');
+    expect(panel.querySelector('.eval-sugg')).toBeNull();
+    expect(panel.textContent).toContain('no hypotheses');
+  });
+
+  it('a failed incident pull shows unavailable, never a crash', () => {
+    const f = make();
+    http.expectOne(r => r.url.endsWith('/traces/t1')
+      && r.method === 'GET').flush(TRACE);
+    http.expectOne(r => r.url.endsWith('/traces/t1/cost')).flush({});
+    http.expectOne(r => r.url.endsWith('/traces/t1/failure')).flush({});
+    http.expectOne(r => r.url.endsWith('/traces/t1/loops'))
+      .flush({ findings: [], classification: 'none' });
+    http.expectOne(r => r.url.endsWith('/graph/traces/t1/analysis')).flush({});
+    http.expectOne(r => r.url.endsWith('/traces/t1/eval')).flush(EVAL_GET);
+    http.expectOne(r => r.url.endsWith('/traces/t1/replay')).flush(REPLAY);
+    http.expectOne(r => r.url.endsWith('/traces/t1/incident'))
+      .flush('gone', { status: 404, statusText: 'Not Found' });
+    http.expectOne(r => r.url.endsWith('/traces/t1/security'))
+      .flush(SECURITY_EMPTY);
+    http.expectOne(r => r.url.endsWith('/traces/t1/efficiency'))
+      .flush(EFFICIENCY);
+    http.expectOne(r => r.url.endsWith('/traces/t1/recommendations'))
+      .flush(RECS_EMPTY);
+    http.expectOne(r => r.url.endsWith('/traces/t1/correlate'))
+      .flush(CORRELATE_EMPTY);
+    http.expectOne(r => r.url.endsWith('/analyze/specialists'))
+      .flush(SPECIALISTS);
+    f.componentInstance.tab.set('evidence');
+    f.detectChanges();
+    const panel = incidentPanel(f);
+    expect(panel.textContent).toContain('incident bundle unavailable');
+    expect(panel.querySelector('.eval-sugg')).toBeNull();
+  });
+
+  it('security/efficiency/recommendations/correlate panels render rows', () => {
+    const f = make();
+    flushInit();
+    // the intel pulls flushed by flushInit used empties — push real data
+    // directly through the extras signal to render the row paths
+    const c = f.componentInstance;
+    c.extras.update(e => ({ ...e, security: SECURITY,
+                             recommendations: RECS, correlate: CORRELATE }));
+    c.tab.set('evidence');
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    const sec = el.querySelector('details.intel-security')!;
+    expect(sec.textContent).toContain('1 observation(s)');
+    expect(sec.textContent).toContain('risky_tool');
+    expect(sec.textContent).toContain('exec');
+    const eff = el.querySelector('details.intel-efficiency')!;
+    expect(eff.textContent).toContain('2 llm · 3 tool');
+    expect(eff.textContent).toContain('120 in · 40 out');
+    expect(eff.textContent).toContain('2/2 llm spans');
+    const rec = el.querySelector('details.intel-recs')!;
+    expect(rec.textContent).toContain('unstable_tool');
+    expect(rec.textContent).toContain('search ×2');
+    const cor = el.querySelector('details.intel-correlate')!;
+    expect(cor.textContent).toContain('tool_failure_cluster');
+    expect(cor.textContent).toContain('shared cause is unproven');
+    expect(cor.textContent).toContain('s2, s3');
+  });
+
+  it('analyze posts /v1/analyze/{specialist}/{id} with {} body', () => {
+    const f = make();
+    flushInit();
+    const c = f.componentInstance;
+    c.tab.set('evidence');
+    c.specialistSel = 'failure_investigator';
+    c.runAnalysis();
+    const req = http.expectOne(r =>
+      r.url.endsWith('/analyze/failure_investigator/t1'));
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({});
+    req.flush({
+      run_id: 'failure_investigator:t1', specialist: 'failure_investigator',
+      stop_reason: 'completed', iterations: 1, tokens_observed: 0,
+      cancelled: false,
+      findings: [{ failed: true, category: 'tool_error' }],
+    });
+    f.detectChanges();
+    const panel = (f.nativeElement as HTMLElement)
+      .querySelector('details.analyze')!;
+    expect(panel.textContent).toContain('completed');
+    expect(panel.textContent).toContain('tool_error');
+    expect(c.analysisRunning()).toBe(false);
   });
 });

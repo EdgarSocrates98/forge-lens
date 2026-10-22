@@ -60,7 +60,12 @@ def install(
     }
     if dry_run:
         return {"ok": True, "dry_run": True, "receipt": receipt}
-    write_receipt(data_dir, receipt)
+    try:
+        write_receipt(data_dir, receipt)
+    except OSError as exc:
+        # an unwritable data_dir is an install failure, not a crash —
+        # report through the same {"ok": False} channel as bad input
+        return {"ok": False, "error": f"receipt write failed: {exc}"}
     return {"ok": True, "receipt": receipt}
 
 
@@ -91,6 +96,7 @@ def uninstall(data_dir: Path, *, ts_ns: int) -> dict[str, Any]:
     the receipt itself survives so the removal is provable)."""
     r = read_receipt(data_dir)
     removed: list[str] = []
+    failed: list[str] = []
     if r:
         base = data_dir.resolve()
         files = r.get("files")
@@ -101,8 +107,27 @@ def uninstall(data_dir: Path, *, ts_ns: int) -> dict[str, Any]:
             # lexical containment is bypassable via '..' — compare
             # resolved paths only
             if fp.is_relative_to(base) and fp.is_file():
-                fp.unlink()
-                removed.append(f)
-    write_receipt(data_dir, {"action": "uninstall", "ts_ns": ts_ns,
-                             "removed": sorted(removed)})
-    return {"removed": sorted(removed), "prior_receipt": r}
+                try:
+                    fp.unlink()
+                    removed.append(f)
+                except OSError:
+                    failed.append(f)  # removal denied — record, keep going
+    try:
+        write_receipt(data_dir, {"action": "uninstall", "ts_ns": ts_ns,
+                                 "removed": sorted(removed)})
+    except OSError as exc:
+        # unwritable data_dir → the audit trail can't record the removal;
+        # report what happened instead of dying on a traceback
+        out: dict[str, Any] = {
+            "ok": False,
+            "error": f"receipt write failed: {exc}",
+            "removed": sorted(removed),
+            "prior_receipt": r,
+        }
+        if failed:
+            out["failed"] = sorted(failed)
+        return out
+    out = {"ok": True, "removed": sorted(removed), "prior_receipt": r}
+    if failed:
+        out["failed"] = sorted(failed)
+    return out

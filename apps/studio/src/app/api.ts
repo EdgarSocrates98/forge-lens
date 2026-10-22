@@ -46,7 +46,9 @@ export interface TraceFilter {
   status?: string; session_id?: string; tool?: string; q?: string;
   since?: string; until?: string;
   min_duration_ms?: number; max_duration_ms?: number;
-  limit?: number;
+  model?: string; agent?: string; host?: string;
+  min_total_tokens?: number; project_id?: string;
+  limit?: number; offset?: number;
 }
 /** Row shape returned by GET /v1/sessions (ordered last_activity_at DESC). */
 export interface SessionRow {
@@ -99,6 +101,14 @@ export interface DatasetVersionRow {
   dataset_id: string; project_id: string; version: string;
   description: string | null; case_count: number;
   created_at: string | null;
+}
+/** GET /v1/datasets/{id}/versions/{v} — the version row plus its full
+ *  ordered `cases` list (same field contract as DatasetCaseInput). */
+export interface DatasetVersionDetail {
+  dataset_id: string; project_id: string; version: string;
+  description: string | null; created_at: string | null;
+  metadata: Record<string, unknown>;
+  cases: DatasetCaseInput[];
 }
 /** PUT /v1/datasets/{id} response. */
 export interface DatasetStored {
@@ -277,6 +287,100 @@ export interface Bottleneck {
   id: string; name: string; kind: string;
   self_ms: number; duration_ms: number | null;
 }
+/** One waste/anomaly finding — inside `IncidentBundle.waste` and the
+ *  `waste` array of GET /v1/traces/{id}/cost. `estimated_usd` is null
+ *  when the finding is not token-priced. */
+export interface WasteFinding {
+  kind: string; span_ids: string[];
+  evidence: Record<string, unknown>;
+  estimated_usd: number | null; detail: string;
+}
+/** One root-cause candidate inside `IncidentBundle.hypotheses` —
+ *  `status` is 'proposed' | 'supported' | 'refuted' | 'unverifiable';
+ *  the three evidence lists are the ledger a reviewer verifies by hand. */
+export interface Hypothesis {
+  hypothesis_id: string; label: string; symptom: string;
+  supporting_evidence: string[]; contradictory_evidence: string[];
+  missing_evidence: string[]; suggested_verification: string[];
+  confidence: string; status: string;
+}
+/** One `eval_suggestions` entry inside the incident bundle — a
+ *  `candidate` evaluator spec or dataset-case sketch derived from the
+ *  failure category; `params_required` names the keys a reviewer must
+ *  still fill (SLOs live outside the traces). */
+export interface EvalSuggestion {
+  kind: string; name: string; params: Record<string, unknown>;
+  params_required: string[]; rationale: string;
+  evidence: Record<string, unknown>; classification: string;
+}
+/** GET /v1/traces/{id}/incident — the full evidence handoff, returned
+ *  as the bundle itself (no wrapper). `failure`/`cost`/`graph` are the
+ *  same payloads as their dedicated endpoints; `export_sanitize`
+ *  discloses what the export-boundary redaction touched. */
+export interface IncidentBundle {
+  trace_id: string; project_id: string; session_id: string | null;
+  status: string; failure: Record<string, unknown>;
+  hypotheses: Hypothesis[]; eval_suggestions: EvalSuggestion[];
+  graph: Record<string, unknown>; cost: Record<string, unknown>;
+  waste: WasteFinding[]; replay: ReplayTimeline;
+  bundle_version: string;
+  export_sanitize?: Record<string, unknown>;
+}
+/** One observation from GET /v1/traces/{id}/security — observer mode:
+ *  the Lens reports risky/secret-shaped evidence, it never blocks. */
+export interface SecurityObservation {
+  kind: string; severity: string; span_id: string; detail: string;
+}
+/** GET /v1/traces/{id}/security — `counts` groups observations by kind;
+ *  `mode` is always 'observer'. */
+export interface SecurityReport {
+  trace_id: string; observations: SecurityObservation[];
+  counts: Record<string, number>; mode: string;
+}
+/** GET /v1/traces/{id}/efficiency — per-trace roll-up; `usage_coverage`
+ *  is the honest "seen/total llm spans" string, not a ratio. */
+export interface EfficiencyReport {
+  trace_id: string; outcome: string; tool_calls: number;
+  llm_calls: number; error_spans: number; retries_observed: number;
+  input_tokens: number; output_tokens: number;
+  usage_coverage: string; succeeded: boolean;
+}
+/** One candidate recommendation — every claim is `candidate`-classified
+ *  because gains require experimental validation; optional fields carry
+ *  the evidence for the specific rule that fired. */
+export interface Recommendation {
+  kind: string; classification: string; detail: string;
+  spans?: string[]; tool?: string; failures?: number; tool_calls?: number;
+}
+/** GET /v1/traces/{id}/recommendations. */
+export interface RecommendationReport {
+  trace_id: string; recommendations: Recommendation[]; note: string;
+}
+/** One intra-trace correlation — `classification` is always
+ *  'temporal_association'; `strength` carries the counts/ratios for the
+ *  specific kind; `caveat` is the non-causation note to show verbatim. */
+export interface Correlation {
+  kind: string; classification: string;
+  signals: { type: string; span_ids?: string[]; value?: unknown }[];
+  strength: Record<string, unknown>;
+  evidence_span_ids: string[]; caveat: string; detail: string;
+}
+/** GET /v1/traces/{id}/correlate — `signal_inventory` counts the raw
+ *  inputs (tool/llm/error/eval spans, observed models/tools). */
+export interface CorrelateReport {
+  trace_id: string; correlations: Correlation[];
+  signal_inventory: Record<string, unknown>;
+  classification: string; note: string;
+}
+/** POST /v1/analyze/{specialist}/{trace_id} response — `findings` are
+ *  the specialist's free-shape result objects; `stop_reason` reports
+ *  why the run ended ('completed', 'timeout', 'token_budget_exceeded',
+ *  'unknown_specialist', …). */
+export interface AnalysisRun {
+  run_id: string; specialist: string; stop_reason: string;
+  iterations: number; tokens_observed: number; cancelled: boolean;
+  findings: Record<string, unknown>[];
+}
 
 const BASE_KEY = 'lens-api-base';
 const KEY_KEY = 'lens-api-key';
@@ -296,7 +400,10 @@ export class Api {
     return k ? new HttpHeaders({ 'X-Forge-Lens-Key': k }) : new HttpHeaders();
   }
 
-  listTraces(f: TraceFilter): Observable<{ items: TraceRow[] }> {
+  /** GET /v1/traces — `{items, limit, offset}` envelope; the server
+   *  echoes the (possibly clamped) paging window it actually used. */
+  listTraces(f: TraceFilter):
+    Observable<{ items: TraceRow[]; limit: number; offset: number }> {
     let p = new HttpParams().set('limit', f.limit ?? 100);
     const set = (k: string, v: string | number | undefined): void => {
       if (v !== undefined && v !== '') p = p.set(k, v);
@@ -305,12 +412,18 @@ export class Api {
     set('session_id', f.session_id);
     set('tool', f.tool);
     set('q', f.q);
+    set('model', f.model);
+    set('agent', f.agent);
+    set('host', f.host);
+    set('min_total_tokens', f.min_total_tokens);
+    set('project_id', f.project_id);
     set('since', f.since);
     set('until', f.until);
     set('min_duration_ms', f.min_duration_ms);
     set('max_duration_ms', f.max_duration_ms);
-    return this.http.get<{ items: TraceRow[] }>(`${this.base()}/traces`,
-      { params: p, headers: this.headers() });
+    set('offset', f.offset);
+    return this.http.get<{ items: TraceRow[]; limit: number; offset: number }>(
+      `${this.base()}/traces`, { params: p, headers: this.headers() });
   }
   listSessions(project_id?: string, limit?: number, offset?: number):
     Observable<SessionRow[]> {
@@ -371,6 +484,46 @@ export class Api {
   getTraceEval(id: string): Observable<TraceEval> {
     return this.get(`/traces/${id}/eval`);
   }
+  /** GET /v1/traces/{id}/incident — the whole evidence bundle
+   *  (failure + hypotheses + eval_suggestions + graph + cost + waste +
+   *  replay) in one call; the payload is already redact-exported. */
+  getIncident(id: string): Observable<IncidentBundle> {
+    return this.get(`/traces/${id}/incident`);
+  }
+  /** GET /v1/traces/{id}/security — MCP/tool-call observations
+   *  (observer mode, sorted high-severity first). */
+  getSecurityReport(id: string): Observable<SecurityReport> {
+    return this.get(`/traces/${id}/security`);
+  }
+  /** GET /v1/traces/{id}/efficiency — per-trace tokens/tools/retries
+   *  roll-up; missing signals stay honest strings/zero counts. */
+  getEfficiency(id: string): Observable<EfficiencyReport> {
+    return this.get(`/traces/${id}/efficiency`);
+  }
+  /** GET /v1/traces/{id}/recommendations — `candidate` suggestions
+   *  only; gains are never claimed server-side. */
+  getRecommendations(id: string): Observable<RecommendationReport> {
+    return this.get(`/traces/${id}/recommendations`);
+  }
+  /** GET /v1/traces/{id}/correlate — intra-trace temporal associations;
+   *  every row is non-causal evidence with its span ids. */
+  getCorrelate(id: string): Observable<CorrelateReport> {
+    return this.get(`/traces/${id}/correlate`);
+  }
+  /** GET /v1/analyze/specialists — registered specialist names,
+   *  already sorted server-side. */
+  listSpecialists(): Observable<string[]> {
+    return this.get<{ specialists: string[] }>(`/analyze/specialists`)
+      .pipe(map(r => r.specialists ?? []));
+  }
+  /** POST /v1/analyze/{specialist}/{trace_id} — runs one specialist
+   *  under server-side default budgets; the wire body is `{}` (all
+   *  fields optional; `budget`/`context`/`project_id`/`run_id` can be
+   *  passed through `body` when a caller needs them). */
+  runAnalysis(traceId: string, specialist: string,
+    body?: Record<string, unknown>): Observable<AnalysisRun> {
+    return this.post(`/analyze/${specialist}/${traceId}`, body ?? {});
+  }
   /** `evaluators` are `{name, params?}` spec objects — posted verbatim;
    *  the wire field is `trace_ids` (a list), per POST /v1/eval/run. */
   runEval(traceId: string, evaluators: EvalSpec[]): Observable<EvalReport> {
@@ -392,6 +545,12 @@ export class Api {
   }
   listDatasetVersions(id: string): Observable<DatasetVersionRow[]> {
     return this.get(`/datasets/${id}/versions`);
+  }
+  /** GET /v1/datasets/{id}/versions/{v} — the stored version with its
+   *  cases ordered by case_id. */
+  getDatasetVersion(id: string, version: string):
+    Observable<DatasetVersionDetail> {
+    return this.get(`/datasets/${id}/versions/${version}`);
   }
   /** PUT /v1/datasets/{id} — upserts the mutable metadata (name/task);
    *  `task` omitted entirely when the field is left blank. */

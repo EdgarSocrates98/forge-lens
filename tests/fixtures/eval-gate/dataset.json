@@ -1,0 +1,5 @@
+{
+  "dataset_id": "ds-demo-qa",
+  "dataset_version": "v1",
+  "evaluators": [{ "name": "error_free" }, { "name": "tool_success" }]
+}

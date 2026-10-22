@@ -95,3 +95,186 @@ jobs:
       - name: npm audit (published SDK)
         run: npm audit --audit-level=high
         working-directory: packages/forge-lens-sdk-ts
+
+  studio-e2e:
+    name: studio-e2e (playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      # playwright.config.ts webServer execs `.venv/bin/python
+      # scripts/seed_demo_data.py` and `.venv/bin/forge-lens serve` from
+      # the repo root — the project must be installed into ./.venv WITH
+      # the server extra (no dev groups needed for e2e). `.venv/bin/*`
+      # is invoked directly so nothing re-syncs this env.
+      - run: uv sync --locked --extra server --no-default-groups
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/studio/package-lock.json
+      - run: npm ci
+        working-directory: apps/studio
+      # the config's webServer does its own `npm run build`, but an
+      # explicit build fails fast with a clearer step boundary
+      - run: npm run build
+        working-directory: apps/studio
+      # all three configured projects — playwright.config.ts defines
+      # chromium + firefox + webkit; trimming to chromium here would
+      # silently redefine the suite's coverage
+      - run: npx playwright install --with-deps chromium firefox webkit
+        working-directory: apps/studio
+      - run: npx playwright test
+        working-directory: apps/studio
+      - name: playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/studio/e2e/.artifacts/
+          retention-days: 7
+
+  eval-gate:
+    name: eval-gate self-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      # eval_gate.py + seed_demo_data.py need only the installed
+      # project — no server extra, no dev groups. Steps call
+      # `.venv/bin/python` (not `uv run`) so the env stays minimal.
+      - run: uv sync --locked --no-default-groups
+      - name: seed the deterministic demo corpus
+        run: .venv/bin/python scripts/seed_demo_data.py --db build/eval-gate/lens.db
+      # committed fixtures under tests/fixtures/eval-gate/ pin the
+      # seeded trace ids — see the README there for the derivation
+      - name: gate passes on clean evidence (expect exit 0)
+        run: |
+          .venv/bin/python scripts/eval_gate.py \
+            --db build/eval-gate/lens.db \
+            --dataset tests/fixtures/eval-gate/dataset.json \
+            --baseline tests/fixtures/eval-gate/baseline.json \
+            --candidate tests/fixtures/eval-gate/candidate-pass.json \
+            --gate tests/fixtures/eval-gate/gate.json \
+            > build/eval-gate/pass-report.json
+      # the negative case proves the gate is not vacuous: the regressed
+      # cohort carries the seeded failure trace, so the exit code must
+      # be exactly 1 — any other verdict breaks the job
+      - name: gate fails on regressed cohort (assert exit 1)
+        run: |
+          code=0
+          .venv/bin/python scripts/eval_gate.py \
+            --db build/eval-gate/lens.db \
+            --dataset tests/fixtures/eval-gate/dataset.json \
+            --baseline tests/fixtures/eval-gate/baseline.json \
+            --candidate tests/fixtures/eval-gate/candidate-fail.json \
+            --gate tests/fixtures/eval-gate/gate.json \
+            > build/eval-gate/fail-report.json || code=$?
+          echo "eval_gate exit: ${code} (expected 1 = regression)"
+          test "${code}" -eq 1
+      - name: gate reports (audit evidence)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-gate-reports
+          path: build/eval-gate/
+          retention-days: 7
+
+  wheel-smoke:
+    name: wheel-smoke (install + serve degradation)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - run: uv build
+      - run: uv venv --python 3.13 /tmp/wheel-venv
+      # bare wheel install — no extras — the env a `pip install
+      # forge-lens` user actually gets
+      - run: uv pip install --python /tmp/wheel-venv/bin/python dist/*.whl
+      - name: cli smoke on the installed wheel
+        run: |
+          /tmp/wheel-venv/bin/forge-lens --version
+          /tmp/wheel-venv/bin/forge-lens init /tmp/wheel-smoke -p ci-smoke
+          /tmp/wheel-venv/bin/forge-lens doctor /tmp/wheel-smoke
+      # `serve` without the server extra must exit 2 with a clean
+      # message (cli/main.py checks `import uvicorn` first) — never a
+      # traceback, never a crash
+      - name: serve degrades cleanly without server extras
+        run: |
+          code=0
+          out=$(/tmp/wheel-venv/bin/forge-lens serve 2>&1) || code=$?
+          echo "$out"
+          echo "serve exit: ${code} (expected 2 — uvicorn not installed)"
+          test "${code}" -eq 2
+          ! echo "$out" | grep -qi "traceback"
+
+  minimal:
+    name: minimal install (no extras)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      # base deps + test group only — deliberately NOT --extra server
+      # and NOT the full dev set. Steps call `.venv/bin/*` directly:
+      # `uv run` would re-sync dev groups back into the env.
+      - run: uv sync --locked --no-default-groups --group test
+      - name: server extras are absent
+        run: |
+          for mod in fastapi uvicorn; do
+            if .venv/bin/python -c "import $mod" 2>/dev/null; then
+              echo "$mod importable — the no-extras env leaked"; exit 1
+            fi
+          done
+          echo "no fastapi/uvicorn in env"
+      - name: cli smoke
+        run: |
+          .venv/bin/forge-lens --version
+          .venv/bin/forge-lens ingest --help > /dev/null
+          .venv/bin/forge-lens init /tmp/minimal-smoke -p ci-minimal
+          .venv/bin/forge-lens doctor /tmp/minimal-smoke
+      - name: serve degrades cleanly without server extras
+        run: |
+          code=0
+          out=$(.venv/bin/forge-lens serve 2>&1) || code=$?
+          echo "$out"
+          test "${code}" -eq 2
+          ! echo "$out" | grep -qi "traceback"
+      # pytest CAN run here — but only the subset that never touches the
+      # API. The --ignore files import fastapi/uvicorn at module top
+      # (collection would error); the --deselect tests import server
+      # deps inside the test body. tests/golden|integration|e2e|bench
+      # are API-driven — excluded entirely. If a new test module starts
+      # importing server deps, this job fails loudly and the list gets
+      # re-baselined — that drift is exactly what this job guards.
+      - name: pytest — no-server-extras subset
+        run: |
+          .venv/bin/pytest tests/contract tests/unit \
+            --ignore tests/unit/test_alert_metrics.py \
+            --ignore tests/unit/test_experiments.py \
+            --ignore tests/unit/test_filters.py \
+            --ignore tests/unit/test_ops.py \
+            --ignore tests/unit/test_query_client.py \
+            --ignore tests/unit/test_security_audit.py \
+            --deselect tests/unit/test_cli.py::test_serve_binds_from_endpoint_config \
+            --deselect tests/unit/test_cli.py::test_serve_rejects_malformed_endpoint \
+            --deselect tests/unit/test_cli.py::test_serve_schemeless_endpoint_parses_host_port \
+            --deselect tests/unit/test_cli_homolog.py::test_serve_port_range_validated \
+            --deselect tests/unit/test_cli_homolog.py::test_serve_happy_path_echoes_banner \
+            --deselect tests/unit/test_security.py::test_incident_export_resanitizes \
+            --deselect tests/unit/test_storage.py::test_wall_clock_free

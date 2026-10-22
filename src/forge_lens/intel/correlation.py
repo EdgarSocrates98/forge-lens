@@ -705,9 +705,25 @@ def correlate_fleet(
     """
     applied = max(0, min(int(limit), _MAX_WINDOW))
     rows = store.list_traces(project_id=project_id, limit=applied)
+    # one batch fetch per project present in the window — a None-project
+    # window can mix tenants and each row must resolve under its OWN
+    # project_id (the same trace_id may exist under several projects)
+    by_pid: dict[str | None, list[str]] = {}
+    for r in rows:
+        rp = r.get("project_id")
+        by_pid.setdefault(
+            rp if isinstance(rp, str) else None, []
+        ).append(str(r["trace_id"]))
+    resolved: dict[tuple[str | None, str], Trace | None] = {}
+    for rp, tids in by_pid.items():
+        for tid, t in store.get_traces(rp, tids).items():
+            resolved[(rp, tid)] = t
     traces: list[Trace] = []
     for r in rows:
-        t = store.get_trace(r["trace_id"], project_id=r["project_id"])
+        rp = r.get("project_id")
+        t = resolved.get(
+            (rp if isinstance(rp, str) else None, str(r["trace_id"]))
+        )
         if t is not None:
             traces.append(t)
 

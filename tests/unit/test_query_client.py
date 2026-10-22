@@ -5,6 +5,9 @@ behavior is exercised over a real socket (same pattern as
 ``tests/e2e/test_full_flow.py::test_http_exporter_over_real_socket``);
 request shapes and error paths use ``patch("urllib.request.urlopen")``
 (same pattern as ``test_exporter_body_shape``).
+
+Marked ``network`` — the module legitimately opens loopback sockets, so
+the ``_no_network`` offline gate in ``tests/conftest.py`` skips it.
 """
 
 from __future__ import annotations
@@ -28,6 +31,8 @@ from forge_lens.core.config import LensConfig
 from forge_lens.ingest.pipeline import IngestPipeline
 from forge_lens.sdk.query import LensClient, QueryError
 from forge_lens.storage.sqlite import SQLiteTraceStore
+
+pytestmark = pytest.mark.network
 
 
 def _serve(app: Any) -> tuple[str, Any, threading.Thread]:

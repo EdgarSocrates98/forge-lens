@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -168,3 +169,55 @@ def otlp_payload() -> dict[str, Any]:
 def fixtures_dir() -> Path:
     FIXTURES.mkdir(exist_ok=True)
     return FIXTURES
+
+
+# --- offline gate ------------------------------------------------------------
+# Sibling forges hard-block sockets across the test session. Forge Lens
+# keeps the same guarantee scoped to the layers that must stay offline:
+# unit and contract tests. Integration/e2e suites legitimately open
+# loopback sockets (uvicorn in ``test_forge_e2e``/``test_full_flow``),
+# and ``tests/unit/test_query_client.py`` is marked ``network`` for the
+# same reason — it exists to prove the SDK over a real socket.
+
+_OFFLINE_DIRS = {"unit", "contract"}
+
+
+@pytest.fixture(autouse=True)
+def _no_network(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Any *new* socket inside unit/contract tests is a hard failure.
+
+    Fresh ``socket()`` construction and every DNS/connect entrypoint
+    raise; wrapping an existing fd stays allowed so in-process machinery
+    that is not network I/O (``socketpair`` self-pipes behind anyio's
+    blocking portal — the FastAPI ``TestClient`` path) keeps working.
+    Tests that genuinely need sockets carry ``@pytest.mark.network``.
+    """
+    if not set(request.path.parts) & _OFFLINE_DIRS:
+        return
+    if request.node.get_closest_marker("network"):
+        return
+
+    real_socket = socket.socket
+
+    class _GuardedSocket(real_socket):  # type: ignore[misc]
+        def __init__(
+            self, family: int = -1, type: int = -1, proto: int = -1,
+            fileno: int | None = None,
+        ) -> None:
+            if fileno is None:
+                raise AssertionError(
+                    "network access attempted during test: socket()"
+                )
+            super().__init__(family, type, proto, fileno)
+
+    def _blocked(*args: object, **kwargs: object) -> None:
+        raise AssertionError("network access attempted during test")
+
+    monkeypatch.setattr(socket, "socket", _GuardedSocket)
+    monkeypatch.setattr(socket, "create_connection", _blocked)
+    monkeypatch.setattr(socket, "getaddrinfo", _blocked)
+    monkeypatch.setattr(socket, "gethostbyname", _blocked)
+    monkeypatch.setattr(socket, "gethostbyaddr", _blocked)
+    monkeypatch.setattr(socket, "getnameinfo", _blocked)

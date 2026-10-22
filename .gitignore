@@ -33,6 +33,9 @@ prompt_inicial.md
 # Forge Lens runtime state
 .forge-lens/
 
+# Lab receipts (loop-factory harness output)
+.forge/
+
 # Local graph tooling output (not part of the shipped repo)
 graphify-out/
 

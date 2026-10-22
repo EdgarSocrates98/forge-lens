@@ -56,12 +56,13 @@ Envelope de erro: rejeições da rota respondem `{"detail": "<mensagem>"}`
 `Internal Server Error` em texto puro, sem vazar exceção nem payload.
 
 Convenções de resposta: as listas paginadas `traces`/`sessions`/`tools`
-/`experiments` retornam envelope `{items, limit, offset}` (`limit`
-clampa a 1..500 — exceto `admin/audit`, que rejeita `limit` fora de
-0..500 com `422` — `offset` clampa a ≥0 — e todo parâmetro inteiro é
-limitado a int64:
+/`experiments` (e runs de experiment) retornam envelope
+`{items, limit, offset}` — `limit` **rejeita** `<1` com `422` e clampa
+acima de 500; `offset` **rejeita** `<0` com `422`. `admin/audit` usa a
+mesma regra (`limit`/`offset` fora de faixa → `422`). Todo parâmetro
+inteiro é limitado a int64:
 `offset`/`min_total_tokens` > `2^63−1` → `422`, nunca um bind no
-driver); `datasets`, dataset versions, `admin/keys`
+driver; `datasets`, dataset versions, `admin/keys`
 e `admin/audit` retornam **array puro**; `graph/.../bottlenecks`
 retorna `{items}` sem envelope; o restante retorna objeto.
 

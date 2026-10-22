@@ -69,8 +69,9 @@
 
 ## Componentes (roadmap)
 
-- **Studio/Trace Explorer UI** (Angular) — ciclo 02, `NOT_STARTED`; as
-  APIs acima são o backend que a UI consumirá.
+- **Studio/Trace Explorer UI** (Angular) — implementado em `apps/studio`
+  sobre as APIs acima (rotas `/traces`, `/traces/:id`, `/graph`, …; E2E
+  Playwright em `docs/studio-e2e.md`).
 - **Agentic ops / loop detection / alerts** — ciclo 07.
 - **RBAC, retenção, auditoria, criptografia** — ciclo 08.
 - **Postgres/ClickHouse path + benchmarks 100k–1M spans** — ciclo 09.
