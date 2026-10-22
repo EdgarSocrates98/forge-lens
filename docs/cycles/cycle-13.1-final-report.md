@@ -50,6 +50,11 @@ Branch: `cycle-13.1/hardening-homologation` → review branch
 | R4-3 | baixa | `except (ValueError, TypeError)` largo → 64 | bug de engine reportado como usage | catch estreito: só `apply_gate` (specs) → 64; evaluate/compare → 70 | `test_gate_engine_valueerror_is_70_not_64` | fixed |
 | R4-4 | baixa | residual contraditório no threat-model | linha pré-fix sobreviveu | reescrito: amplificação eliminada, residual = eco bounded | — | fixed |
 | R4-5 | informativa | `repr()` completo antes de truncar | bound só no output | `reprlib` bounda a *renderização* | bounded-detail tests | fixed |
+| R5-1 | crítica | `auth_mode` inválido em `config.toml` fail-open | `_toml_to_config` descartava silenciosamente (`"keyz"` → `none`); só o caminho programático tinha guarda | validação estrita dos três campos de auth do TOML (`auth_mode`∈enum, `api_key` str, `auth_reads` bool) → `ValueError` com caminho do arquivo | `test_toml_invalid_auth_mode_fails_closed` (5 casos) + `test_auth_mode_unknown_fails_at_boot` | fixed |
+| R5-2 | média | matriz afirmava Playwright em CI | célula incorreta — job `studio` é build+unit | matriz + nota de cobertura corrigidas (E2E vivo local; CI = plataforma) | inspeção `ci.yml` | fixed |
+| R5-3 | baixa | evidência homolog com paths `/home/edgar/...` | `save_evidence` não sanitizava | `<work>`/`<repo>` substituídos antes de escrever; A–K regerados | `grep -rl /home/` → 0 | fixed |
+| R5-4 | baixa | `serve-dist.mjs` morria em `/%ZZ` | `decodeURIComponent` sem guarda | `try/catch` → HTTP 400 texto; traversal/fallback intactos | — | fixed |
+| R5-5 | informativa | `sys.path` global em homolog/forge-e2e | conveniência de import | pacote instalado preferido (`src/` só fallback); bridge via `importlib.util` isolado | forge-e2e verde | fixed |
 
 ## Matriz de validação
 
@@ -59,19 +64,21 @@ Branch: `cycle-13.1/hardening-homologation` → review branch
 | MCP stdio (lifecycle/tools) | ✅ CI + local | ✅ CI | ✅ CI | `test_mcp_lifecycle`/`test_mcp_tools` na matriz |
 | CLI (exit-code contract) | ✅ CI + local | ✅ CI | ✅ CI | `test_ops`/`test_cli` na matriz |
 | Installer `install.sh`/`install.ps1` | ✅ CI + e2e local | ✅ CI (forge_bootstrap suite) | ✅ CI | `test_forge_bootstrap` per-OS |
-| Studio unit (79 specs) | ✅ CI `studio` job | n/a (job roda em ubuntu) | n/a | job `studio (angular)`; `npx ng test` local |
-| Playwright browser E2E (40 specs) | ✅ chromium/firefox/webkit local + CI studio | CI studio (ubuntu) | CI studio (ubuntu) | `apps/studio/e2e` — incl. grafo 3 200 nós (§14 F) |
+| Studio unit (79 specs) | ✅ CI `studio` job + local | via CI ubuntu | via CI ubuntu | job `studio (angular)`: `npm ci` + `ng build` + `ng test` |
+| Playwright browser E2E (42 specs) | ✅ local — chromium verificado nesta rodada; suite 3-browser registrada no ciclo | **não roda em CI** (studio job = build+unit apenas) | **não roda em CI** | `apps/studio/e2e` — incl. grafo 3 200 nós (§14 F); execução local evidenciada |
 | SDK TypeScript | ✅ Node 20 + 22 | n/a | n/a | jobs `sdk-ts (node 20/22)`; `run-tests.mjs` |
 | Homologação A–K (surfaces vivas) | ✅ 11/11 PASS local | coberta pela suite de plataforma no CI | idem | `homolog/results.json` + `homolog/evidence/` |
 | Build wheel+sdist | ✅ `uv build` local + CI | via build linux | via build linux | `dist/` artifacts, LICENSE incluso |
 
 Nota honesta de cobertura: a homologação operacional (A–K) e o E2E de
-navegador rodam **ao vivo em Linux**; Windows/macOS são cobertos pela
-matriz de testes de plataforma no CI (onde as falhas de portabilidade
-reais foram encontradas e corrigidas), não por homologação viva nesses
-hosts. Esse é o desenho da suíte — as superfícies de produto sob
-homologação (serve/CLI/MCP) são exercidas por testes reais nas três
-plataformas.
+navegador rodam **ao vivo em Linux local apenas** — o CI **não executa
+Playwright** (o job `studio` cobre `npm ci`/`ng build`/`ng test`); a
+suite E2E completa nos três browsers foi executada localmente neste
+ciclo. Windows/macOS são cobertos pela matriz de testes de plataforma
+no CI (onde as falhas de portabilidade reais foram encontradas e
+corrigidas), não por homologação viva nesses hosts. Esse é o desenho
+da suíte — as superfícies de produto sob homologação (serve/CLI/MCP)
+são exercidas por testes reais nas três plataformas.
 
 ## Integração Forge
 
@@ -159,8 +166,9 @@ viva. Threat model: `docs/security/threat-model.md`.
 ## Release
 
 - **Commit final:** HEAD da branch `fix/forge-e2e-captured-span`
-  (ver `git log`; último commit de fix: r4 desta rodada — CHANGELOG
-  seção "review r4").
+  (ver `git log`; último commit de fix: r5 desta rodada — CHANGELOG
+  seção "review r5", inclui o fechamento do fail-open de
+  `auth_mode` no TOML).
 - **PR:** [#11](https://github.com/EdgarSocrates98/forge-lens/pull/11) —
   `OPEN`, `MERGEABLE`; proteção de `main` ativa (sibling-parity:
   reviews + 16 status checks + CODEOWNERS).

@@ -52,8 +52,12 @@ Cada item abaixo tem teste que reproduz o ataque e verifica o veredito
 - Escape de tenant por `project_id` omitido ou cross-project: 403
   uniforme em traces/datasets/experiments/ops/sessions/tools.
 - Modo `auth_mode` desconhecido com postura ambígua (leituras abertas +
-  escritas mortas): **corrigido** — `create_app` aborta na inicialização
-  com `ValueError`.
+  escritas mortas): **corrigido** nos três canais — `create_app` aborta
+  com `ValueError`, `FORGE_LENS_AUTH_MODE` inválido falha em
+  `load_config`, e `auth_mode` no `config.toml` agora falha fechado
+  (um typo como `"keyz"` era descartado silenciosamente → boot aberto).
+  `api_key`/`auth_reads` mistipados no TOML falham da mesma forma —
+  campo de auth nunca é descartado em silêncio.
 - Credenciais em forma de URL (`user:pass@host`), `password=x`,
   `Authorization: Basic <blob>`, `X-Api-Key: <v>` sobrevivendo à
   sanitização: **corrigido** — três padrões novos em `VALUE_PATTERNS`,

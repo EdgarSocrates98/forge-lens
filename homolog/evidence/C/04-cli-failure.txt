@@ -1,4 +1,4 @@
-$ forge-lens failure cccccccccccccccccccccccccccccccc --db /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/C/data.db
+$ forge-lens failure cccccccccccccccccccccccccccccccc --db <work>/data.db
 rc=0
 --- stdout ---
 trace cccccccccccccccccccccccccccccccc  failed=True

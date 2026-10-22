@@ -1007,15 +1007,19 @@ class TestEnvConfig:
         (data_dir / "config.toml").write_text(
             'project_id = "flat"\n'
             "retention_days = true\n"  # bool is not an int — ignored
-            "auth_mode = \"kyes\"\n"  # invalid: silently ignored (asymmetry
-            # with env vars, which hard-fail — documented behavior)
             "max_payload_bytes = 1.5\n"  # float, not int — ignored
         )
         cfg = load_config(tmp_path)
         assert cfg.project_id == "flat"
         assert cfg.retention_days == 0
-        assert cfg.auth_mode == "none"
         assert cfg.max_payload_bytes == 8 * 1024 * 1024
+
+        # auth fields are the exception to silent-drop: an invalid
+        # auth_mode must fail closed (it used to be ignored, which
+        # booted the API fully open) — same posture as env vars
+        (data_dir / "config.toml").write_text('auth_mode = "kyes"\n')
+        with pytest.raises(ValueError, match=r"invalid auth_mode"):
+            load_config(tmp_path)
 
     def test_project_dir_resolution_and_cwd_default(
         self, tmp_path: Path, clean_env: pytest.MonkeyPatch

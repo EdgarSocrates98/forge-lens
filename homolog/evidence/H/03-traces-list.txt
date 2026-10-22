@@ -1,6 +1,6 @@
-$ forge-lens traces list --db /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/H/data.db
+$ forge-lens traces list --db <work>/data.db
 rc=0
 --- stdout ---
-b1111111111111111111111111111111  2026-10-22T04:12:25  ok     spans=3    errors=0
+b1111111111111111111111111111111  2026-10-22T05:39:42  ok     spans=3    errors=0
 
 --- stderr ---

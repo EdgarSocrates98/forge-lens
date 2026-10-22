@@ -96,3 +96,32 @@ def test_toml_bool_is_not_an_int_bound(tmp_path: Path) -> None:
     # bool ignored — default preserved; the real int still applies
     assert cfg.rate_limit_per_minute != 1
     assert cfg.max_spans_per_request == 50
+
+
+def test_toml_invalid_auth_mode_fails_closed(tmp_path: Path) -> None:
+    """`auth_mode = "keyz"` (a plausible typo of "keys") must raise —
+    silently dropping it leaves auth_mode="none" and the API boots
+    fully open: a fail-open control on the primary config channel.
+    The same strictness covers non-string api_key and non-bool
+    auth_reads — a mistyped auth field never silently disables."""
+    from forge_lens.core.config import load_config
+
+    (tmp_path / ".forge-lens").mkdir()
+    cfg_path = tmp_path / ".forge-lens" / "config.toml"
+
+    for line in (
+        'auth_mode = "keyz"',   # typo of "keys" → was silently dropped
+        'auth_mode = "KEYS"',   # case-sensitive enum, not normalized
+        "auth_mode = 5",        # non-string enum value
+        "api_key = 123",        # non-string key would disable auth
+        'auth_reads = "yes"',   # non-bool flag
+    ):
+        cfg_path.write_text(f"[lens]\n{line}\n")
+        with pytest.raises(ValueError, match=r"config\.toml") as exc:
+            load_config(tmp_path)
+        # the wrapper names the file; the inner error names the field
+        assert line.split(" ")[0] in str(exc.value)
+
+    # a valid auth_mode still loads
+    cfg_path.write_text('[lens]\nauth_mode = "keys"\n')
+    assert load_config(tmp_path).auth_mode == "keys"

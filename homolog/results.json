@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-22T04:12:46.834825+00:00",
+  "generated_at": "2026-10-22T05:40:04.266676+00:00",
   "scenarios": [
     {
       "id": "A",
@@ -38,7 +38,7 @@
         {
           "name": "serve",
           "ok": true,
-          "detail": "http://127.0.0.1:54697",
+          "detail": "http://127.0.0.1:55195",
           "evidence": null
         },
         {
@@ -80,7 +80,7 @@
         {
           "name": "serve",
           "ok": true,
-          "detail": "http://127.0.0.1:36005",
+          "detail": "http://127.0.0.1:38919",
           "evidence": null
         },
         {
@@ -150,7 +150,7 @@
         {
           "name": "serve",
           "ok": true,
-          "detail": "http://127.0.0.1:50657",
+          "detail": "http://127.0.0.1:49473",
           "evidence": null
         },
         {
@@ -204,13 +204,13 @@
         {
           "name": "serve",
           "ok": true,
-          "detail": "http://127.0.0.1:36421",
+          "detail": "http://127.0.0.1:49217",
           "evidence": null
         },
         {
           "name": "GET /v1/graph/traces/{id} (1200 spans)",
           "ok": true,
-          "detail": "HTTP 200, 511 ms, 485479 bytes",
+          "detail": "HTTP 200, 500 ms, 485479 bytes",
           "evidence": "homolog/evidence/D/01-graph-1200.json"
         },
         {
@@ -246,7 +246,7 @@
         {
           "name": "serve",
           "ok": true,
-          "detail": "http://127.0.0.1:60007",
+          "detail": "http://127.0.0.1:43753",
           "evidence": null
         },
         {
@@ -280,7 +280,7 @@
         {
           "name": "serve",
           "ok": true,
-          "detail": "http://127.0.0.1:38483",
+          "detail": "http://127.0.0.1:49525",
           "evidence": null
         },
         {
@@ -332,7 +332,7 @@
         {
           "name": "serve",
           "ok": true,
-          "detail": "http://127.0.0.1:39277",
+          "detail": "http://127.0.0.1:47883",
           "evidence": null
         },
         {
@@ -440,7 +440,7 @@
         {
           "name": "serve offline",
           "ok": true,
-          "detail": "http://127.0.0.1:35699",
+          "detail": "http://127.0.0.1:40095",
           "evidence": null
         },
         {
@@ -474,7 +474,7 @@
         {
           "name": "serve auth_mode=keys",
           "ok": true,
-          "detail": "http://127.0.0.1:49885",
+          "detail": "http://127.0.0.1:50139",
           "evidence": null
         },
         {

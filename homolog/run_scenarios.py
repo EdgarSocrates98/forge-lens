@@ -39,7 +39,12 @@ EVIDENCE = HOMOLOG / "evidence"
 RESULTS_JSON = HOMOLOG / "results.json"
 REGISTRY_MD = ROOT / "docs" / "homologation.md"
 
-sys.path.insert(0, str(ROOT / "src"))
+try:
+    import forge_lens  # noqa: F401 — prefer the installed package: the
+except ImportError:   # in-process seed then exercises the same code the
+    # `forge-lens` subprocess serves. src/ is only a source-checkout
+    # fallback for contributors running without an install.
+    sys.path.insert(0, str(ROOT / "src"))
 
 from forge_lens.contracts.v1.trace import Span, SpanKind, Status, StatusCode, Trace, TraceSource  # noqa: E402
 from forge_lens.storage.sqlite import SQLiteTraceStore  # noqa: E402
@@ -118,6 +123,11 @@ class Ctx:
 
     def save_evidence(self, name: str, content: str) -> str:
         path = self.ev_dir / name
+        # Evidence is committed — absolute developer/machine paths are
+        # replaced by stable markers, same posture as the forge bridge's
+        # sanitize_for_evidence (longest prefix first).
+        content = content.replace(str(self.dir), "<work>")
+        content = content.replace(str(ROOT), "<repo>")
         path.write_text(content, encoding="utf-8")
         return str(path.relative_to(ROOT))
 

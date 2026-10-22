@@ -5,6 +5,40 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 
 ## [Unreleased]
 
+### Fixed — ciclo 13.1 (review r5)
+
+- **`config.toml` `auth_mode` fail-open fechado**: `_toml_to_config`
+  descartava silenciosamente valores inválidos (`auth_mode = "keyz"` →
+  boot em `auth_mode="none"`, com leituras e escritas abertas). Agora os
+  três campos de auth do TOML são validados estritamente e falham fechado
+  com `ValueError` — `auth_mode` deve ser string em
+  `{"none","key","keys"}`; `api_key` presente deve ser string;
+  `auth_reads` presente deve ser bool. `load_config` continua envelopando
+  com o caminho do arquivo (`invalid config file .../config.toml:
+  invalid auth_mode 'keyz'`). Programático (`create_app`), env
+  (`FORGE_LENS_AUTH_MODE`) e TOML agora rejeitam igual. Regressão em
+  `test_toml_invalid_auth_mode_fails_closed` cobre typo, caixa errada,
+  não-string e tipos errados nos três campos; threat-model atualizado
+  para afirmar o fix nos três canais.
+- **Matriz de validação do relatório corrigida**: a célula de
+  Playwright/E2E afirmava cobertura em CI, mas o job `studio` só roda
+  `npm ci`/`build`/`ng test`. A matriz agora distingue execução viva
+  local (Linux, homolog A–K + browser E2E) da cobertura de plataforma
+  via matriz CI (Windows/macOS).
+- **Evidência de homologação sem paths de desenvolvedor**:
+  `Ctx.save_evidence` sanitiza o caminho de trabalho e a raiz do repo
+  para `<work>`/`<repo>` antes de escrever artefatos texto; `grep -rl
+  /home/ homolog/evidence/` retorna zero. Cenários A–K regerados
+  (11/11 PASS).
+- **`serve-dist.mjs` não derruba em encoding malformado**:
+  `decodeURIComponent(url.pathname)` agora sob `try/catch` — `/%ZZ`
+  recebe HTTP 400 texto em vez de `URIError` não tratado que matava o
+  servidor e2e. Path traversal e fallback SPA inalterados.
+- **Higiene de imports em harness/testes**: `run_scenarios.py` prefere o
+  pacote instalado (`src/` só como fallback de checkout); `test_forge_e2e`
+  não muta mais `sys.path` global — `forge_bridge.py` é carregado via
+  `importlib.util.spec_from_file_location` como módulo isolado.
+
 ### Fixed — ciclo 13.1 (review r4)
 
 - **Relatório final no formato §17**: `docs/cycles/cycle-13.1-final-report.md`
