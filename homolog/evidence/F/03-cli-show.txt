@@ -1,4 +1,4 @@
-$ forge-lens traces show ffffffffffffffffffffffffffffffff --db /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/F/data.db
+$ forge-lens traces show ffffffffffffffffffffffffffffffff --db <work>/data.db
 rc=0
 --- stdout ---
 trace ffffffffffffffffffffffffffffffff  status=ok

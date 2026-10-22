@@ -83,13 +83,23 @@ def _toml_to_config(data: dict[str, object], base: LensConfig) -> LensConfig:
         kwargs["db_path"] = Path(v).expanduser()
     if isinstance(v := section.get("capture"), str):
         kwargs["capture"] = CaptureLevel(v)
-    if isinstance(v := section.get("api_key"), str):
+    # Auth fields are strict, never silent-dropped: a typo'd
+    # `auth_mode = "keyz"` falling back to "none" boots the API fully
+    # open — fail-open on the security boundary. Same class for a
+    # mistyped `api_key`/`auth_reads` (a non-string key or non-bool flag
+    # would silently disable the control the operator asked for).
+    # load_config wraps this ValueError with the config path.
+    if (v := section.get("api_key")) is not None:
+        if not isinstance(v, str):
+            raise ValueError(f"invalid api_key {v!r} — expected a string")
         kwargs["api_key"] = v
-    if isinstance(v := section.get("auth_reads"), bool):
+    if (v := section.get("auth_reads")) is not None:
+        if not isinstance(v, bool):
+            raise ValueError(f"invalid auth_reads {v!r} — expected a boolean")
         kwargs["auth_reads"] = v
-    if isinstance(v := section.get("auth_mode"), str) and v in {
-        "none", "key", "keys",
-    }:
+    if (v := section.get("auth_mode")) is not None:
+        if not isinstance(v, str) or v not in {"none", "key", "keys"}:
+            raise ValueError(f"invalid auth_mode {v!r}")
         kwargs["auth_mode"] = v
     if isinstance(v := section.get("retention_days"), int) and not isinstance(
         v, bool

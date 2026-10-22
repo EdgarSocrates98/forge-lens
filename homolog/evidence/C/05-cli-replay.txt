@@ -1,4 +1,4 @@
-$ forge-lens replay cccccccccccccccccccccccccccccccc --db /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/C/data.db
+$ forge-lens replay cccccccccccccccccccccccccccccccc --db <work>/data.db
 rc=0
 --- stdout ---
 trace cccccccccccccccccccccccccccccccc: 3 span(s), 6 timeline entries, 900.0ms

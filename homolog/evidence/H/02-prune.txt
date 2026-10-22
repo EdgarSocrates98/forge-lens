@@ -1,4 +1,4 @@
-$ forge-lens prune --db /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/H/data.db --days 30 -y
+$ forge-lens prune --db <work>/data.db --days 30 -y
 rc=0
 --- stdout ---
 pruned 1 trace(s)

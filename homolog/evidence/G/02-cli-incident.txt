@@ -1,4 +1,4 @@
-$ forge-lens incident a7777777777777777777777777777777 --db /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/G/data.db
+$ forge-lens incident a7777777777777777777777777777777 --db <work>/data.db
 rc=0
 --- stdout ---
 trace a7777777777777777777777777777777  status=error  failed=True

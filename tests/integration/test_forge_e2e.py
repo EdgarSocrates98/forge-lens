@@ -20,15 +20,31 @@ Para rodar: ``.venv/bin/python -m pytest tests/integration/test_forge_e2e.py -xv
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 _EXAMPLES = Path(__file__).resolve().parents[2] / "examples" / "forge-integration"
-sys.path.insert(0, str(_EXAMPLES))
 
-import forge_bridge as fb  # noqa: E402
+
+def _load_forge_bridge() -> Any:
+    """Load the example harness as a module — without mutating the
+    global ``sys.path`` (it is a single self-contained file, not a
+    package; a path insertion would leak into every test's imports)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "forge_bridge", _EXAMPLES / "forge_bridge.py"
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+fb = _load_forge_bridge()
 
 from forge_lens.contracts.provenance import Provenance  # noqa: E402
 from forge_lens.contracts.v1.trace import StatusCode  # noqa: E402

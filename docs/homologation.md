@@ -29,7 +29,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - ✅ `seed` — trace de exemplo persistido
 - ✅ `doctor` — rc=0 — evidência: `homolog/evidence/A/02-doctor.txt`
 - ✅ `capabilities (CLI)` — rc=0 — evidência: `homolog/evidence/A/03-capabilities.txt`
-- ✅ `serve` — http://127.0.0.1:54697
+- ✅ `serve` — http://127.0.0.1:55195
 - ✅ `GET /v1/health` — HTTP 200 — evidência: `homolog/evidence/A/04-health.json`
 - ✅ `GET /v1/ops/summary` — HTTP 200 — evidência: `homolog/evidence/A/05-ops-summary.json`
 - ✅ `GET /v1/capabilities` — HTTP 200 — evidência: `homolog/evidence/A/06-capabilities.json`
@@ -43,7 +43,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Status:** PASS
 
 - ✅ `seed trace` — bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-- ✅ `serve` — http://127.0.0.1:36005
+- ✅ `serve` — http://127.0.0.1:38919
 - ✅ `GET /v1/traces` — HTTP 200 — evidência: `homolog/evidence/B/01-traces.json`
 - ✅ `GET /v1/traces/{id}` — HTTP 200 — evidência: `homolog/evidence/B/02-trace-detail.json`
 - ✅ `GET /v1/traces/{id}/cost` — HTTP 200 — evidência: `homolog/evidence/B/03-cost.json`
@@ -62,7 +62,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Status:** PASS
 
 - ✅ `seed failing trace + embedded secret` — cccccccccccccccccccccccccccccccc
-- ✅ `serve` — http://127.0.0.1:50657
+- ✅ `serve` — http://127.0.0.1:49473
 - ✅ `GET /v1/traces/{id}/failure` — HTTP 200 — evidência: `homolog/evidence/C/01-failure.json`
 - ✅ `GET /v1/traces/{id}/replay` — HTTP 200 — evidência: `homolog/evidence/C/02-replay.json`
 - ✅ `GET /v1/traces/{id}/incident` — HTTP 200; segredo não vazado — evidência: `homolog/evidence/C/03-incident.json`
@@ -76,8 +76,8 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Status:** PASS
 
 - ✅ `seed 1200-span trace` — 1200 spans
-- ✅ `serve` — http://127.0.0.1:36421
-- ✅ `GET /v1/graph/traces/{id} (1200 spans)` — HTTP 200, 511 ms, 485479 bytes — evidência: `homolog/evidence/D/01-graph-1200.json`
+- ✅ `serve` — http://127.0.0.1:49217
+- ✅ `GET /v1/graph/traces/{id} (1200 spans)` — HTTP 200, 500 ms, 485479 bytes — evidência: `homolog/evidence/D/01-graph-1200.json`
 - ✅ `GET .../analysis` — HTTP 200 — evidência: `homolog/evidence/D/02-graph-analysis.json`
 - ✅ `GET .../critical-path` — HTTP 200 — evidência: `homolog/evidence/D/03-critical-path.json`
 
@@ -90,7 +90,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Status:** PASS
 
 - ✅ `seed baseline ok + candidato regressado` — baseline=e000 cand=e111
-- ✅ `serve` — http://127.0.0.1:60007
+- ✅ `serve` — http://127.0.0.1:43753
 - ✅ `POST /v1/eval/run` — HTTP 200 — evidência: `homolog/evidence/E/01-eval-run.json`
 - ✅ `POST /v1/eval/compare` — HTTP 200 — evidência: `homolog/evidence/E/02-eval-compare.json`
 - ✅ `CLI eval` — rc=0 — evidência: `homolog/evidence/E/03-cli-eval.txt`
@@ -103,7 +103,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Esperado:** API, CLI, MCP e incident export exibem conteúdo mascarado; contadores de sanitização são declarados.
 - **Status:** PASS
 
-- ✅ `serve` — http://127.0.0.1:38483
+- ✅ `serve` — http://127.0.0.1:49525
 - ✅ `POST /v1/traces (ingest com segredos)` — HTTP 200 — evidência: `homolog/evidence/F/00-ingest-response.json`
 - ✅ `API GET /v1/traces/{id}` — HTTP 200; vazaram: nenhum — evidência: `homolog/evidence/F/01-api-trace.json`
 - ✅ `API incident export` — HTTP 200; vazaram: nenhum — evidência: `homolog/evidence/F/02-api-incident.json`
@@ -117,7 +117,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Status:** PASS
 
 - ✅ `seed failing trace` — a7777777777777777777777777777777
-- ✅ `serve` — http://127.0.0.1:39277
+- ✅ `serve` — http://127.0.0.1:47883
 - ✅ `GET /v1/traces/{id}/incident` — HTTP 200; chaves=['bundle_version', 'cost', 'eval_suggestions', 'export_sanitize', 'failure', 'graph', 'hypotheses', 'project_id', 'replay', 'session_id', 'status', 'trace_id', 'waste'] — evidência: `homolog/evidence/G/01-incident-bundle.json`
 - ✅ `CLI incident` — rc=0 — evidência: `homolog/evidence/G/02-cli-incident.txt`
 
@@ -151,7 +151,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Status:** PASS
 
 - ✅ `init offline` — rc=0 — evidência: `homolog/evidence/J/01-init-offline.txt`
-- ✅ `serve offline` — http://127.0.0.1:35699
+- ✅ `serve offline` — http://127.0.0.1:40095
 - ✅ `GET /v1/traces offline` — HTTP 200
 - ✅ `MCP offline`
 
@@ -162,7 +162,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Status:** PASS
 
 - ✅ `seed 2 keys (reader + writer escopada a proj-a)`
-- ✅ `serve auth_mode=keys` — http://127.0.0.1:49885
+- ✅ `serve auth_mode=keys` — http://127.0.0.1:50139
 - ✅ `POST sem key → 401` — HTTP 401 — evidência: `homolog/evidence/K/01-post-no-key.json`
 - ✅ `POST key inválida → 401` — HTTP 401 — evidência: `homolog/evidence/K/02-post-bad-key.json`
 - ✅ `POST reader (sem role writer) → 403` — HTTP 403 — evidência: `homolog/evidence/K/03-post-reader.json`

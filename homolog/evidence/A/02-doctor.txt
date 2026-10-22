@@ -1,9 +1,9 @@
-$ forge-lens doctor . --db /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/A/data.db
+$ forge-lens doctor . --db <work>/data.db
 rc=0
 --- stdout ---
 [ok] python>=3.11 3.14.7
 [ok] config parseable 
-[ok] data dir exists /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/A/.forge-lens
+[ok] data dir exists <work>/.forge-lens
 [ok] sqlite store readable schema=1.0.0
        traces=1 spans=3 db=131072B
 [ok] server extras installed 

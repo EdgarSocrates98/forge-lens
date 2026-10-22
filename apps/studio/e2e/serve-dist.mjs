@@ -68,7 +68,16 @@ const server = createServer(async (req, res) => {
     return;
   }
   // static file, else SPA fallback to index.html (Angular routes)
-  const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+  let rel;
+  try {
+    rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+  } catch {
+    // malformed percent-encoding (`/%ZZ`) throws URIError — an
+    // unhandled rejection here kills the e2e server process
+    res.writeHead(400, { 'content-type': 'text/plain' });
+    res.end('malformed url encoding');
+    return;
+  }
   let file = path.resolve(ROOT, rel || 'index.html');
   // prefix check alone would let a sibling dir "browser-evil" slip past
   if (file !== ROOT && !file.startsWith(ROOT + path.sep)) {
