@@ -501,6 +501,20 @@ def create_app(
             raise _reject_request(422, f"{field}: out of int64 range")
         return value
 
+    def _page_params(limit: int, offset: int) -> tuple[int, int]:
+        """Pagination bounds shared by the list routes: ``limit<1`` and
+        ``offset<0`` are malformed input — a 422, never a silent clamp.
+        ``limit`` over the cap still clamps to 500 (bounding a request
+        ≠ malformed input); ``offset`` stays int64-checked like every
+        integer bind."""
+        if limit < 1:
+            raise _reject_request(422, "limit: positive integer required")
+        if offset < 0:
+            raise _reject_request(
+                422, "offset: non-negative integer required"
+            )
+        return min(limit, 500), _query_i64(offset, "offset")
+
     @app.get(f"/{API_VERSION}/traces", dependencies=read_deps)
     async def list_traces(
         request: Request,
@@ -520,11 +534,9 @@ def create_app(
         limit: int = 50,
         offset: int = 0,
     ) -> dict[str, Any]:
-        limit = max(1, min(limit, 500))
-        offset = _query_i64(max(0, offset), "offset")  # clamped low,
-        # bounded high — a huge offset is malformed, not "empty page"
         # validation before any store call — malformed input is a 422
         # here, never a sqlite bind or an unhandled driver error
+        limit, offset = _page_params(limit, offset)
         if status is not None and status not in _TRACE_STATUSES:
             raise _reject_request(
                 422, f"status: one of {list(_TRACE_STATUSES)}"
@@ -580,8 +592,7 @@ def create_app(
     ) -> dict[str, Any]:
         """Session roll-up — one row per observed session_id, newest
         activity first (see ``SQLiteTraceStore.list_sessions``)."""
-        limit = max(1, min(limit, 500))
-        offset = _query_i64(max(0, offset), "offset")
+        limit, offset = _page_params(limit, offset)
         pid = _resolve_pid(request, project_id)
         with METRICS.timer(M_QUERY_LATENCY):
             items = get_store().list_sessions(pid, limit=limit, offset=offset)
@@ -596,8 +607,7 @@ def create_app(
     ) -> dict[str, Any]:
         """Fleet-wide tool roll-up — calls/traces/errors/avg duration
         per ``tool.name`` (see ``SQLiteTraceStore.list_tools``)."""
-        limit = max(1, min(limit, 500))
-        offset = _query_i64(max(0, offset), "offset")
+        limit, offset = _page_params(limit, offset)
         pid = _resolve_pid(request, project_id)
         with METRICS.timer(M_QUERY_LATENCY):
             items = get_store().list_tools(pid, limit=limit, offset=offset)
@@ -628,6 +638,22 @@ def create_app(
         if trace is None:
             raise HTTPException(status_code=404, detail="trace not found")
         return trace
+
+    def _get_traces_or_404(
+        trace_ids: list[str], project_id: str | None, request: Request
+    ) -> list[Any]:
+        """Batch twin of ``_get_trace_or_404``: one scope check, one
+        store round-trip for the whole id list — then the same 404 on
+        the first missing id, in input order (duplicates preserved)."""
+        _require_scope(request, project_id or cfg.project_id)
+        got = get_store().get_traces(project_id or cfg.project_id, trace_ids)
+        traces: list[Any] = []
+        for tid in trace_ids:
+            t = got.get(tid)
+            if t is None:
+                raise HTTPException(status_code=404, detail="trace not found")
+            traces.append(t)
+        return traces
 
     def _registry() -> Any:
         return _pricing
@@ -680,17 +706,21 @@ def create_app(
 
         pid = project_id or cfg.project_id
         _require_scope(request, pid)
-        lim = max(1, min(limit, 500))
+        if limit < 1:
+            raise _reject_request(422, "limit: positive integer required")
+        lim = min(limit, 500)
         # fetch one extra row — its existence is the truncation evidence
         rows = get_store().list_traces(
             project_id=pid, session_id=session_id, limit=lim + 1
         )
         truncated = len(rows) > lim
+        store = get_store()
+        page = rows[:lim]
+        got = store.get_traces(pid, [r["trace_id"] for r in page])
+        # rows deleted between list and fetch resolve to None — skipped,
+        # never invented
         traces = [
-            t
-            for r in rows[:lim]
-            if (t := get_store().get_trace(r["trace_id"], project_id=pid))
-            is not None
+            t for r in page if (t := got.get(r["trace_id"])) is not None
         ]
         graph = build_session_graph(session_id, pid, traces)
         out = graph.model_dump(mode="json")
@@ -901,7 +931,7 @@ def create_app(
         body: dict[str, Any], request: Request, pid: str | None
     ) -> list[Any]:
         ids = _eval_trace_ids(body)
-        return [_get_trace_or_404(tid, pid, request) for tid in ids]
+        return _get_traces_or_404(ids, pid, request)
 
     async def _eval_body(request: Request) -> dict[str, Any]:
         _check_declared_size(request, cfg.max_payload_bytes, _reject_request)
@@ -974,11 +1004,11 @@ def create_app(
         b_pid = _resolve_pid(request, b_pid)
         result = compare_runs(
             evaluate_traces(
-                [_get_trace_or_404(t, a_pid, request) for t in a_ids],
+                _get_traces_or_404(a_ids, a_pid, request),
                 specs, dataset=a_dataset,
             ),
             evaluate_traces(
-                [_get_trace_or_404(t, b_pid, request) for t in b_ids],
+                _get_traces_or_404(b_ids, b_pid, request),
                 specs, dataset=b_dataset,
             ),
         )
@@ -1029,13 +1059,15 @@ def create_app(
         if "trace_ids" in body:
             ids = _eval_trace_ids(body, "trace_ids")
         if ids is not None:
-            traces = [t for i in ids[:_MAX_EVAL_TRACES]
-                      if (t := store.get_trace(i, project_id=pid)) is not None]
+            wanted = ids[:_MAX_EVAL_TRACES]
+            got = store.get_traces(pid, wanted)
+            traces = [t for i in wanted if (t := got.get(i)) is not None]
             missing = sorted(set(ids) - {t.trace_id for t in traces})
         else:
             rows = store.list_traces(project_id=pid, limit=_MAX_EVAL_TRACES)
+            got = store.get_traces(pid, [r["trace_id"] for r in rows])
             traces = [t for r in rows
-                      if (t := store.get_trace(r["trace_id"], project_id=pid))]
+                      if (t := got.get(r["trace_id"])) is not None]
             missing = []
         out = fleet_efficiency(traces)
         if missing:
@@ -1108,10 +1140,13 @@ def create_app(
         def _cohort(
             ids: list[str], pid: str | None
         ) -> tuple[list[Any], list[str]]:
+            # one batch fetch per side; per-id verdicts preserved —
+            # a duplicated missing id still lists twice
+            got = store.get_traces(pid, ids)
             traces: list[Any] = []
             missing: list[str] = []
             for i in ids:
-                t = store.get_trace(i, project_id=pid)
+                t = got.get(i)
                 if t is None:
                     missing.append(i)
                 else:
@@ -1406,8 +1441,7 @@ def create_app(
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
-        limit = max(1, min(limit, 500))
-        offset = _query_i64(max(0, offset), "offset")
+        limit, offset = _page_params(limit, offset)
         pid = _resolve_pid(request, project_id)
         with METRICS.timer(M_QUERY_LATENCY):
             items = get_store().list_experiments(
@@ -1430,8 +1464,7 @@ def create_app(
 
         ``limit``/``offset`` page the embedded ``runs`` list (bounded at
         500 like every other collection)."""
-        limit = max(1, min(limit, 500))
-        offset = _query_i64(max(0, offset), "offset")
+        limit, offset = _page_params(limit, offset)
         pid = _resolve_pid(request, project_id)
         store = get_store()
         exp = store.get_experiment(experiment_id, pid)
@@ -1490,11 +1523,11 @@ def create_app(
         b_ids = (cohorts.get("b") or {}).get("trace_ids") or []
         result = compare_runs(
             evaluate_traces(
-                [_get_trace_or_404(t, pid, request) for t in a_ids],
+                _get_traces_or_404(a_ids, pid, request),
                 specs, dataset=label,
             ),
             evaluate_traces(
-                [_get_trace_or_404(t, pid, request) for t in b_ids],
+                _get_traces_or_404(b_ids, pid, request),
                 specs, dataset=label,
             ),
         )
@@ -1633,9 +1666,13 @@ def create_app(
         if ident is not None and ident.projects:
             raise _reject_request(
                 403, "audit trail requires an unscoped admin key")
-        if limit > 500 or limit < 0:
-            raise _reject_request(422, "limit: 0..500")
-        offset = _query_i64(max(0, offset), "offset")
+        if limit > 500 or limit < 1:
+            raise _reject_request(422, "limit: 1..500")
+        if offset < 0:
+            raise _reject_request(
+                422, "offset: non-negative integer required"
+            )
+        offset = _query_i64(offset, "offset")
         return get_store().list_audit(
             action=action, actor=actor, limit=limit, offset=offset
         )

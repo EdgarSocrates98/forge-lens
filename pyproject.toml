@@ -70,6 +70,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Vendored shared bootstrap — canonical copy in forge-doctor-api is the lint target.
 "scripts/forge_bootstrap.py" = ["ALL"]
+# Lab emitter parses its own just-written junit artifact — not untrusted input.
+"scripts/lab/forge_lens_lab.py" = ["S314"]
 "tests/**" = ["S101", "PT011", "PTH", "S105", "S106"]
 "examples/**" = ["S101", "T201"]
 # Homologation runner — subprocess/urllib against the local install is the point.
@@ -83,6 +85,7 @@ markers = [
     "e2e: end-to-end scenarios",
     "contract: contract and schema tests",
     "benchmark: benchmark smoke tests (tests/bench)",
+    "network: legitimately opens sockets (exempt from the offline gate)",
 ]
 
 [tool.coverage.run]

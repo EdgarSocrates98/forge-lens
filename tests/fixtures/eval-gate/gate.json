@@ -1,0 +1,6 @@
+{
+  "metrics": {
+    "error_free/no_error_spans": { "min_pass_rate_b": 1.0 }
+  },
+  "fail_on_significant_regression": true
+}

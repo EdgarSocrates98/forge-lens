@@ -248,8 +248,22 @@ def _build_window(
     limit: int,
 ) -> _Window:
     """Scan at most ``limit`` recent traces once; derive every window
-    aggregate in a single pass (one ``get_trace`` per row)."""
+    aggregate in a single pass (batched fetch — one query per project
+    group, not one per row)."""
     rows = store.list_traces(project_id=project_id, limit=limit)
+    # each row must resolve under its OWN project_id — the same
+    # trace_id may exist under several projects when project_id=None;
+    # batch per project group so the window isn't one query per row
+    by_pid: dict[str | None, list[str]] = {}
+    for row in rows:
+        rp = row.get("project_id")
+        by_pid.setdefault(
+            rp if isinstance(rp, str) else None, []
+        ).append(str(row.get("trace_id", "")))
+    resolved: dict[tuple[str | None, str], Trace | None] = {}
+    for rp, tids in by_pid.items():
+        for tid, t in store.get_traces(rp, tids).items():
+            resolved[(rp, tid)] = t
     durations: list[float] = []
     error_traces = 0
     token_total = 0
@@ -258,12 +272,12 @@ def _build_window(
     for row in rows:
         if row.get("status") == "error":
             error_traces += 1
-        # fetch the copy this row actually names — the same trace_id may
-        # exist under several projects when project_id=None
         row_pid = row.get("project_id")
-        trace: Trace | None = store.get_trace(
-            str(row.get("trace_id", "")),
-            project_id=row_pid if isinstance(row_pid, str) else None,
+        trace = resolved.get(
+            (
+                row_pid if isinstance(row_pid, str) else None,
+                str(row.get("trace_id", "")),
+            )
         )
         if trace is None:
             # deleted between list and fetch — skip; never invent it

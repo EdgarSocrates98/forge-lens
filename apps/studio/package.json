@@ -15,6 +15,9 @@
   },
   "private": true,
   "packageManager": "npm@10.9.8",
+  "overrides": {
+    "vite": "^8.3.5"
+  },
   "dependencies": {
     "@angular/common": "^22.2.0",
     "@angular/compiler": "^22.2.0",

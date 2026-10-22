@@ -17,5 +17,23 @@
     "-m",
     "forge_lens",
     "install"
-  ]
+  ],
+  "lab": {
+    "command": [
+      "{python}",
+      "scripts/lab/forge_lens_lab.py",
+      "--checkout",
+      "{checkout}",
+      "--mode",
+      "{mode}",
+      "--result-out",
+      "{receipt}"
+    ],
+    "receipt": ".forge/lab-result.json",
+    "modes": [
+      "A"
+    ],
+    "suite": "forge-lens-lab",
+    "timeout_s": 300
+  }
 }

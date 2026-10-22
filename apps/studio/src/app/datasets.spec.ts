@@ -296,6 +296,66 @@ describe('DatasetsComponent', () => {
     expect(banner).toContain('gone-1');
   });
 
+  it('opens a version and renders its stored cases', async () => {
+    const f = TestBed.createComponent(DatasetsComponent);
+    f.detectChanges();
+    listReq(http).flush([mkDs('ds-1')]);
+    await f.whenStable();
+    const el = f.nativeElement as HTMLElement;
+    btn(el, 'ds-1')?.click();
+    detailReq(http, 'ds-1').flush({ ...mkDs('ds-1'), metadata: {} });
+    versionsReq(http, 'ds-1').flush([mkVer('v1'), mkVer('v2')]);
+    await f.whenStable();
+    // clicking the version row fetches GET /datasets/{id}/versions/{v}
+    btn(el, 'v1')?.click();
+    const verReq = http.expectOne(r => r.method === 'GET'
+      && r.url.endsWith('/datasets/ds-1/versions/v1'));
+    // mirrors SQLiteTraceStore.get_dataset_version — version fields +
+    // the cases list ordered by case_id
+    verReq.flush({
+      dataset_id: 'ds-1', project_id: 'default', version: 'v1',
+      description: 'first cut', created_at: '2026-03-02T10:00:00Z',
+      metadata: {}, cases: [
+        { case_id: 'c1', input: { q: 'hi' }, expected: { a: 'hello' },
+          allowed_tools: ['search'], constraints: {}, rubric: {} },
+        { case_id: 'c2', input: { q: 'bye' }, expected: { a: 'bye' },
+          allowed_tools: [], constraints: {}, rubric: { strict: true } },
+      ],
+    });
+    await f.whenStable();
+    const cases = el.querySelector('table.cases')!;
+    const trs = cases.querySelectorAll('tbody tr');
+    expect(trs.length).toBe(2);
+    expect(trs[0].textContent).toContain('c1');
+    expect(trs[0].textContent).toContain('"hi"');
+    expect(trs[0].textContent).toContain('"hello"');
+    expect(trs[0].textContent).toContain('search');
+    expect(trs[1].textContent).toContain('c2');
+    expect(trs[1].textContent).toContain('"strict"');
+  });
+
+  it('surfaces the error banner when a version fetch 404s', async () => {
+    const f = TestBed.createComponent(DatasetsComponent);
+    f.detectChanges();
+    listReq(http).flush([mkDs('ds-1')]);
+    await f.whenStable();
+    const el = f.nativeElement as HTMLElement;
+    btn(el, 'ds-1')?.click();
+    detailReq(http, 'ds-1').flush({ ...mkDs('ds-1'), metadata: {} });
+    versionsReq(http, 'ds-1').flush([mkVer('v1')]);
+    await f.whenStable();
+    btn(el, 'v1')?.click();
+    http.expectOne(r => r.method === 'GET'
+      && r.url.endsWith('/datasets/ds-1/versions/v1'))
+      .flush({ detail: "dataset version 'ds-1'@'v1' not found" },
+        { status: 404, statusText: 'Not Found' });
+    await f.whenStable();
+    const banner = el.querySelector('.err-banner')?.textContent ?? '';
+    expect(banner).toContain('cannot load version');
+    expect(banner).toContain('not found');
+    expect(el.querySelector('table.cases')).toBeNull();
+  });
+
   it('filters rows by id or name substring', async () => {
     const f = TestBed.createComponent(DatasetsComponent);
     f.detectChanges();

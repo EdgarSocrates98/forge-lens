@@ -458,18 +458,20 @@ def test_otlp_malformed_containers_not_500(client: TestClient) -> None:
         assert r.status_code in (200, 422), (payload, r.text)
 
 
-def test_negative_offset_clamped_to_zero(
+def test_negative_offset_rejected_422(
     client: TestClient, synthetic_trace: Trace
 ) -> None:
-    """offset is clamped like limit — negative input reads as 0, and the
-    response echoes the clamped value."""
+    """Negative pagination input is malformed → 422, never a silent
+    clamp (the route 422s every other malformed parameter too)."""
     envelope = TraceIngest(traces=[synthetic_trace]).model_dump(mode="json")
     client.post("/v1/traces", json=envelope)
     r = client.get("/v1/traces", params={"offset": -5})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["offset"] == 0
-    assert len(body["items"]) == 1
+    assert r.status_code == 422
+    assert isinstance(r.json()["detail"], str)
+    r = client.get("/v1/traces", params={"limit": -5})
+    assert r.status_code == 422
+    r = client.get("/v1/traces", params={"limit": 0})
+    assert r.status_code == 422
 
 
 # -- Cycle 03/04 endpoints ---------------------------------------------------

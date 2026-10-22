@@ -7,6 +7,7 @@ later cycle) can implement it without touching the pipeline.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, Protocol
 
 from forge_lens.contracts.v1.trace import Trace
@@ -28,6 +29,20 @@ class TraceStore(Protocol):
         ...
 
     def get_trace(self, trace_id: str, project_id: str | None = None) -> Trace | None: ...
+
+    def get_traces(
+        self, project_id: str | None, trace_ids: Iterable[str]
+    ) -> dict[str, Trace | None]:
+        """Batch ``get_trace`` — one round-trip for many ids.
+
+        Returns one entry per distinct id: the hydrated ``Trace``, or
+        ``None`` when the id is absent (or unencodable — the same
+        "absent" verdict ``get_trace`` gives lone surrogates).
+        ``project_id=None`` keeps ``get_trace``'s wildcard semantics:
+        each id resolves to the row with the latest ``last_seen_ns``
+        across projects.
+        """
+        ...
 
     def list_traces(
         self,

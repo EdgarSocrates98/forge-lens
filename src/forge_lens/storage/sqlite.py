@@ -22,6 +22,7 @@ import json
 import math
 import sqlite3
 import threading
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -522,11 +523,33 @@ class SQLiteTraceStore:
         ended_ns = _ns(trace.ended_at)
         seen_ns = max(started_ns, ended_ns) if ended_ns is not None else started_ns
         with self._lock, self._conn:
+            # One prefetch stands in for the per-span PK SELECT: the
+            # dedup/merge checks below only need the stored row per
+            # span_id, and this snapshot is live state — it shares the
+            # transaction the loop writes in, so nothing mutates it
+            # underneath us. O(1) queries per trace instead of O(spans).
+            prefetched: dict[str, sqlite3.Row] = {
+                r["span_id"]: r
+                for r in self._conn.execute(
+                    "SELECT * FROM spans WHERE project_id=? AND trace_id=?",
+                    (trace.project_id, trace.trace_id),
+                ).fetchall()
+            }
+            delivered: set[str] = set()
             for span in trace.spans:
-                row = self._conn.execute(
-                    "SELECT * FROM spans WHERE project_id=? AND trace_id=? AND span_id=?",
-                    (trace.project_id, span.trace_id, span.span_id),
-                ).fetchone()
+                if span.span_id in delivered:
+                    # a second occurrence of a span_id inside one trace
+                    # must see the row its predecessor just wrote —
+                    # the prefetch predates it, so re-read live (exactly
+                    # the row the old per-span SELECT would have seen)
+                    row = self._conn.execute(
+                        "SELECT * FROM spans WHERE project_id=? AND trace_id=? "
+                        "AND span_id=?",
+                        (trace.project_id, span.trace_id, span.span_id),
+                    ).fetchone()
+                else:
+                    row = prefetched.get(span.span_id)
+                delivered.add(span.span_id)
                 if row is None:
                     self._insert_span(trace, span, _span_digest(span))
                     inserted += 1
@@ -906,6 +929,26 @@ class SQLiteTraceStore:
             integrity_flags=flags_raw,
         )
 
+    def _trace_from_rows(self, trow: sqlite3.Row, srows: list[sqlite3.Row]) -> Trace:
+        """Hydrate a Trace from its traces row + ordered span rows —
+        the one hydration path shared by ``get_trace``/``get_traces``."""
+        return Trace(
+            trace_id=trow["trace_id"],
+            project_id=trow["project_id"],
+            session_id=trow["session_id"],
+            root_span_id=trow["root_span_id"],
+            started_at=from_unix_nano(trow["started_ns"]),
+            ended_at=_dt(trow["ended_ns"]),
+            status=Status(
+                code=StatusCode(trow["status_code"]),
+                message=trow["status_message"],
+            ),
+            source=TraceSource.model_validate_json(trow["source_json"]),
+            resource_attributes=json.loads(trow["resource_attributes_json"] or "{}"),
+            spans=[self._span_from_row(r) for r in srows],
+            provenance=Provenance(trow["provenance"]),
+        )
+
     def get_trace(self, trace_id: str, project_id: str | None = None) -> Trace | None:
         # a str carrying lone surrogates (argv surrogateescape, WTF-8
         # request bodies) raises UnicodeEncodeError in the driver — an
@@ -930,23 +973,81 @@ class SQLiteTraceStore:
                 "ORDER BY started_ns, span_id",
                 (trow["project_id"], trace_id),
             ).fetchall()
-        spans = [self._span_from_row(r) for r in srows]
-        return Trace(
-            trace_id=trace_id,
-            project_id=trow["project_id"],
-            session_id=trow["session_id"],
-            root_span_id=trow["root_span_id"],
-            started_at=from_unix_nano(trow["started_ns"]),
-            ended_at=_dt(trow["ended_ns"]),
-            status=Status(
-                code=StatusCode(trow["status_code"]),
-                message=trow["status_message"],
-            ),
-            source=TraceSource.model_validate_json(trow["source_json"]),
-            resource_attributes=json.loads(trow["resource_attributes_json"] or "{}"),
-            spans=spans,
-            provenance=Provenance(trow["provenance"]),
-        )
+        return self._trace_from_rows(trow, srows)
+
+    # SQLite's SQLITE_MAX_VARIABLE_NUMBER is 999 on older builds —
+    # a 500-id chunk stays under it with headroom for extra binds.
+    _BATCH_CHUNK = 500
+
+    def get_traces(
+        self, project_id: str | None, trace_ids: Iterable[str]
+    ) -> dict[str, Trace | None]:
+        """Batch ``get_trace``: one ``traces`` query plus one grouped
+        ``spans`` query per ≤500-id chunk, all under a single lock
+        acquisition — the cohort/window endpoints' N+1 killer.
+
+        Duplicate ids collapse into one entry; callers keep their own
+        input list when per-id order/duplicates matter. Absent (or
+        unencodable) ids map to ``None`` — hydration is identical to
+        ``get_trace`` and missing data stays missing.
+        """
+        out: dict[str, Trace | None] = {}
+        ids: list[str] = []
+        for tid in trace_ids:
+            if tid not in out:
+                out[tid] = None
+                # an unencodable id stays out of the IN list — the same
+                # "absent" verdict get_trace gives lone surrogates
+                if _utf8_ok(tid):
+                    ids.append(tid)
+        if not ids or not _utf8_ok(project_id):
+            return out
+        with self._lock:
+            for lo in range(0, len(ids), self._BATCH_CHUNK):
+                chunk = ids[lo : lo + self._BATCH_CHUNK]
+                ph = ", ".join("?" for _ in chunk)
+                if project_id is not None:
+                    trows = self._conn.execute(
+                        "SELECT * FROM traces WHERE project_id=? "
+                        f"AND trace_id IN ({ph})",
+                        (project_id, *chunk),
+                    ).fetchall()
+                else:
+                    # wildcard — ORDER BY last_seen_ns DESC so the first
+                    # row per trace_id wins, mirroring get_trace's LIMIT 1
+                    trows = self._conn.execute(
+                        f"SELECT * FROM traces WHERE trace_id IN ({ph}) "
+                        "ORDER BY last_seen_ns DESC",
+                        tuple(chunk),
+                    ).fetchall()
+                winners: dict[str, sqlite3.Row] = {}
+                for r in trows:
+                    cur = winners.get(r["trace_id"])
+                    if cur is None or r["last_seen_ns"] > cur["last_seen_ns"]:
+                        winners[r["trace_id"]] = r
+                if not winners:
+                    continue
+                # spans hydrate per winning (project_id, trace_id):
+                # grouped by project so a wildcard lookup never mixes
+                # tenants — same-trace-id rows under different projects
+                # stay independent
+                by_pid: dict[str, list[str]] = {}
+                for w in winners.values():
+                    by_pid.setdefault(w["project_id"], []).append(w["trace_id"])
+                spans_by_tid: dict[str, list[sqlite3.Row]] = {}
+                for pid, want in by_pid.items():
+                    ph2 = ", ".join("?" for _ in want)
+                    for r in self._conn.execute(
+                        f"SELECT * FROM spans WHERE project_id=? AND trace_id "
+                        f"IN ({ph2}) ORDER BY started_ns, span_id",
+                        (pid, *want),
+                    ).fetchall():
+                        spans_by_tid.setdefault(r["trace_id"], []).append(r)
+                for tid, trow in winners.items():
+                    out[tid] = self._trace_from_rows(
+                        trow, spans_by_tid.get(tid, [])
+                    )
+        return out
 
     def list_traces(
         self,

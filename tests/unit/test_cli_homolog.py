@@ -13,14 +13,21 @@ por ao menos um teste de sucesso ou de erro):
     import-otel <file> [--db] [--project]
     traces list [--db --project --status --session --tool --model --agent
                  --host --min-tokens --q --since --until
-                 --min-duration-ms --max-duration-ms --limit --json]
+                 --min-duration-ms --max-duration-ms --limit --offset --json]
     traces show <trace_id> [--db --project --json]
     graph|cost|incident|eval|failure|loops|efficiency|recommendations|
         correlate|security|replay <trace_id> [--db --project --json]
-        (eval adds --budget-ms; loops adds --repeat-threshold)
+        (eval adds --budget-ms + repeatable --evaluator + --params-json;
+         loops adds --repeat-threshold)
+    analyze --list · analyze <specialist> <trace_id> [--db --project --json]
+    eval-suggest <trace_id>... [--db --project --json]
     sessions|tools [--db --project --limit --json]
     stats [--db --project --json] · capabilities [--json]
+    audit [--db --action --actor --limit --offset --json]
     datasets list|show · keys create|list|revoke
+    experiments create|list|show|run [--db --project --json]
+    alerts list|save|delete · alerts evaluate [--db --project --limit --json]
+    intel efficiency|correlate|regress [--db --project --limit --json]
     prune [--before|--days --project --db --yes]
     archive --before --out [--project --db --delete --append --yes]
     mcp-serve [--db] · install-status [--data-dir] · doctor [path] [--db]
@@ -62,6 +69,14 @@ Ambiguidades deliberadamente NÃO alteradas (registro para o ciclo):
   apenas paths inválidos (diretório, arquivo não-sqlite) → exit 2.
 - ``eval --budget-ms`` negativo/NaN não falha: o avaliador reporta
   ``n/a`` com motivo — degradação evidenciada, por design.
+- ``audit`` não tem ``--project`` (eventos de auditoria não carregam
+  atribuição de projeto — paridade com ``GET /v1/admin/audit``);
+  ``alerts list|save|delete`` operam sobre
+  ``<data-dir>/alert-rules.json`` sem abrir o store — não aceitam
+  ``--db``/``--project`` (só ``alerts evaluate`` aceita).
+- ``--limit``: ``audit``/``traces list`` rejeitam fora de faixa
+  (exit 2); ``sessions``/``tools``/``experiments list``/``intel``
+  clamam a 0..500 — divergência deliberada já registrada.
 """
 
 from __future__ import annotations
@@ -110,6 +125,14 @@ TRACE_CMDS = [
     ["replay"],
 ]
 
+# trace-id commands outside TRACE_CMDS' per-trace payload shape (their
+# JSON carries no top-level "trace_id"): still under the uniform
+# not-found contract, exercised only by that sweep
+NOT_FOUND_EXTRA = [
+    ["analyze", "trace_investigator"],  # analyze <specialist> <trace_id>
+    ["eval-suggest"],                    # eval-suggest <trace_id>...
+]
+
 # --db-bearing commands for the unopenable-store sweep
 DB_CMDS: list[list[str]] = [
     ["traces", "list"],
@@ -121,6 +144,22 @@ DB_CMDS: list[list[str]] = [
     ["graph", "f" * 32],
     ["datasets", "list"],
     ["keys", "list"],
+    ["audit"],
+    ["analyze", "trace_investigator", "f" * 32],
+    ["eval-suggest", "f" * 32],
+    ["experiments", "list"],
+    ["experiments", "show", "x"],
+    ["experiments", "run", "x"],
+    [
+        "experiments", "create", "x",
+        "--evaluators-json", '[{"name": "error_free"}]',
+        "--cohorts-json",
+        '{"a": {"trace_ids": ["t"]}, "b": {"trace_ids": ["t"]}}',
+    ],
+    ["alerts", "evaluate"],
+    ["intel", "efficiency"],
+    ["intel", "correlate"],
+    ["intel", "regress", "--a-json", '["x"]', "--b-json", '["x"]'],
 ]
 
 
@@ -229,8 +268,14 @@ _ALL_PATHS = [
     ["graph"], ["cost"], ["capabilities"], ["stats"], ["failure"],
     ["loops"], ["efficiency"], ["recommendations"], ["correlate"],
     ["security"], ["replay"], ["incident"], ["eval"], ["doctor"],
+    ["analyze"], ["eval-suggest"], ["audit"],
     ["datasets", "list"], ["datasets", "show"],
     ["keys", "create"], ["keys", "list"], ["keys", "revoke"],
+    ["experiments", "create"], ["experiments", "list"],
+    ["experiments", "show"], ["experiments", "run"],
+    ["alerts", "list"], ["alerts", "save"], ["alerts", "delete"],
+    ["alerts", "evaluate"],
+    ["intel", "efficiency"], ["intel", "correlate"], ["intel", "regress"],
     ["prune"], ["archive"], ["mcp-serve"], ["install-status"],
     ["install"], ["install", "status"], ["install", "doctor"],
     ["install", "uninstall"],
@@ -256,7 +301,11 @@ def test_root_help_and_version() -> None:
     assert r.output.strip()
 
 
-@pytest.mark.parametrize("cmd", [[], ["traces"], ["keys"], ["datasets"]])
+@pytest.mark.parametrize(
+    "cmd",
+    [[], ["traces"], ["keys"], ["datasets"], ["experiments"],
+     ["alerts"], ["intel"]],
+)
 def test_bare_group_shows_help_exit_2(cmd: list[str]) -> None:
     """no_args_is_help prints usage — observed contract is exit 2."""
     r = runner.invoke(app, cmd)
@@ -575,7 +624,7 @@ def test_traces_show(seeded_db: Path, synthetic_trace: Trace) -> None:
 # -- uniform not-found contract ---------------------------------------------------
 
 
-@pytest.mark.parametrize("cmd", TRACE_CMDS)
+@pytest.mark.parametrize("cmd", TRACE_CMDS + NOT_FOUND_EXTRA)
 def test_missing_trace_uniform_exit_2(seeded_db: Path, cmd: list[str]) -> None:
     """Every <trace_id> command answers a missing id identically:
     stderr 'trace <id> not found', exit 2, stdout empty."""

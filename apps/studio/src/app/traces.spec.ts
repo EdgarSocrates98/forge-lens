@@ -84,6 +84,74 @@ describe('TracesComponent', () => {
     expect(qp['since']).toBe(new Date('2026-03-01T10:15').toISOString());
   });
 
+  it('sends model/agent/host/min_total_tokens/project_id to the API', () => {
+    const f = TestBed.createComponent(TracesComponent);
+    f.detectChanges();
+    flushInit();
+    const c = f.componentInstance;
+    c.model = 'gpt-5'; c.agent = 'devin'; c.host = 'mcp';
+    c.minTotalTokens = 500; c.projectId = 'proj-9';
+    c.load();
+    const req = http.expectOne(r => r.url.endsWith('/traces'));
+    const p = req.request.params;
+    expect(p.get('model')).toBe('gpt-5');
+    expect(p.get('agent')).toBe('devin');
+    expect(p.get('host')).toBe('mcp');
+    expect(p.get('min_total_tokens')).toBe('500');
+    expect(p.get('project_id')).toBe('proj-9');
+    expect(p.get('offset')).toBe('0');
+    req.flush({ items: [], limit: 100, offset: 0 });
+    const qp = navSpy.mock.calls.at(-1)?.[1]?.queryParams as
+      Record<string, unknown>;
+    expect(qp['model']).toBe('gpt-5');
+    expect(qp['min_total_tokens']).toBe(500);
+    expect(qp['project_id']).toBe('proj-9');
+  });
+
+  it('paginates with offset when a full page comes back', () => {
+    const f = TestBed.createComponent(TracesComponent);
+    f.detectChanges();
+    flushInit();                     // drain the ngOnInit fetch first
+    const c = f.componentInstance;
+    c.limit = 2;
+    c.load();
+    http.expectOne(r => r.url.endsWith('/traces')).flush({
+      items: [
+        { trace_id: 't1', status: 'ok', span_count: 1 },
+        { trace_id: 't2', status: 'ok', span_count: 2 },
+      ],
+      limit: 2, offset: 0,
+    });
+    f.detectChanges();
+    expect(c.hasMore()).toBe(true);
+    const el = f.nativeElement as HTMLElement;
+    const btn = [...el.querySelectorAll('button')]
+      .find(b => b.textContent?.includes('load more'))!;
+    btn.click();
+    const req = http.expectOne(r => r.url.endsWith('/traces')
+      && r.params.get('offset') === '2');
+    req.flush({
+      items: [{ trace_id: 't3', status: 'error', span_count: 1 }],
+      limit: 2, offset: 2,
+    });
+    f.detectChanges();
+    expect(c.rows().length).toBe(3);
+    expect(c.hasMore()).toBe(false);   // partial page → end of results
+    expect(el.textContent).toContain('t3');
+  });
+
+  it('hydrates offset from the URL and keeps paging forward', () => {
+    params = convertToParamMap({ offset: '50', limit: '25' });
+    const f = TestBed.createComponent(TracesComponent);
+    f.detectChanges();
+    const req = http.expectOne(r => r.url.endsWith('/traces'));
+    expect(req.request.params.get('offset')).toBe('50');
+    req.flush({ items: [], limit: 25, offset: 50 });
+    f.detectChanges();
+    // empty page → nothing more to fetch
+    expect(f.componentInstance.hasMore()).toBe(false);
+  });
+
   it('saved views round-trip the new fields', () => {
     const f = TestBed.createComponent(TracesComponent);
     f.detectChanges();
