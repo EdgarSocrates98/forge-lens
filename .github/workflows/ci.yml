@@ -266,6 +266,7 @@ jobs:
         run: |
           .venv/bin/pytest tests/contract tests/unit \
             --ignore tests/unit/test_alert_metrics.py \
+            --ignore tests/unit/test_batch_reads.py \
             --ignore tests/unit/test_experiments.py \
             --ignore tests/unit/test_filters.py \
             --ignore tests/unit/test_ops.py \

@@ -47,14 +47,16 @@ test.describe('graph explorer', () => {
 
     // zoom mutates the viewBox; fit restores the full-bounds camera
     // (selecting a node above centerOn-ed it, so fit first to take
-    // the canonical baseline)
+    // the canonical baseline). Attribute binding flushes
+    // asynchronously — poll with toHaveAttribute instead of one-shot
+    // getAttribute reads, which can race the signal→DOM flush.
     await page.getByRole('button', { name: 'fit' }).click();
+    await expect(svg).toHaveAttribute('viewBox', /^0 0 \d+ \d+$/);
     const vb0 = await svg.getAttribute('viewBox');
     await page.getByRole('button', { name: 'zoom in' }).click();
-    const vb1 = await svg.getAttribute('viewBox');
-    expect(vb1).not.toBe(vb0);
+    await expect(svg).not.toHaveAttribute('viewBox', vb0!);
     await page.getByRole('button', { name: 'fit' }).click();
-    expect(await svg.getAttribute('viewBox')).toBe(vb0);
+    await expect(svg).toHaveAttribute('viewBox', vb0!);
   });
 
   test('search reveals and centers a node beyond the draw cap', async ({ page }) => {

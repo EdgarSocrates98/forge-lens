@@ -186,12 +186,18 @@ _OFFLINE_DIRS = {"unit", "contract"}
 def _no_network(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Any *new* socket inside unit/contract tests is a hard failure.
+    """Any network egress inside unit/contract tests is a hard failure.
 
-    Fresh ``socket()`` construction and every DNS/connect entrypoint
-    raise; wrapping an existing fd stays allowed so in-process machinery
-    that is not network I/O (``socketpair`` self-pipes behind anyio's
-    blocking portal — the FastAPI ``TestClient`` path) keeps working.
+    ``connect``/``connect_ex``/``bind``/``sendto`` and every DNS/connect
+    entrypoint are restricted to loopback; wrapping an existing fd is
+    unaffected. Loopback must stay allowed: in-process machinery that is
+    not network I/O — ``socket.socketpair`` self-pipes behind anyio's
+    blocking portal (the FastAPI ``TestClient`` path) — creates sockets
+    directly on POSIX but on **Windows** CPython emulates ``socketpair``
+    with a real ``socket()`` + bind + connect to ``127.0.0.1``/``::1``.
+    Blocking construction outright therefore kills every ``TestClient``
+    test on Windows, while loopback-scoped guards keep egress blocked
+    everywhere and still leave in-process pipes working.
     Tests that genuinely need sockets carry ``@pytest.mark.network``.
     """
     if not set(request.path.parts) & _OFFLINE_DIRS:
@@ -200,24 +206,103 @@ def _no_network(
         return
 
     real_socket = socket.socket
+    real_create_connection = socket.create_connection
+    real_getaddrinfo = socket.getaddrinfo
+
+    _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+    def _host(address: object) -> object:
+        return address[0] if isinstance(address, tuple) else address
+
+    def _is_loopback(address: object) -> bool:
+        if isinstance(address, str):  # unix socket path — not egress
+            return True
+        return _host(address) in _LOOPBACK
 
     class _GuardedSocket(real_socket):  # type: ignore[misc]
         def __init__(
             self, family: int = -1, type: int = -1, proto: int = -1,
             fileno: int | None = None,
         ) -> None:
-            if fileno is None:
-                raise AssertionError(
-                    "network access attempted during test: socket()"
-                )
             super().__init__(family, type, proto, fileno)
 
-    def _blocked(*args: object, **kwargs: object) -> None:
-        raise AssertionError("network access attempted during test")
+        def connect(self, address: object) -> None:
+            if not _is_loopback(address):
+                raise AssertionError(
+                    f"network access attempted during test: "
+                    f"connect({_host(address)!r})"
+                )
+            super().connect(address)
+
+        def connect_ex(self, address: object) -> int:
+            if not _is_loopback(address):
+                raise AssertionError(
+                    f"network access attempted during test: "
+                    f"connect_ex({_host(address)!r})"
+                )
+            return super().connect_ex(address)
+
+        def bind(self, address: object) -> None:
+            if not _is_loopback(address):
+                raise AssertionError(
+                    f"network access attempted during test: "
+                    f"bind({_host(address)!r})"
+                )
+            super().bind(address)
+
+        def sendto(self, data: object, *args: object) -> int:
+            if args and not _is_loopback(args[-1]):
+                raise AssertionError(
+                    f"network access attempted during test: "
+                    f"sendto({_host(args[-1])!r})"
+                )
+            return super().sendto(data, *args)
+
+    def _guarded_create_connection(*args: object, **kwargs: object) -> socket.socket:
+        if not _is_loopback(args[0] if args else None):
+            raise AssertionError(
+                f"network access attempted during test: "
+                f"create_connection({_host(args[0] if args else None)!r})"
+            )
+        return real_create_connection(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _guarded_getaddrinfo(host: object, *args: object, **kwargs: object) -> object:
+        if host not in _LOOPBACK and host is not None:
+            raise AssertionError(
+                f"network access attempted during test: getaddrinfo({host!r})"
+            )
+        return real_getaddrinfo(host, *args, **kwargs)  # type: ignore[arg-type]
+
+    # name-resolution helpers take a bare host string (gethostbyname/
+    # gethostbyaddr) — check it directly, not through _is_loopback
+    # (which treats str as a unix socket path)
+    def _loopback_name_only(name: str, real: object) -> object:
+        def _guarded(host: object, *args: object, **kwargs: object) -> object:
+            if host not in _LOOPBACK:
+                raise AssertionError(
+                    f"network access attempted during test: {name}({host!r})"
+                )
+            return real(host, *args, **kwargs)  # type: ignore[operator, call-arg]
+        return _guarded
+
+    real_getnameinfo = socket.getnameinfo
+
+    # getnameinfo(sockaddr, flags) takes a sockaddr tuple → _is_loopback
+    def _guarded_getnameinfo(sockaddr: object, *args: object, **kwargs: object) -> object:
+        if not _is_loopback(sockaddr):
+            raise AssertionError(
+                f"network access attempted during test: "
+                f"getnameinfo({_host(sockaddr)!r})"
+            )
+        return real_getnameinfo(sockaddr, *args, **kwargs)  # type: ignore[call-overload]
 
     monkeypatch.setattr(socket, "socket", _GuardedSocket)
-    monkeypatch.setattr(socket, "create_connection", _blocked)
-    monkeypatch.setattr(socket, "getaddrinfo", _blocked)
-    monkeypatch.setattr(socket, "gethostbyname", _blocked)
-    monkeypatch.setattr(socket, "gethostbyaddr", _blocked)
-    monkeypatch.setattr(socket, "getnameinfo", _blocked)
+    monkeypatch.setattr(socket, "create_connection", _guarded_create_connection)
+    monkeypatch.setattr(socket, "getaddrinfo", _guarded_getaddrinfo)
+    monkeypatch.setattr(
+        socket, "gethostbyname",
+        _loopback_name_only("gethostbyname", socket.gethostbyname))
+    monkeypatch.setattr(
+        socket, "gethostbyaddr",
+        _loopback_name_only("gethostbyaddr", socket.gethostbyaddr))
+    monkeypatch.setattr(socket, "getnameinfo", _guarded_getnameinfo)
