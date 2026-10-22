@@ -6,7 +6,12 @@
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "e2e": "playwright test",
+    "e2e:chromium": "playwright test --project=chromium",
+    "e2e:report": "playwright show-report e2e/.artifacts/report",
+    "e2e:seed": "../../.venv/bin/python ../../scripts/seed_demo_data.py --db e2e/.runtime/lens.db --manifest e2e/.runtime/seed-manifest.json",
+    "e2e:serve": "node e2e/serve-dist.mjs"
   },
   "private": true,
   "packageManager": "npm@10.9.8",
@@ -24,6 +29,7 @@
     "@angular/build": "^22.2.3",
     "@angular/cli": "^22.2.3",
     "@angular/compiler-cli": "^22.2.0",
+    "@playwright/test": "^1.64.1",
     "jsdom": "^30.0.0",
     "prettier": "^3.8.1",
     "typescript": "~6.0.2",

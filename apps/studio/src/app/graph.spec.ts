@@ -160,6 +160,155 @@ describe('GraphComponent', () => {
     expect(el.querySelector('.err-banner')?.textContent).toContain('600');
   });
 
+  /** Chain n0→n1→…— under the cap the drawn set must be a connected
+   *  prefix: no drawn node may have a drawn-out parent. */
+  const chain = (n: number): ExecutionGraph => ({
+    subject_id: 'tchain', project_id: 'p1', root_id: 'n0',
+    nodes: Array.from({ length: n }, (_, i) => node(`n${i}`)),
+    edges: Array.from({ length: n - 1 }, (_, i) =>
+      ({ source: `n${i}`, target: `n${i + 1}`, kind: 'parent' })),
+    stats: { span_count: n, edge_count: n - 1 },
+  });
+
+  it('draws a parent-closed BFS prefix when the cap cuts the graph', async () => {
+    params = convertToParamMap({ trace_id: 't1' });
+    const f = make();
+    flushTrace(chain(600));
+    await f.whenStable();
+    const c = f.componentInstance;
+    const drawnIds = new Set(c.drawn().map(n => n.id));
+    expect(drawnIds.size).toBe(500);
+    expect(drawnIds.has('n0')).toBe(true);
+    expect(drawnIds.has('n499')).toBe(true);
+    expect(drawnIds.has('n599')).toBe(false);
+    // parent-closed: every drawn node's parent edge stays inside the set
+    for (const e of chain(600).edges) {
+      if (drawnIds.has(e.target)) expect(drawnIds.has(e.source)).toBe(true);
+    }
+    const el = f.nativeElement as HTMLElement;
+    expect(el.textContent).toContain('drawn 500 of 600');
+  });
+
+  it('find centers the camera on a match and marks hits', async () => {
+    params = convertToParamMap({ trace_id: 't1' });
+    const f = make();
+    flushTrace(chain(600));
+    await f.whenStable();
+    const c = f.componentInstance;
+    c.onFindInput('n42');
+    await f.whenStable();
+    expect(c.matches().length).toBeGreaterThan(0);
+    c.find();
+    await f.whenStable();
+    expect(c.sel()?.id).toBe('n42');
+    // camera zoomed to the readable window and contains the node
+    const el = f.nativeElement as HTMLElement;
+    const g = [...el.querySelectorAll('svg .node')]
+      .find(n => n.querySelector('title')?.textContent?.includes('(n42)'))!;
+    const rect = g.querySelector('rect')!;
+    const nx = Number(rect.getAttribute('x'));
+    const v = c.vb();
+    expect(nx).toBeGreaterThanOrEqual(v.x);
+    expect(nx).toBeLessThanOrEqual(v.x + v.w);
+    expect(v.w).toBeLessThanOrEqual(190 * 8 + 1);
+    // hit marks apply to every match that survived cap AND viewport cull
+    const visible = new Set(c.vlnodes().map(l => l.n.id));
+    const hitCount = c.matches().filter(id => visible.has(id)).length;
+    expect(hitCount).toBeGreaterThan(0);
+    expect(el.querySelectorAll('svg .node.hit').length).toBe(hitCount);
+  });
+
+  it('find reveals a node beyond the cap instead of losing it', async () => {
+    params = convertToParamMap({ trace_id: 't1' });
+    const f = make();
+    flushTrace(chain(600));
+    await f.whenStable();
+    const c = f.componentInstance;
+    expect(c.drawn().some(n => n.id === 'n599')).toBe(false);
+    c.onFindInput('n599');
+    c.find();
+    await f.whenStable();
+    expect(c.sel()?.id).toBe('n599');
+    expect(c.drawn().some(n => n.id === 'n599')).toBe(true);
+    // the cap still holds — n599 displaced one BFS-tail node
+    expect(c.drawn().length).toBe(500);
+    const el = f.nativeElement as HTMLElement;
+    expect(el.textContent).toContain('n599');
+  });
+
+  it('lists in/out neighbors, traverses on click and expands the cap', async () => {
+    params = convertToParamMap({ trace_id: 't1' });
+    const f = make();
+    flushTrace(chain(600));
+    await f.whenStable();
+    const c = f.componentInstance;
+    c.go('n250'); // drawn; its child n251 is also drawn (prefix)
+    await f.whenStable();
+    let el = f.nativeElement as HTMLElement;
+    expect(el.textContent).toContain('1 in-edge(s)');
+    expect(el.textContent).toContain('1 out-edge(s)');
+    // traverse via the out-edge button — the last .nb lists the
+    // out-edge neighbor (n251) after the in-edge one (n249)
+    const outBtns = [...el.querySelectorAll('button.nb')] as HTMLElement[];
+    outBtns[outBtns.length - 1].click();
+    await f.whenStable();
+    expect(c.sel()?.id).toBe('n251');
+    // now select the cap-edge node: n499's child n500 is beyond the cap
+    c.go('n499');
+    await f.whenStable();
+    el = f.nativeElement as HTMLElement;
+    expect(c.hiddenNeighbors()).toBe(1);
+    const expand = [...el.querySelectorAll('button')]
+      .find(b => b.textContent?.includes('expand neighbors'))!;
+    expand.click();
+    await f.whenStable();
+    expect(c.hiddenNeighbors()).toBe(0);
+    expect(c.drawn().some(n => n.id === 'n500')).toBe(true);
+    expect(c.drawn().length).toBe(500);
+  });
+
+  it('culls nodes outside the viewport as the camera zooms in', async () => {
+    params = convertToParamMap({ trace_id: 't1' });
+    const f = make();
+    flushTrace(chain(600));
+    await f.whenStable();
+    const c = f.componentInstance;
+    const el = f.nativeElement as HTMLElement;
+    // fit view: all 500 drawn nodes are inside the viewBox
+    expect(el.querySelectorAll('svg .node').length).toBe(500);
+    c.centerOn('n250'); // readable-width window around one node
+    await f.whenStable();
+    const shown = el.querySelectorAll('svg .node').length;
+    expect(shown).toBeLessThan(500);
+    expect(shown).toBeGreaterThan(0);
+    expect(c.vlnodes().length).toBe(shown);
+    // the culled node is not in the DOM, the centered one is
+    const titles = [...el.querySelectorAll('svg .node title')]
+      .map(t => t.textContent ?? '');
+    expect(titles.some(t => t.includes('(n250)'))).toBe(true);
+    expect(titles.some(t => t.includes('(n499)'))).toBe(false);
+  });
+
+  it('clamps panning so the viewport cannot escape the content', async () => {
+    params = convertToParamMap({ trace_id: 't1' });
+    const f = make();
+    flushTrace(chain(10));
+    await f.whenStable();
+    const c = f.componentInstance;
+    const svg = {
+      getBoundingClientRect: () => ({ width: 1000, height: 600 }),
+    } as unknown as SVGSVGElement;
+    const start = { button: 0, clientX: 0, clientY: 0 };
+    const move = { clientX: -100000, clientY: 0, currentTarget: svg };
+    c.panStart(start as unknown as PointerEvent);
+    c.panMove(move as unknown as PointerEvent);
+    const v = c.vb();
+    const b = (c as unknown as { layout: () => { w: number; h: number } }).layout();
+    // slack = half the view width — never further than that off-content
+    expect(v.x).toBeGreaterThanOrEqual(-v.w * 0.5 - 1);
+    expect(v.x).toBeLessThanOrEqual(b.w - v.w * 0.5 + 1);
+  });
+
   it('shows an error banner on 404', async () => {
     params = convertToParamMap({ trace_id: 'nope' });
     const f = make();

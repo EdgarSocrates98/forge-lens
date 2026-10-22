@@ -1,0 +1,3 @@
+# seeded db + manifest + playwright outputs — regenerated per run
+.runtime/
+.artifacts/
