@@ -5,7 +5,9 @@ Runs on every ingestion path (OTLP and native) before persistence:
 1. Attribute keys matching sensitive patterns are replaced by
    ``[REDACTED]`` (key preserved, value destroyed).
 2. String values matching credential patterns (API keys, bearer tokens,
-   PEM blocks, e-mail addresses at level=metadata) are replaced inline.
+   PEM blocks, ``Authorization: <scheme> <cred>`` headers, URL userinfo
+   ``scheme://user:pass@host``, ``key=value`` credential forms, e-mail
+   addresses at level=metadata) are replaced inline.
 3. ``capture=metadata`` drops content-bearing attributes (prompts,
    tool I/O bodies) and replaces them with ``{"_dropped": <bytes>}``.
 4. Values longer than ``max_attr_value_chars`` are truncated with an
@@ -108,6 +110,55 @@ VALUE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     (re.compile(r"(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*"), "Bearer [REDACTED]"),
     (re.compile(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*"), "[REDACTED:jwt]"),
+    # Authorization header value in scheme+credential form —
+    # `Authorization: Basic dXNlcjpwYXNz`, `Digest u=…`, AWS4-HMAC-…;
+    # the credential may sit *after* the scheme word, so the kv rule
+    # below (which stops at the first whitespace run) is not enough.
+    # Runs after `bearer\s+…` so `Bearer x` keeps its specific label.
+    # `["']?` around the separator catches serialized-JSON forms
+    # (`"Authorization": "Basic zz"`).
+    (
+        re.compile(
+            r"(?i)\bauthorization[\"']?\s*[=:]\s*[\"']?"
+            r"[a-z][\w.+-]*\s+[^\s&;,}\"'\[]+"
+        ),
+        "authorization=[REDACTED]",
+    ),
+    # URL userinfo — `scheme://user:pass@host`: the credential pair is
+    # destroyed, scheme/host kept for correlation. Username excludes
+    # `:`/`@` (exactly one `:` separates user from password) and the
+    # password greedily reaches the LAST `@` before the first `/` —
+    # both facts keep the match linear, no nested-quantifier
+    # backtracking. `host:8080` (no `@`) and `scheme://host` are
+    # untouched; a username-only `u@host` survives (not a credential).
+    (
+        re.compile(
+            r"(?i)\b([a-z][a-z0-9+.\-]*://)[^\s/?#'\":@]+:[^\s/?#'\"]*@"
+        ),
+        r"\1[REDACTED:userinfo]@",
+    ),
+    # `key=value` / `key: value` credential forms embedded in free text
+    # — `password=hunter2`, `token: tok_…`, `api_key=x`, including
+    # camelCase (`accessToken=y`) and quoted-JSON (`"password": "x"`).
+    # Names are enumerated, like SENSITIVE_KEY_RE: `token` alone never
+    # touches `input_tokens`/`token_count` metrics, `key` alone never
+    # touches `sort_key`/`partition_key`, and bare `pass` keeps
+    # `passw0rd`-style lookalikes out (leetspeak is unbounded by
+    # design). The value class excludes `[` so an already-redacted
+    # `[REDACTED:label]` keeps its specific label.
+    (
+        re.compile(
+            r"(?i)\b(password|passwd|pwd|passphrase|pass|secret|"
+            r"api[-_.]?key|access[-_.]?key|secret[-_.]?key|"
+            r"private[-_.]?key|client[-_.]?secret|signing[-_.]?key|"
+            r"encryption[-_.]?key|session[-_.]?key|x-api-key|"
+            r"authorization|access[-_.]?token|auth[-_.]?token|"
+            r"session[-_.]?token|refresh[-_.]?token|id[-_.]?token|"
+            r"bearer[-_.]?token|csrf[-_.]?token|oauth[-_.]?token|"
+            r"jwt|token)[\"']?\s*[=:]\s*[\"']?[^\s&;,}\"'\[]+"
+        ),
+        r"\g<1>=[REDACTED]",
+    ),
 )
 
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")

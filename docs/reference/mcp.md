@@ -40,18 +40,40 @@ existir um **ponto de instrumentação real**:
 
 ## Servidor observer stdio (`forge-lens mcp-serve`)
 
-JSON-RPC 2.0 sobre stdin/stdout (uma mensagem por linha), store SQLite
-aberta em modo **readonly**. Métodos: `initialize`, `ping`, `tools/list`,
-`tools/call`. **Toda request exige `initialize` antes, exceto `ping`** —
-o lifecycle MCP permite ping durante o handshake; requests pré-init
-respondem `-32602`; falhas de dados pós-init viram
-`result.isError` (o loop nunca morre por dado faltante). Argumentos
-malformados (`TypeError` de validação) → `-32602`; uma falha interna →
-`-32603` **opaco** — a mensagem carrega só o tipo da exceção
-(`internal tool error: ValueError`), nunca o texto — que pode embutir
-fragmentos de payload ou paths. Uma chamada malformada nunca derruba
-o loop. Tools expostas —
-espelham a inteligência de leitura da API HTTP:
+JSON-RPC 2.0 sobre stdin/stdout (uma mensagem por linha, JSON estrito —
+literais `NaN`/`Infinity` são erro de parse), store SQLite aberta em modo
+**readonly**. Métodos: `initialize`, `ping`, `tools/list`, `tools/call`.
+
+**Lifecycle.** `initialize` negocia `protocolVersion`: a única revisão
+suportada é `2024-11-05` — pedida compatível é ecoada, qualquer outra
+recebe a suportada de volta (o cliente decide se prossegue); a resposta
+anuncia `capabilities: {"tools": {"listChanged": false}}` e
+`serverInfo`. **Toda request exige `initialize` antes, exceto `ping`** —
+o lifecycle MCP permite ping durante o handshake. Frames **sem `id`**
+são notifications e nunca recebem resposta (`notifications/initialized`
+é tolerada mesmo com `id`). EOF/disconnect encerra o loop com exit 0 —
+uma chamada malformada nunca derruba o servidor.
+
+**Classes de erro.**
+
+| Situação | Resposta |
+|---|---|
+| linha que não é JSON válido | `-32700` parse error (`id: null`) |
+| JSON válido que não é Request (não-objeto; `id` sem `method`) | `-32600` invalid request |
+| método desconhecido | `-32601` |
+| request pré-`initialize` (exceto `ping`) | `-32602` |
+| `params`/`arguments` não-objeto, `name` ausente/mistipado, `TypeError` de validação (tipo errado, `offset` fora de int64, float não-finito) | `-32602` invalid params |
+| falha interna da tool | `-32603` **opaco** — `internal tool error: {TipoDaExcecao}`, nunca o texto (pode embutir payload/paths) |
+| tool desconhecida ou miss de dados (trace inexistente) | `result` com `isError: true` |
+
+O contrato `isError`: qualquer payload com chave `error` de topo vira
+`result.isError` — falha de dados é dado, não falha de protocolo, e o
+loop continua servindo.
+
+Tools expostas — espelham a inteligência de leitura da API HTTP.
+A matriz completa de parâmetros/limites/erros é gerada do registry vivo
+em [`mcp-tools.md`](mcp-tools.md) (`scripts/gen_mcp_matrix.py`; sync
+garantido por `tests/unit/test_mcp_matrix.py`):
 
 | Tool | Argumentos | Equivale a |
 |---|---|---|
@@ -75,4 +97,8 @@ Notas:
   bundled; arquivo malformado falha na subida do servidor (exit 2), nunca
   por chamada.
 - Trace inexistente retorna `{"trace_id": ..., "error": "trace not found"}`
-  no payload — not-found é dado, não falha de protocolo.
+  no payload (→ `isError`) — not-found é dado, não falha de protocolo.
+  Exceção deliberada: `lens.get_trace` retorna `{"trace": null}` sem
+  `isError`, espelhando o 404/200-shape da API.
+- `limit`/`offset` são bounded: `limit` clampa em `[0, 500]`; `offset`
+  fora do range int64 do SQLite é `-32602`, não um erro de driver.

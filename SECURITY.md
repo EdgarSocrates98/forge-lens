@@ -13,10 +13,13 @@ vulnerabilidades não divulgadas.
 - **Sanitização por padrão** (`capture=metadata`): chaves de credenciais são
   redigidas, corpos de prompt/tool são descartados com marcador explícito,
   e-mails são mascarados, valores longos são truncados com marcador.
-- **Auth de ingestão opcional**: defina `api_key` em `.forge-lens/config.toml`
-  (ou `FORGE_LENS_API_KEY`) para exigir `X-Forge-Lens-Key` nos endpoints de
-  ingestão. Endpoints de leitura são abertos no modelo local — se expuser a
-  porta, proteja-a no nível de rede.
+- **Auth opcional em três modos** (`auth_mode` / `FORGE_LENS_AUTH_MODE`):
+  `none` (default local) deixa tudo aberto; `key` exige `X-Forge-Lens-Key`
+  igual a `api_key` configurada nas escritas (leituras continuam abertas,
+  a menos que `auth_reads=true`); `keys` ativa chaves gerenciadas com
+  papéis `reader|writer|admin` e escopo de `projects[]` — nesse modo toda
+  rota exige uma chave válida e `project_id` é a fronteira de tenant.
+  Se expuser a porta, proteja-a também no nível de rede.
 - **Sem auto-execução**: o produto nunca re-executa ferramentas ao abrir um
   trace. Replay observado é read-only por design.
 

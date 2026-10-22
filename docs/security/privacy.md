@@ -23,7 +23,9 @@ tem "phone home". Rede existe só entre seu SDK e seu servidor local.
 
 - `capture=full` só para depuração temporária — corpos de prompt podem
   conter segredos do *seu* usuário final.
-- Rode `api_key` quando a porta for acessível a outras pessoas.
+- Rode `api_key` quando a porta for acessível a outras pessoas — e
+  `auth_mode=keys` quando houver mais de um tenant/time, para isolar
+  `project_id` por chave (`reader|writer|admin`).
 - `BlobRef` aponta payloads; o conteúdo é decisão do produtor — classifique
   via `metadata`/`classification` e respeite sua política interna.
 - `.forge-lens/lens.db` pode conter dados de execuções: trate como artefato

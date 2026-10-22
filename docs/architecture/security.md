@@ -6,8 +6,8 @@
 |---|---|---|
 | Capture level | `metadata` | `capture="full"` em config/env (opt-in) |
 | Bind | `127.0.0.1` | `--host` (decisão do operador) |
-| Auth ingestão | desligada (local) | `api_key` → `X-Forge-Lens-Key` obrigatório |
-| Auth leitura | aberta | modelo local single-user; proteger via rede |
+| Auth ingestão | desligada (local) | `api_key`/`auth_mode` → `X-Forge-Lens-Key` obrigatório |
+| Auth leitura | aberta | `auth_mode=keys` fecha tudo com papéis + escopo; `auth_reads=true` estende `api_key` a leituras |
 
 ## Pipeline de sanitização (pré-persistência, sempre ativa)
 
@@ -17,8 +17,11 @@
    (`llm.token_count.*`, `*.usage.*tokens`) não são redigidos — são
    métricas, não segredos (terminam em `count`/`usage`/`tokens`).
 2. **Padrões em valores** (sk-ant-*, sk-*, AIza*, AKIA*, ghp_*, github_pat_*,
-   xox*, blocos PEM, `Bearer x`, JWT) → `[REDACTED:…]` inline — em
-   atributos *e* em campos de texto livre do contrato: `status.message`
+   glpat-*, npm_*, pypi-*, hf_*, xox*, blocos PEM, `Bearer x`, JWT,
+   `Authorization: <scheme> <cred>`, userinfo `scheme://user:pass@host`,
+   e formas `password=`/`token:`/`api_key=`/`x-api-key:` em texto livre)
+   → `[REDACTED:…]` inline — em atributos *e* em campos de texto livre
+   do contrato: `status.message`
    (span+trace — carrega texto de exceção), `span.name`, `event.name`,
    `source.*` (`system`, `sdk_name`, `sdk_version`, `host`, `runtime`,
    `language`), `session_id` e `project_id` (esses dois sem e-mail-mask:
