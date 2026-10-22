@@ -422,11 +422,34 @@ class SQLiteTraceStore:
             # (live or crash-leftover) it may carry real data and plain
             # ro reads it, recreating -shm only if the dir allows.
             wal = self.path.with_name(self.path.name + "-wal")
-            mode = "ro" if wal.exists() else "ro&immutable=1"
-            uri = self.path.as_uri() + f"?mode={mode}"
-            self._conn = sqlite3.connect(
-                uri, uri=True, check_same_thread=False
+            shm = self.path.with_name(self.path.name + "-shm")
+            # SQLite permits immutable=1 only when BOTH sidecars are
+            # absent — a lone -shm means a WAL-mode peer is/was live.
+            # Checking both shrinks (not closes) the TOCTOU window: a
+            # -wal appearing between the exists() check and the open
+            # leaves an immutable view over live WAL data, which fails
+            # on first read (SQLITE_CORRUPT) — so the open is verified
+            # with a schema probe and falls back to plain ro, where
+            # busy_timeout arbitrates the live peer.
+            immutable = not (wal.exists() or shm.exists())
+            uri = self.path.as_uri() + (
+                "?mode=ro&immutable=1" if immutable else "?mode=ro"
             )
+            conn: sqlite3.Connection | None = None
+            try:
+                conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+                conn.execute("PRAGMA schema_version").fetchone()
+            except sqlite3.Error:
+                if conn is not None:
+                    conn.close()
+                if not immutable:
+                    raise
+                conn = sqlite3.connect(
+                    self.path.as_uri() + "?mode=ro",
+                    uri=True,
+                    check_same_thread=False,
+                )
+            self._conn = conn
         else:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             # Default (deferred) isolation level so `with self._conn:` is a

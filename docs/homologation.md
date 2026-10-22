@@ -1,4 +1,4 @@
-# Homologação operacional — cenários A-J
+# Homologação operacional — cenários A-K
 
 Execução ponta-a-ponta contra a superfície instalada (binário `forge-lens`
 do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por `homolog/run_scenarios.py`.
@@ -15,6 +15,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 | H — Retenção: prune + archive | Aplicar retenção: arquivar e apagar traços antigos com auditoria. | **PASS** | 5/5 | `homolog/evidence/H/01-archive.txt`; `homolog/evidence/H/02-prune.txt`; `homolog/evidence/H/03-traces-list.txt` |
 | I — Backup e restauração | Copiar a store (WAL checkpoint + cópia) e reabrir com conteúdo íntegro. | **PASS** | 4/4 | `homolog/evidence/I/01-archive-all.txt` |
 | J — Operação 100% offline | Provar que toda a superfície local opera sem rede (proxies mortos). | **PASS** | 4/4 | `homolog/evidence/J/01-init-offline.txt` |
+| K — Autorização: permissões inadequadas rejeitadas | Exercitar auth_mode=keys num serve real: key ausente/errada, role insuficiente e escopo de projeto errado são rejeitados. | **PASS** | 9/9 | `homolog/evidence/K/01-post-no-key.json`; `homolog/evidence/K/02-post-bad-key.json`; `homolog/evidence/K/03-post-reader.json`; `homolog/evidence/K/04-post-out-of-scope.json`; `homolog/evidence/K/05-post-writer-ok.json`; `homolog/evidence/K/06-get-no-key.json`; `homolog/evidence/K/07-get-reader.json` |
 
 ## Detalhes por cenário
 
@@ -28,7 +29,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - ✅ `seed` — trace de exemplo persistido
 - ✅ `doctor` — rc=0 — evidência: `homolog/evidence/A/02-doctor.txt`
 - ✅ `capabilities (CLI)` — rc=0 — evidência: `homolog/evidence/A/03-capabilities.txt`
-- ✅ `serve` — http://127.0.0.1:42251
+- ✅ `serve` — http://127.0.0.1:54697
 - ✅ `GET /v1/health` — HTTP 200 — evidência: `homolog/evidence/A/04-health.json`
 - ✅ `GET /v1/ops/summary` — HTTP 200 — evidência: `homolog/evidence/A/05-ops-summary.json`
 - ✅ `GET /v1/capabilities` — HTTP 200 — evidência: `homolog/evidence/A/06-capabilities.json`
@@ -42,7 +43,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Status:** PASS
 
 - ✅ `seed trace` — bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-- ✅ `serve` — http://127.0.0.1:43561
+- ✅ `serve` — http://127.0.0.1:36005
 - ✅ `GET /v1/traces` — HTTP 200 — evidência: `homolog/evidence/B/01-traces.json`
 - ✅ `GET /v1/traces/{id}` — HTTP 200 — evidência: `homolog/evidence/B/02-trace-detail.json`
 - ✅ `GET /v1/traces/{id}/cost` — HTTP 200 — evidência: `homolog/evidence/B/03-cost.json`
@@ -61,7 +62,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Status:** PASS
 
 - ✅ `seed failing trace + embedded secret` — cccccccccccccccccccccccccccccccc
-- ✅ `serve` — http://127.0.0.1:57447
+- ✅ `serve` — http://127.0.0.1:50657
 - ✅ `GET /v1/traces/{id}/failure` — HTTP 200 — evidência: `homolog/evidence/C/01-failure.json`
 - ✅ `GET /v1/traces/{id}/replay` — HTTP 200 — evidência: `homolog/evidence/C/02-replay.json`
 - ✅ `GET /v1/traces/{id}/incident` — HTTP 200; segredo não vazado — evidência: `homolog/evidence/C/03-incident.json`
@@ -75,8 +76,8 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Status:** PASS
 
 - ✅ `seed 1200-span trace` — 1200 spans
-- ✅ `serve` — http://127.0.0.1:34309
-- ✅ `GET /v1/graph/traces/{id} (1200 spans)` — HTTP 200, 938 ms, 485479 bytes — evidência: `homolog/evidence/D/01-graph-1200.json`
+- ✅ `serve` — http://127.0.0.1:36421
+- ✅ `GET /v1/graph/traces/{id} (1200 spans)` — HTTP 200, 511 ms, 485479 bytes — evidência: `homolog/evidence/D/01-graph-1200.json`
 - ✅ `GET .../analysis` — HTTP 200 — evidência: `homolog/evidence/D/02-graph-analysis.json`
 - ✅ `GET .../critical-path` — HTTP 200 — evidência: `homolog/evidence/D/03-critical-path.json`
 
@@ -89,7 +90,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Status:** PASS
 
 - ✅ `seed baseline ok + candidato regressado` — baseline=e000 cand=e111
-- ✅ `serve` — http://127.0.0.1:44045
+- ✅ `serve` — http://127.0.0.1:60007
 - ✅ `POST /v1/eval/run` — HTTP 200 — evidência: `homolog/evidence/E/01-eval-run.json`
 - ✅ `POST /v1/eval/compare` — HTTP 200 — evidência: `homolog/evidence/E/02-eval-compare.json`
 - ✅ `CLI eval` — rc=0 — evidência: `homolog/evidence/E/03-cli-eval.txt`
@@ -102,7 +103,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Esperado:** API, CLI, MCP e incident export exibem conteúdo mascarado; contadores de sanitização são declarados.
 - **Status:** PASS
 
-- ✅ `serve` — http://127.0.0.1:35339
+- ✅ `serve` — http://127.0.0.1:38483
 - ✅ `POST /v1/traces (ingest com segredos)` — HTTP 200 — evidência: `homolog/evidence/F/00-ingest-response.json`
 - ✅ `API GET /v1/traces/{id}` — HTTP 200; vazaram: nenhum — evidência: `homolog/evidence/F/01-api-trace.json`
 - ✅ `API incident export` — HTTP 200; vazaram: nenhum — evidência: `homolog/evidence/F/02-api-incident.json`
@@ -116,7 +117,7 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Status:** PASS
 
 - ✅ `seed failing trace` — a7777777777777777777777777777777
-- ✅ `serve` — http://127.0.0.1:50163
+- ✅ `serve` — http://127.0.0.1:39277
 - ✅ `GET /v1/traces/{id}/incident` — HTTP 200; chaves=['bundle_version', 'cost', 'eval_suggestions', 'export_sanitize', 'failure', 'graph', 'hypotheses', 'project_id', 'replay', 'session_id', 'status', 'trace_id', 'waste'] — evidência: `homolog/evidence/G/01-incident-bundle.json`
 - ✅ `CLI incident` — rc=0 — evidência: `homolog/evidence/G/02-cli-incident.txt`
 
@@ -150,6 +151,22 @@ do `.venv`, API `forge-lens serve` em subprocess, MCP por stdio). Regenerado por
 - **Status:** PASS
 
 - ✅ `init offline` — rc=0 — evidência: `homolog/evidence/J/01-init-offline.txt`
-- ✅ `serve offline` — http://127.0.0.1:36267
+- ✅ `serve offline` — http://127.0.0.1:35699
 - ✅ `GET /v1/traces offline` — HTTP 200
 - ✅ `MCP offline`
+
+### K — Autorização: permissões inadequadas rejeitadas
+
+- **Objetivo:** Exercitar auth_mode=keys num serve real: key ausente/errada, role insuficiente e escopo de projeto errado são rejeitados.
+- **Esperado:** sem key → 401; reader em write → 403; writer fora do escopo → 403; writer no próprio projeto → 200; reader em read → 200.
+- **Status:** PASS
+
+- ✅ `seed 2 keys (reader + writer escopada a proj-a)`
+- ✅ `serve auth_mode=keys` — http://127.0.0.1:49885
+- ✅ `POST sem key → 401` — HTTP 401 — evidência: `homolog/evidence/K/01-post-no-key.json`
+- ✅ `POST key inválida → 401` — HTTP 401 — evidência: `homolog/evidence/K/02-post-bad-key.json`
+- ✅ `POST reader (sem role writer) → 403` — HTTP 403 — evidência: `homolog/evidence/K/03-post-reader.json`
+- ✅ `POST writer escopada em proj-b → 403` — HTTP 403 — evidência: `homolog/evidence/K/04-post-out-of-scope.json`
+- ✅ `POST writer em proj-a → 200` — HTTP 200 — evidência: `homolog/evidence/K/05-post-writer-ok.json`
+- ✅ `GET sem key → 401 (keys cobre reads)` — HTTP 401 — evidência: `homolog/evidence/K/06-get-no-key.json`
+- ✅ `GET reader em proj-a → 200` — HTTP 200 — evidência: `homolog/evidence/K/07-get-reader.json`

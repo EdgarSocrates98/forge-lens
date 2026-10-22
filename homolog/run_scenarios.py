@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Homologação operacional Forge Lens — cenários A-J.
+"""Homologação operacional Forge Lens — cenários A-K.
 
 Executa cenários ponta-a-ponta contra a superfície real instalada
 (binário ``forge-lens`` do ``.venv``, API via subprocess ``serve`` e MCP via
@@ -142,19 +142,25 @@ class Ctx:
         return cp
 
     def http(self, method: str, base: str, path: str,
-             body: Any = None) -> tuple[int, str]:
+             body: Any = None,
+             headers: dict[str, str] | None = None) -> tuple[int, str]:
         data = None if body is None else json.dumps(body).encode()
         req = urllib.request.Request(
             base + path, data=data, method=method,
-            headers={"Content-Type": "application/json"})
+            headers={"Content-Type": "application/json",
+                     **(headers or {})})
         try:
             with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_S) as r:
                 return r.status, r.read().decode()
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode()
 
-    def serve(self, db: Path) -> str:
-        """Sobe `forge-lens serve` real e devolve a base URL quando pronto."""
+    def serve(self, db: Path,
+              ready_headers: dict[str, str] | None = None) -> str:
+        """Sobe `forge-lens serve` real e devolve a base URL quando pronto.
+
+        ``ready_headers`` alimenta o probe de /v1/health — em
+        ``auth_mode=keys`` até o health exige uma key reader."""
         port = _free_port()
         base = f"http://127.0.0.1:{port}"
         proc = subprocess.Popen(
@@ -168,7 +174,8 @@ class Ctx:
             if proc.poll() is not None:
                 raise RuntimeError(f"serve exited early rc={proc.returncode}")
             try:
-                status, _ = self.http("GET", base, "/v1/health")
+                status, _ = self.http(
+                    "GET", base, "/v1/health", headers=ready_headers)
                 if status == 200:
                     return base
             except OSError:
@@ -781,11 +788,94 @@ def scenario_j(ctx: Ctx) -> None:
                                  indent=2, ensure_ascii=False))
 
 
+def scenario_k(ctx: Ctx) -> None:
+    ctx.result.title = "K — Autorização: permissões inadequadas rejeitadas"
+    ctx.result.objective = (
+        "Exercitar auth_mode=keys num serve real: key ausente/errada, "
+        "role insuficiente e escopo de projeto errado são rejeitados.")
+    ctx.result.expected = (
+        "sem key → 401; reader em write → 403; writer fora do escopo → 403; "
+        "writer no próprio projeto → 200; reader em read → 200.")
+
+    from forge_lens.security.keys import hash_secret
+
+    db = ctx.dir / "data.db"
+    seed_basic_trace(db, "a0" + "0" * 30, project_id="proj-a")
+
+    reader_secret = "fl-reader-" + "r" * 24
+    writer_secret = "fl-writer-" + "w" * 24
+    store = _store(db)
+    try:
+        store.create_api_key(
+            "k-reader", name="reader", key_hash=hash_secret(reader_secret),
+            role="reader", projects=["proj-a"])
+        store.create_api_key(
+            "k-writer", name="writer", key_hash=hash_secret(writer_secret),
+            role="writer", projects=["proj-a"])
+    finally:
+        store.close()
+    ctx.step("seed 2 keys (reader + writer escopada a proj-a)", True)
+
+    hdr_r = {"X-Forge-Lens-Key": reader_secret}
+    hdr_w = {"X-Forge-Lens-Key": writer_secret}
+    hdr_bad = {"X-Forge-Lens-Key": "fl-forged-" + "x" * 24}
+
+    ctx.env["FORGE_LENS_AUTH_MODE"] = "keys"
+    # em keys até /v1/health exige role reader — o probe usa a reader key
+    base = ctx.serve(db, ready_headers=hdr_r)
+    ctx.step("serve auth_mode=keys", True, base)
+
+    span = _span("a1" + "1" * 30, "1" * 16, "agent.run", SpanKind.AGENT,
+                 None, _T0, 100)
+    ingest = {
+        "project_id": "proj-a",
+        "source": _SOURCE.model_dump(mode="json"),
+        "traces": [Trace(
+            trace_id="a1" + "1" * 30, root_span_id=span.span_id,
+            started_at=_T0, ended_at=_T0 + timedelta(milliseconds=100),
+            status=Status(), source=_SOURCE, spans=[span],
+            project_id="proj-a").model_dump(mode="json")],
+    }
+
+    s, body = ctx.http("POST", base, "/v1/traces", ingest)
+    ev = ctx.save_evidence("01-post-no-key.json", body)
+    ctx.step("POST sem key → 401", s == 401, f"HTTP {s}", ev)
+
+    s, body = ctx.http("POST", base, "/v1/traces", ingest, headers=hdr_bad)
+    ev = ctx.save_evidence("02-post-bad-key.json", body)
+    ctx.step("POST key inválida → 401", s == 401, f"HTTP {s}", ev)
+
+    s, body = ctx.http("POST", base, "/v1/traces", ingest, headers=hdr_r)
+    ev = ctx.save_evidence("03-post-reader.json", body)
+    ctx.step("POST reader (sem role writer) → 403", s == 403, f"HTTP {s}", ev)
+
+    cross = json.loads(json.dumps(ingest))
+    cross["project_id"] = "proj-b"
+    for t in cross["traces"]:
+        t["project_id"] = "proj-b"
+    s, body = ctx.http("POST", base, "/v1/traces", cross, headers=hdr_w)
+    ev = ctx.save_evidence("04-post-out-of-scope.json", body)
+    ctx.step("POST writer escopada em proj-b → 403", s == 403, f"HTTP {s}", ev)
+
+    s, body = ctx.http("POST", base, "/v1/traces", ingest, headers=hdr_w)
+    ev = ctx.save_evidence("05-post-writer-ok.json", body)
+    ctx.step("POST writer em proj-a → 200", s == 200, f"HTTP {s}", ev)
+
+    s, body = ctx.http("GET", base, "/v1/traces?project_id=proj-a")
+    ev = ctx.save_evidence("06-get-no-key.json", body)
+    ctx.step("GET sem key → 401 (keys cobre reads)", s == 401, f"HTTP {s}", ev)
+
+    s, body = ctx.http("GET", base, "/v1/traces?project_id=proj-a",
+                       headers=hdr_r)
+    ev = ctx.save_evidence("07-get-reader.json", body)
+    ctx.step("GET reader em proj-a → 200", s == 200, f"HTTP {s}", ev)
+
+
 SCENARIOS: list[tuple[str, Any]] = [
     ("A", scenario_a), ("B", scenario_b), ("C", scenario_c),
     ("D", scenario_d), ("E", scenario_e), ("F", scenario_f),
     ("G", scenario_g), ("H", scenario_h), ("I", scenario_i),
-    ("J", scenario_j),
+    ("J", scenario_j), ("K", scenario_k),
 ]
 
 
@@ -806,7 +896,7 @@ def run_one(sid: str, fn: Any, keep_work: bool) -> ScenarioResult:
 
 def write_registry(results: list[ScenarioResult]) -> None:
     lines = [
-        "# Homologação operacional — cenários A-J",
+        "# Homologação operacional — cenários A-K",
         "",
         "Execução ponta-a-ponta contra a superfície instalada (binário "
         "`forge-lens`",

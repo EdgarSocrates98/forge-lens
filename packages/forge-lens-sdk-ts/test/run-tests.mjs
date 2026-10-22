@@ -1,7 +1,7 @@
-// Test discovery for Node >= 18: `node --test "glob"` only expands
-// globs on Node >= 21, and shell expansion differs by OS. Importing
-// each compiled *.test.js registers its tests with node:test, which
-// runs them automatically at process exit — identical on 18/20/22.
+// Test discovery for Node >= 20 (engines floor): `node --test "glob"`
+// only expands globs on Node >= 21, and shell expansion differs by OS.
+// Importing each compiled *.test.js registers its tests with node:test,
+// which runs them automatically at process exit — identical on 20/22.
 import { readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-22T00:37:29.193703+00:00",
+  "generated_at": "2026-10-22T04:12:46.834825+00:00",
   "scenarios": [
     {
       "id": "A",
@@ -38,7 +38,7 @@
         {
           "name": "serve",
           "ok": true,
-          "detail": "http://127.0.0.1:42251",
+          "detail": "http://127.0.0.1:54697",
           "evidence": null
         },
         {
@@ -80,7 +80,7 @@
         {
           "name": "serve",
           "ok": true,
-          "detail": "http://127.0.0.1:43561",
+          "detail": "http://127.0.0.1:36005",
           "evidence": null
         },
         {
@@ -150,7 +150,7 @@
         {
           "name": "serve",
           "ok": true,
-          "detail": "http://127.0.0.1:57447",
+          "detail": "http://127.0.0.1:50657",
           "evidence": null
         },
         {
@@ -204,13 +204,13 @@
         {
           "name": "serve",
           "ok": true,
-          "detail": "http://127.0.0.1:34309",
+          "detail": "http://127.0.0.1:36421",
           "evidence": null
         },
         {
           "name": "GET /v1/graph/traces/{id} (1200 spans)",
           "ok": true,
-          "detail": "HTTP 200, 938 ms, 485479 bytes",
+          "detail": "HTTP 200, 511 ms, 485479 bytes",
           "evidence": "homolog/evidence/D/01-graph-1200.json"
         },
         {
@@ -246,7 +246,7 @@
         {
           "name": "serve",
           "ok": true,
-          "detail": "http://127.0.0.1:44045",
+          "detail": "http://127.0.0.1:60007",
           "evidence": null
         },
         {
@@ -280,7 +280,7 @@
         {
           "name": "serve",
           "ok": true,
-          "detail": "http://127.0.0.1:35339",
+          "detail": "http://127.0.0.1:38483",
           "evidence": null
         },
         {
@@ -332,7 +332,7 @@
         {
           "name": "serve",
           "ok": true,
-          "detail": "http://127.0.0.1:50163",
+          "detail": "http://127.0.0.1:39277",
           "evidence": null
         },
         {
@@ -440,7 +440,7 @@
         {
           "name": "serve offline",
           "ok": true,
-          "detail": "http://127.0.0.1:36267",
+          "detail": "http://127.0.0.1:35699",
           "evidence": null
         },
         {
@@ -454,6 +454,70 @@
           "ok": true,
           "detail": "",
           "evidence": null
+        }
+      ]
+    },
+    {
+      "id": "K",
+      "title": "K — Autorização: permissões inadequadas rejeitadas",
+      "status": "PASS",
+      "objective": "Exercitar auth_mode=keys num serve real: key ausente/errada, role insuficiente e escopo de projeto errado são rejeitados.",
+      "expected": "sem key → 401; reader em write → 403; writer fora do escopo → 403; writer no próprio projeto → 200; reader em read → 200.",
+      "notes": [],
+      "steps": [
+        {
+          "name": "seed 2 keys (reader + writer escopada a proj-a)",
+          "ok": true,
+          "detail": "",
+          "evidence": null
+        },
+        {
+          "name": "serve auth_mode=keys",
+          "ok": true,
+          "detail": "http://127.0.0.1:49885",
+          "evidence": null
+        },
+        {
+          "name": "POST sem key → 401",
+          "ok": true,
+          "detail": "HTTP 401",
+          "evidence": "homolog/evidence/K/01-post-no-key.json"
+        },
+        {
+          "name": "POST key inválida → 401",
+          "ok": true,
+          "detail": "HTTP 401",
+          "evidence": "homolog/evidence/K/02-post-bad-key.json"
+        },
+        {
+          "name": "POST reader (sem role writer) → 403",
+          "ok": true,
+          "detail": "HTTP 403",
+          "evidence": "homolog/evidence/K/03-post-reader.json"
+        },
+        {
+          "name": "POST writer escopada em proj-b → 403",
+          "ok": true,
+          "detail": "HTTP 403",
+          "evidence": "homolog/evidence/K/04-post-out-of-scope.json"
+        },
+        {
+          "name": "POST writer em proj-a → 200",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/K/05-post-writer-ok.json"
+        },
+        {
+          "name": "GET sem key → 401 (keys cobre reads)",
+          "ok": true,
+          "detail": "HTTP 401",
+          "evidence": "homolog/evidence/K/06-get-no-key.json"
+        },
+        {
+          "name": "GET reader em proj-a → 200",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/K/07-get-reader.json"
         }
       ]
     }

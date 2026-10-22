@@ -64,10 +64,12 @@ def _config(db: Path | None = None) -> LensConfig:
 def _store(cfg: LensConfig) -> SQLiteTraceStore:
     try:
         return SQLiteTraceStore(cfg.resolved_db_path)
-    except (OSError, sqlite3.Error) as exc:
-        # a --db pointing at a directory, a non-sqlite file or an
-        # unwritable parent is invalid input — clean message + exit 2,
-        # same contract mcp-serve reports for an unopenable store
+    except (OSError, sqlite3.Error, RuntimeError) as exc:
+        # a --db pointing at a directory, a non-sqlite file, an
+        # unwritable parent or a symlink loop (Path.resolve raises
+        # RuntimeError there, not OSError) is invalid input — clean
+        # message + exit 2, same contract mcp-serve reports for an
+        # unopenable store
         typer.echo(
             f"cannot open store at {cfg.resolved_db_path}: {exc}", err=True
         )

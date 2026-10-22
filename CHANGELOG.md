@@ -5,6 +5,46 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 
 ## [Unreleased]
 
+### Fixed — ciclo 13.1 (review r3)
+
+- **`mcp_server.initialize` crash**: `protocolVersion` não-string
+  (objeto/array) era probed com `in frozenset` → `TypeError` matava o
+  processo inteiro — kill-switch de um frame. Guard `isinstance(str)` +
+  `initialized` só marcado depois do resultado construído; teste de
+  regressão cobre object/array/null/número seguidos de ping.
+- **MCP stdio byte bound**: `for line in sys.stdin` aceitava frames
+  ilimitados — um único line de GBs era bufferizado e parseado sem
+  bound (o HTTP capa bodies em 8 MiB). `readline(_MAX_LINE_CHARS+2)`
+  com dreno até o newline → `-32700`, e o loop segue servindo.
+- **`_num` normaliza strings**: `"limit": "abc"` chegava ao `int()` e
+  vazava `-32603` (internal) por um erro de cliente — agora `int`→
+  `float` no guard, unparseable vira `-32602` como os demais tipos
+  errados. Strings numéricas são normalizadas (`"3.5"` → `3.5` → `int`
+  no consumidor), `"nan"`/`"inf"`/`"1e999"` rejeitadas.
+- **Readonly `immutable=1`**: SQLite só permite `immutable` quando
+  `-wal` **e** `-shm` estão ausentes — um `-shm` órfão agora força
+  `mode=ro`. O open é verificado com `PRAGMA schema_version` e cai
+  para `ro` plain se a race TOCTOU for perdida (conn vazada fechada
+  antes do retry). Testes: writer vivo (`-wal` live → ro vê os dados)
+  e `-shm` órfão.
+- **`cli/_store`**: `Path.resolve()` pode levantar `RuntimeError`
+  (symlink loop) — capturado junto de `OSError`/`sqlite3.Error` →
+  exit 2 limpo (era traceback).
+- **`app.py`**: comentário stale removido — `_read_capped_body` (413)
+  está fora do `try`, só `json.loads` é protegido.
+- **Docs/exemplos**: `run-tests.mjs` dizia Node ≥18 (engines é ≥20);
+  `eval-gate-workflow-example.yml` instalava `@main` — agora pin em
+  SHA (a tag publicada substitui). `mcp.md` documenta o bound de linha
+  e a negociação não-string; matriz `mcp-tools.md` sync intacta.
+- **Homologação §14**: cenário **K — Autorização** (auth_mode=keys em
+  serve real: sem key/key errada → 401; reader em write → 403; writer
+  fora do escopo → 403; writer no projeto → 200; reader em read →
+  200) — cobre o "permissões inadequadas rejeitadas" que o unit
+  battery não exercitava ao vivo. Cenário **F ≥3k** agora tem prova
+  de navegação real: spec Playwright com route-interception servindo
+  payload sintético de 3 200 nós — `find` revela+centra `n3199` além
+  do cap 500 (evidência de browser, não só jsdom).
+
 ### Fixed — ciclo 13.1 (CI cross-platform r3)
 
 Falhas latentes da wave expostas quando a matriz CI rodou completa pela

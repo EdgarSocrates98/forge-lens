@@ -558,6 +558,33 @@ class TestSqliteWAL:
             probe.upsert_trace(_mk_trace())
         probe.close()
 
+    def test_readonly_sees_live_wal_data(self, tmp_path: Path) -> None:
+        """An open writer keeps a live -wal — the probe must pick plain
+        ro (immutable=1 would read only the main file and see zero
+        rows), not just 'no -wal at check time'."""
+        db = tmp_path / "live.db"
+        writer = SQLiteTraceStore(db)
+        writer.upsert_trace(_mk_trace())
+        # writer stays open — committed rows live in the -wal file
+        assert (tmp_path / "live.db-wal").exists()
+        probe = SQLiteTraceStore(db, readonly=True)
+        assert probe.stats()["traces"] == 1
+        probe.close()
+        writer.close()
+
+    def test_readonly_tolerates_stray_shm(self, tmp_path: Path) -> None:
+        """SQLite permits immutable=1 only when BOTH sidecars are gone —
+        a lone -shm implies a WAL peer, so the probe takes plain ro and
+        still reads the checkpointed file."""
+        db = tmp_path / "shm.db"
+        store = SQLiteTraceStore(db)
+        store.upsert_trace(_mk_trace())
+        store.close()
+        (tmp_path / "shm.db-shm").write_bytes(b"\x00" * 32)
+        probe = SQLiteTraceStore(db, readonly=True)
+        assert probe.stats()["traces"] == 1
+        probe.close()
+
     def test_readonly_with_uri_special_chars_in_name(
         self, tmp_path: Path
     ) -> None:

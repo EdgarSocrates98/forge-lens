@@ -133,6 +133,54 @@ def test_initialize_version_negotiation(
     assert out[2]["result"]["protocolVersion"] == "2024-11-05"
 
 
+def test_initialize_nonstring_protocol_version_never_crashes(
+    db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Object/array/null ``protocolVersion`` is unhashable — the `in`
+    probe would TypeError and kill the loop. Negotiation must answer
+    with the server's version and stay alive for the next frame."""
+    rc, out = _drive(
+        db,
+        [
+            _req("initialize", 1, params={"protocolVersion": {"x": 1}}),
+            _req("initialize", 2, params={"protocolVersion": ["2024-11-05"]}),
+            _req("initialize", 3, params={"protocolVersion": None}),
+            _req("initialize", 4, params={"protocolVersion": 2024}),
+            _req("ping", 5),
+        ],
+        capsys,
+    )
+    assert rc == 0
+    assert len(out) == 5
+    for resp in out[:4]:
+        assert resp["result"]["protocolVersion"] == "2024-11-05"
+    # the loop survived all four hostile handshakes — ping answered
+    assert out[4]["result"] == {}
+
+
+def test_oversize_frame_bounded_and_recovered(
+    db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A frame past _MAX_LINE_CHARS is a parse error, its remainder is
+    drained (not re-parsed as bogus frames), and the loop continues."""
+    rc, out = _drive(
+        db,
+        [
+            _INIT,
+            " " * (9 * 1024 * 1024),  # one hostile line, no structure
+            _req("ping", 7),
+        ],
+        capsys,
+    )
+    assert rc == 0
+    # init-ok, parse-error(null id, -32700), ping-ok — exactly three
+    # replies: the drain left nothing to re-parse.
+    assert len(out) == 3
+    assert out[1]["id"] is None
+    assert out[1]["error"]["code"] == -32700
+    assert out[2]["result"] == {}
+
+
 def test_ping_pre_and_post_init(
     db: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

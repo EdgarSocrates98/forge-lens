@@ -34,6 +34,10 @@ from forge_lens.storage.sqlite import SQLiteTraceStore
 # answer carries ours and the client decides whether it can proceed.
 _PROTOCOL_VERSION = "2024-11-05"
 _SUPPORTED_PROTOCOLS = frozenset({_PROTOCOL_VERSION})
+# Per-frame size bound on the stdio wire — same 8 MiB posture the API
+# applies to request bodies. Text-mode reads count chars, so the byte
+# cost is at most ~4x this on a non-ASCII frame — bounded either way.
+_MAX_LINE_CHARS = 8 * 1024 * 1024
 
 
 def _reject_constant(value: str) -> NoReturn:
@@ -43,16 +47,34 @@ def _reject_constant(value: str) -> NoReturn:
     raise ValueError(f"non-JSON literal {value}")
 
 
-def _num(args: dict[str, Any], name: str) -> int | float | str | None:
+def _num(args: dict[str, Any], name: str) -> int | float | None:
     """Optional numeric arg — bools, non-numerics and non-finite floats
-    raise the authored TypeError that maps to -32602 invalid params."""
+    raise the authored TypeError that maps to -32602 invalid params.
+
+    A string form is normalized here: ``int`` first (the shape every
+    consumer wants), ``float`` as the fractional fallback. Anything
+    unparseable is invalid-params (-32602) — letting it ride through
+    would make ``int()`` raise ValueError inside the call and leak an
+    -32603 internal error for what is plainly a client mistake."""
     v = args.get(name)
-    if v is not None and (
-        isinstance(v, bool)
-        or not isinstance(v, (int, float, str))
-        or (isinstance(v, float) and not math.isfinite(v))
-    ):
+    if v is None:
+        return None
+    if isinstance(v, bool) or not isinstance(v, (int, float, str)):
         raise TypeError(f"{name} must be a number")
+    if isinstance(v, float) and not math.isfinite(v):
+        raise TypeError(f"{name} must be a number")
+    if isinstance(v, str):
+        try:
+            return int(v)
+        except ValueError:
+            pass
+        try:
+            f = float(v)
+        except ValueError:
+            raise TypeError(f"{name} must be a number") from None
+        if not math.isfinite(f):
+            raise TypeError(f"{name} must be a number")
+        return f
     return v
 
 _TRACE_INPUT = {
@@ -264,7 +286,25 @@ def serve(db_path: str) -> int:
         print(json.dumps(out), flush=True)
 
     initialized = False
-    for line in sys.stdin:
+    while True:
+        # Bounded readline — a multi-GB single-line frame is the same
+        # hostile-payload class the API rejects at max_payload_bytes;
+        # text-mode (tests feed StringIO) so the bound counts chars.
+        line = sys.stdin.readline(_MAX_LINE_CHARS + 2)
+        if not line:
+            break
+        # Content of C chars + '\n' reads C+1: C == MAX is legal
+        # (len MAX+1), C > MAX always lands past that (or misses the
+        # newline inside the read window).
+        if len(line) > _MAX_LINE_CHARS + 1:
+            # Over-size frame — drain to the newline so the remainder
+            # doesn't spawn a cascade of bogus frames, then parse-error.
+            while not line.endswith("\n"):
+                line = sys.stdin.readline(_MAX_LINE_CHARS + 2)
+                if not line:
+                    break
+            _err(None, -32700, "parse error")
+            continue
         line = line.strip()
         if not line:
             continue
@@ -305,7 +345,6 @@ def serve(db_path: str) -> int:
             continue
         result: dict[str, Any]
         if method == "initialize":
-            initialized = True
             params = req.get("params")
             requested = (
                 params.get("protocolVersion")
@@ -314,13 +353,20 @@ def serve(db_path: str) -> int:
             result = {
                 "protocolVersion": (
                     requested
-                    if requested in _SUPPORTED_PROTOCOLS
+                    # A non-string version can't be supported — and an
+                    # unhashable one (object/array) would TypeError the
+                    # `in` probe and kill the loop.
+                    if isinstance(requested, str)
+                    and requested in _SUPPORTED_PROTOCOLS
                     else _PROTOCOL_VERSION
                 ),
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": "forge-lens",
                                "version": __version__},
             }
+            # Mark ready only after the negotiation result exists — an
+            # exception mid-handshake must not leave the loop half-open.
+            initialized = True
         elif method == "ping":
             result = {}
         elif method == "tools/list":
