@@ -5,6 +5,39 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 
 ## [Unreleased]
 
+### Fixed — ciclo 13.1 (CI cross-platform r3)
+
+Falhas latentes da wave expostas quando a matriz CI rodou completa pela
+primeira vez (Windows + todas as versões Python):
+
+- **`forge_lens/core/jsonutil.py` (novo)**: `json_depth`/`MAX_JSON_DEPTH`
+  compartilhados — a tolerância de recursão do `json.loads` varia por
+  build CPython, então o payload de 100k-colchetes retornava `-32600`
+  numa build e `-32700` noutra. O `mcp_server` aplica o guard lexical
+  antes de `json.loads` → `-32700` determinístico em toda plataforma;
+  `app.py` importa do módulo comum (o bound 512 fica único).
+- **`storage/sqlite._dump_with_raw_attrs`**: atributos `Any` profundos
+  queimavam o budget de recursão do serializer pydantic-core (medido
+  contra `sys.getrecursionlimit`, consumido diferente sob coverage no
+  Windows → `Circular reference detected`). O dump agora exclui
+  `attributes` do `model_dump` e os re-insere crus para o encoder C do
+  `json` — digest, events/links e merge-compare idênticos em bytes.
+- **`forge_bootstrap.write_launcher`**: `write_text` traduzia `\n`→
+  `\r\n` no Windows — o literal `\r\n` do `.cmd` virava `\r\r\n` e o
+  shim `#!/bin/sh` saía CRLF (quebrava o Git Bash). `newline=""` +
+  UTF-8 explícito mantêm os bytes exatos; teste valida por `read_bytes`.
+- **`test_forge_bootstrap` (17 casos)**: expectativas POSIX codificadas
+  viraram per-OS — `Scripts/` vs `bin/` (`_venv_python`/`_venv_bin`),
+  scan `py -3.x` vs `python3.x`, launcher `.cmd`+shim vs shim POSIX,
+  persistência `HKCU\Environment` vs shell-init, `execution_environment`,
+  e fixture `USERPROFILE` (o `Path.home()` do Python ≥3.13 no Windows
+  ignora `HOME` — o bloco env.sh vazava para o profile real).
+- **UTF-8 explícito** em `test_eval_stats_audit` (em-dash da reason
+  string), `test_mcp_matrix`/`gen_mcp_matrix` (doc com acentos) — o
+  default cp1252 do Windows corrompia as comparações.
+- **`test_platform_reliability`**: o nome com `?`/`%` é per-OS (`?` é
+  ilegal em filename Windows — `q%20x.db` lá, `q%20?.db` no POSIX).
+
 ### Fixed — ciclo 13.1 (review r2)
 
 - **`tests/bench/conftest.py`**: `os.getloadavg` não existe no Windows —

@@ -211,10 +211,40 @@ def _stronger_provenance(a: Provenance, b: Provenance) -> Provenance:
     return a if _PROVENANCE_RANK[a] <= _PROVENANCE_RANK[b] else b
 
 
+def _dump_with_raw_attrs(
+    model: Span | SpanEvent | SpanLink, *, exclude: set[str] | None = None
+) -> dict[str, Any]:
+    """``model_dump`` with the Any-typed ``attributes`` payload spliced
+    back raw.
+
+    Deep ``attributes`` trees go through pydantic-core's serializer when
+    included — its recursion budget burns against ``sys.getrecursionlimit``
+    headroom, which differs across builds (pytest/coverage consume frames).
+    Splicing the raw dict back keeps the serialized content identical while
+    the deep walk happens once in the C ``json`` encoder — the same on
+    every platform.
+    """
+    excl = {"attributes"} | (exclude or set())
+    dump = model.model_dump(mode="json", exclude=excl)
+    dump["attributes"] = model.attributes
+    return dump
+
+
+def _span_comparable_dump(span: Span) -> dict[str, Any]:
+    """Full span dump for digest/equality — deep attrs, events and links
+    all bypass the pydantic-core recursion budget."""
+    dump = _dump_with_raw_attrs(
+        span, exclude={"integrity_flags", "events", "links"}
+    )
+    dump["events"] = [_dump_with_raw_attrs(e) for e in span.events]
+    dump["links"] = [_dump_with_raw_attrs(lk) for lk in span.links]
+    return dump
+
+
 def _span_digest(span: Span) -> str:
     """Content hash of a span, excluding integrity flags (they evolve)."""
     payload = json.dumps(
-        _json_finite(span.model_dump(mode="json", exclude={"integrity_flags"})),
+        _json_finite(_span_comparable_dump(span)),
         sort_keys=True,
         default=str,
     )
@@ -307,14 +337,14 @@ def _derived_status_code(spans: list[Span]) -> str | None:
 
 def _events_json(events: list[SpanEvent]) -> str:
     dumped = [
-        e.model_copy(update={"time": ensure_aware(e.time)}).model_dump(mode="json")
+        _dump_with_raw_attrs(e.model_copy(update={"time": ensure_aware(e.time)}))
         for e in events
     ]
     return json.dumps(_json_finite(dumped), sort_keys=True, default=str)
 
 
 def _links_json(links: list[SpanLink]) -> str:
-    dumped = [lk.model_dump(mode="json") for lk in links]
+    dumped = [_dump_with_raw_attrs(lk) for lk in links]
     return json.dumps(_json_finite(dumped), sort_keys=True, default=str)
 
 
@@ -720,9 +750,7 @@ class SQLiteTraceStore:
             flags.discard(IntegrityFlag.ORPHAN)
         merged.integrity_flags = sorted(flags, key=lambda f: f.value)
 
-        if merged.model_dump(mode="json", exclude={"integrity_flags"}) == stored.model_dump(
-            mode="json", exclude={"integrity_flags"}
-        ):
+        if _span_comparable_dump(merged) == _span_comparable_dump(stored):
             return None
         return merged
 

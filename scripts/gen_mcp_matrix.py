@@ -133,13 +133,13 @@ def main(argv: list[str] | None = None) -> int:
         print(doc, end="")
         return 0
     if ns.check:
-        current = ns.out.read_text() if ns.out.exists() else None
+        current = ns.out.read_text(encoding="utf-8") if ns.out.exists() else None
         if current != doc:
             print(f"{ns.out}: fora de sincronia — rode "
                   f"scripts/gen_mcp_matrix.py", file=sys.stderr)
             return 1
         return 0
-    ns.out.write_text(doc)
+    ns.out.write_text(doc, encoding="utf-8")
     print(f"wrote {ns.out} ({len(doc)} bytes)")
     return 0
 

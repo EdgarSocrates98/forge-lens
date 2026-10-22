@@ -881,7 +881,7 @@ def test_gate_reason_strings_match_compare_contract() -> None:
     src = (
         Path(__file__).resolve().parents[2]
         / "src" / "forge_lens" / "eval" / "compare.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     for reason in (
         "metric not evaluated — cannot gate on unmeasured evidence",
         "pass_rate_b below minimum",
