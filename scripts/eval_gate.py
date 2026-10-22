@@ -584,8 +584,26 @@ def main(argv: list[str] | None = None) -> int:
                     dataset=candidate["dataset"] or ds_info["label"],
                 ),
             )
+        except Exception as exc:  # an engine fault is not a data verdict
+            report["verdict"] = {
+                "status": "internal_error",
+                "exit_code": _EXIT_INTERNAL,
+                "reason": f"{type(exc).__name__}: {exc}",
+                "evidence_failures": [],
+                "missing_evidence_failures": [],
+            }
+            print(_human_report(report), file=sys.stderr)
+            print(
+                json.dumps(report, indent=2, sort_keys=True, default=str)
+            )
+            return _EXIT_INTERNAL
+        try:
             gate_out = apply_gate(compare, gate)
         except (ValueError, TypeError) as exc:
+            # apply_gate's authored raises are gate-spec validation —
+            # a malformed criterion is usage (64). Spec errors inside
+            # evaluate_traces never reach here: run_evaluators reports
+            # them as evaluator_error results instead of raising.
             _usage_error(f"gate: {exc}")
         except Exception as exc:  # an engine fault is not a data verdict
             report["verdict"] = {

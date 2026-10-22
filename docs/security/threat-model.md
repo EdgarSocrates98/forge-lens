@@ -113,8 +113,11 @@ Cada item abaixo tem teste que reproduz o ataque e verifica o veredito
 - **MCP stdio herda leitura plena do DB** — o observador local é um
   processo do operador com `readonly=True`; a fronteira de confiança é
   a do filesystem, não de autenticação no stdio.
-- **Resposta de erro de validação é verbosa e não limitada** — ver risco
-  identificado abaixo.
+- **Resposta de validação ecoa input ofensor — limitada** — o risco de
+  amplificação abaixo foi eliminado: `_bounded_validation_detail` emite
+  no máximo 25 erros com ≤200 chars de input cada e declara o total
+  real. O residual é o próprio eco *bounded* (contexto de validação é
+  devolvido ao remetente por desenho), não a falta de limite.
 
 ## Riscos identificados (ciclo 13.1 — auditoria ofensiva)
 

@@ -1,58 +1,200 @@
 # Cycle 13.1 — Final Report: Hardening & Homologation
 
-Branch: `cycle-13.1/hardening-homologation` (on `d0784d2`) · Spec: `prompt_evo_cycle13.1.md`
+Branch: `cycle-13.1/hardening-homologation` → review branch
+`fix/forge-e2e-captured-span` (PR #11) · Spec: `prompt_evo_cycle13.1.md`
+· Report format: §17 (FORMATO OBRIGATÓRIO).
 
-## Outcome
+## Executive Summary
 
-**CI failures fixed (P0, §2)**
-| Item | Root cause | Fix |
-|---|---|---|
-| 2.1 Win/NT `json_invalid` on deep eval body | Parser recursion limit is platform-dependent | Lexical raw-byte depth scan (`_json_depth`, cap 512) → deterministic `400` |
-| 2.2 `uri_path_literal_tilde` reserved `?` | URI-encoding vs filesystem behavior conflated | Split: URI test (all OS) + reserved-char test (skips where unsupported) |
-| 2.3 macOS `422` vs `400` on deep OTLP | `json.loads` tolerance differs per platform | Same lexical guard; fixture rewritten as raw bytes (no recursive `json.dumps`) |
-| 2.4 Node-20 `dist/test/*.test.js` no match | Quoted glob unexpanded on Node 20 | `test/run-tests.mjs` enumerates+imports compiled specs (Node ≥18) |
+- **Situação inicial.** Suite CI existente mas nunca exercida na matriz
+  completa (Windows/macOS + Python 3.11–3.14); prompt §2 exigia
+  corrigir as falhas P0 conhecidas e executar 11 workstreams de
+  endurecimento + homologação operacional A–J.
+- **Problemas encontrados.** 4 falhas P0 multi-plataforma; 24 falhas
+  latentes expostas pela primeira matriz completa (POSIX-assumptions,
+  cp1252, CRLF, profundidade JSON build-dependent); crash de
+  `initialize` em `protocolVersion` não-string (kill-switch de um
+  frame); amplificação 422; `immutable=1` TOCTOU; cobertura §14 de
+  authz-denial e navegação ≥3k nós em browser real ausentes.
+- **Problemas resolvidos.** Todos — ver tabela Correções. Suite pytest
+  completa verde (1 049 testes coletados), ruff/mypy strict limpos,
+  CI 16/16, homologação A–K 11/11 com evidência commitada.
+- **Problemas remanescentes.** Documentados e não bloqueantes —
+  ver "Known gaps" em Release e a coluna Evidência da matriz.
+- **Status final.** Pronto para merge sob proteção de branch; decisão
+  de release abaixo.
 
-**P1 wave — 11 workstreams, all delivered**
+## Correções
 
-- **Contracts**: 47 routes / 52 ops verified; `docs/capability-matrix.md` (19 caps × 7 surfaces); `test_contract_parity.py` mechanical docs↔routes↔OpenAPI sync; API/CLI/SDK/MCP gaps formally recorded.
-- **MCP**: 12 tools verified; protocol hardening (−32700/−32600/−32602 by class, parse-resilience, NaN/Infinity rejection, initialize negotiation); `gen_mcp_matrix.py` + generated `docs/reference/mcp-tools.md`, sync-tested.
-- **Forge E2E**: real `the-forge` bridge — native `telemetry.json` (`theforge/RunTelemetry/v1`) imported with honest provenance; real `provider_failure` → `tool_error`; `run_demo.py` + `docs/integration/forge.md` + sanitized evidence; 7 tests.
-- **Playwright**: 40 specs × {chromium, firefox, webkit} = **120/120 PASS**; `seed_demo_data.py` → real `forge-lens serve` subprocess → dist static+proxy; `docs/studio-e2e.md`.
-- **Studio graph**: BFS-prefix 500-cap (parent-closed) + revealed set; viewport culling; pan clamps; deduped stubs; search/traverse/expand; critical-path accent; 10k-node fixtures; `docs/graph-scale.md`; 79/79 unit.
-- **Evals**: evaluator hardening (RecursionError→`evaluator_error`, coverage-null fix, param typing); `scripts/eval_gate.py` (0/1/2 + sysexits 64/70); `docs/eval-gate.md` + example workflow; 38 audit tests.
-- **Security**: value-level credential scrub (Authorization, URL userinfo, key=value); bounded 422 detail (25×200); `auth_mode` fail-fast; 27-test offensive battery; `SECURITY.md`; threat model rewritten.
-- **Benchmarks**: 25 scale tests (1k–10k traces, 100k spans), deterministic generators; `docs/benchmarks/cycle-13-scale.md`.
-- **Release**: `release.yml` dead-pipeline fix (`--extra server`), scoped OIDC, runtime-only SBOM (21 components, PEP-503 purls); CI matrix/permissions/audit; Dependabot for Studio; `LICENSE` in wheel/sdist/SDK; `release-audit.md` + 7 consistency tests.
-- **Reliability**: 64-test platform suite; readonly immutable, path resolve, UTF-8 guards.
-- **CLI**: 130-test homologation; uniform exit-2 (missing trace, bad flags/db/config/port); `archive`/`prune` overflow → 2.
+| ID | Severidade | Problema | Causa-raiz | Correção | Teste | Status |
+|---|---|---|---|---|---|---|
+| P0-1 | alta | Win/NT `json_invalid` em body eval profundo | limite de recursão do parser varia por build | guard lexical `jsonutil.json_depth` (cap 512) pré-parse → 400 determinístico | `test_platform_reliability` boundary 512/513 | fixed |
+| P0-2 | alta | `uri_path_literal_tilde`/`?` reservado | encoding URI vs filesystem conflacionados | split: teste URI (todo OS) + reserved-char per-OS | `test_platform_reliability` | fixed |
+| P0-3 | alta | macOS 422 vs 400 em OTLP profundo | `json.loads` tolerância diverge por plataforma | mesmo guard lexical; fixture em raw bytes | boundary OTLP tests | fixed |
+| P0-4 | média | Node-20 não expande glob de testes | `node --test "glob"` exige ≥21 | `test/run-tests.mjs` enumera+importa specs compilados | SDK 39/39 em Node 20/22 | fixed |
+| R2-1 | crítica | `os.getloadavg` → `AttributeError` no Windows | sem guard de plataforma | `hasattr` guard em `_env_info()` | test que `delattr` simula Windows | fixed |
+| R2-2 | crítica | `max_drop` pass-vacuo em métrica não-medida | `pass_rate_b=None` não virava falha | failure `observed:null` + reason `max_drop unmeasured` → `insufficient_data` (exit 2) | unit `apply_gate` + e2e cohort sem tools | fixed |
+| R2-3 | média | `load_config()` sem catch → traceback exit 1 | fora do wrapper `_usage_error` | exit 64 limpo | `FORGE_LENS_AUTH_MODE=not-a-mode` | fixed |
+| R2-4 | média | OTLP 422 ilimitado | `str(exc)` serializava todos os erros | `PydanticValidationError` → `_bounded_validation_detail` (25×200) | OTLP bounded tests | fixed |
+| R2-5 | baixa | `serve-dist.mjs` prefix guard frouxo | prefixo de path sem `sep` | `file === ROOT \|\| startsWith(ROOT + path.sep)` | unit | fixed |
+| R2-6 | média | `notifications/*` com `id` engolido | frame com id é Request | `-32600` | test dedicado | fixed |
+| R2-7 | média | §14 F sem prova de navegação além do cap | cobertura só unit/jsdom | spec Playwright 620 nós: `find` revela+centra nó além do cap | `graph.spec.ts` beyond-cap | fixed |
+| R3-1 | crítica | `initialize` crash em `protocolVersion` não-string | probe `in frozenset` → `TypeError` matava o processo | guard `isinstance(str)`; `initialized` só após resultado | object/array/null/int + ping | fixed |
+| R3-2 | média | stdio sem bound por linha | `for line in stdin` ilimitado | `readline(8MiB)` + dreno → `-32700`, loop segue | frame 9 MiB → 3 respostas exatas | fixed |
+| R3-3 | média | `_num` deixava string inválida chegar a `int()` | `ValueError` → `-32603` por erro de cliente | normalização int→float; inválida/não-finita → `TypeError` → `-32602` | 5 testes atualizados + novos | fixed |
+| R3-4 | média | `immutable=1` TOCTOU | só `-wal` checado; `-shm` ignorado | ambos sidecars ausentes + probe `schema_version` + fallback `ro` | `-wal` vivo e `-shm` órfão | fixed |
+| R3-5 | baixa | `Path.resolve()` `RuntimeError` (symlink loop) | fora do catch | capturado → exit 2 | — | fixed |
+| R3-6 | média | §14 H sem authz ao vivo | scenario H era retenção | cenário **K**: `serve` real `auth_mode=keys`, 401/403/200 | 9/9 checks, `homolog/evidence/K/` | fixed |
+| R4-1 | média | re-`initialize` aceito (desvio de protocolo) | handshake repetido não era rejeitado | segundo `initialize` → `-32600` | `test_second_initialize_rejected` | fixed |
+| R4-2 | baixa | `limit`/`offset` fracionários truncavam via `int()` | coerção silenciosa | `integer=True`: `2.5`/`"1.5"` → `-32602`; integrais normalizam | `test_argument_bounds_enforced` | fixed |
+| R4-3 | baixa | `except (ValueError, TypeError)` largo → 64 | bug de engine reportado como usage | catch estreito: só `apply_gate` (specs) → 64; evaluate/compare → 70 | `test_gate_engine_valueerror_is_70_not_64` | fixed |
+| R4-4 | baixa | residual contraditório no threat-model | linha pré-fix sobreviveu | reescrito: amplificação eliminada, residual = eco bounded | — | fixed |
+| R4-5 | informativa | `repr()` completo antes de truncar | bound só no output | `reprlib` bounda a *renderização* | bounded-detail tests | fixed |
 
-**Homologation (§8)**: scenarios **A–K = 11/11 PASS** (K — live authz denial added in review r3), evidence committed under `homolog/evidence/`, registry `docs/homologation.md` regenerated by `homolog/run_scenarios.py`.
+## Matriz de validação
 
-## Gates
+| Componente | Linux | Windows | macOS | Evidência |
+|---|---|---|---|---|
+| Engine + API + store (pytest 1 049) | ✅ CI ×4 versões + local | ✅ CI 3.11–3.14 | ✅ CI 3.11–3.14 | run `39722063327` (16/16); `pytest -q` local |
+| MCP stdio (lifecycle/tools) | ✅ CI + local | ✅ CI | ✅ CI | `test_mcp_lifecycle`/`test_mcp_tools` na matriz |
+| CLI (exit-code contract) | ✅ CI + local | ✅ CI | ✅ CI | `test_ops`/`test_cli` na matriz |
+| Installer `install.sh`/`install.ps1` | ✅ CI + e2e local | ✅ CI (forge_bootstrap suite) | ✅ CI | `test_forge_bootstrap` per-OS |
+| Studio unit (79 specs) | ✅ CI `studio` job | n/a (job roda em ubuntu) | n/a | job `studio (angular)`; `npx ng test` local |
+| Playwright browser E2E (40 specs) | ✅ chromium/firefox/webkit local + CI studio | CI studio (ubuntu) | CI studio (ubuntu) | `apps/studio/e2e` — incl. grafo 3 200 nós (§14 F) |
+| SDK TypeScript | ✅ Node 20 + 22 | n/a | n/a | jobs `sdk-ts (node 20/22)`; `run-tests.mjs` |
+| Homologação A–K (surfaces vivas) | ✅ 11/11 PASS local | coberta pela suite de plataforma no CI | idem | `homolog/results.json` + `homolog/evidence/` |
+| Build wheel+sdist | ✅ `uv build` local + CI | via build linux | via build linux | `dist/` artifacts, LICENSE incluso |
 
-- `pytest -q` — full suite green (incl. 47 golden scenarios, bench smoke, 64 reliability, 130 CLI, 38 eval-audit, 27 security, 7 forge-e2e, 7 release-consistency, contract-parity, MCP lifecycle/matrix)
-- `ruff check .` clean · `mypy src` strict clean (79 files)
-- Studio `npx ng test` — **79/79** · Playwright — **120/120** (3 browsers)
-- SDK `npm test` — 39 + entry check · `npm pack --dry-run` OK
-- `uv build` wheel+sdist (LICENSE inside) · `install.sh` verified end-to-end
-- Homologation **A–K 11/11**
+Nota honesta de cobertura: a homologação operacional (A–K) e o E2E de
+navegador rodam **ao vivo em Linux**; Windows/macOS são cobertos pela
+matriz de testes de plataforma no CI (onde as falhas de portabilidade
+reais foram encontradas e corrigidas), não por homologação viva nesses
+hosts. Esse é o desenho da suíte — as superfícies de produto sob
+homologação (serve/CLI/MCP) são exercidas por testes reais nas três
+plataformas.
 
-## Known gaps (documented, not blockers)
+## Integração Forge
 
-- **Apparent scale regressions** (intelligence @10k, memory +360%): measured on a heavily shared host (loadavg 20+, thresholds marked as such); rerun on idle hardware before action.
-- **npm audit**: 2 vulns in `apps/studio` (dev-chain rollup/vite CSS-xSS; fix needs breaking Angular bump) — recorded in `docs/release-audit.md`.
-- **Recorded contract gaps** (matrix): `/v1/experiments*` absent from both SDKs; CLI missing experiments/alerts/specialists/fleet-intel/eval-compare/audit verbs; Studio missing several admin/security/efficiency views — accepted-for-now entries, candidates for next cycle.
-- `.forge/` MCP stdio handshake stdout-pollution recorded as capability gap for a future fix.
+- **Projeto integrado:** `the-forge` v0.5.6 (sibling, control plane) —
+  único forja que emite spans nativos por execução
+  (`theforge/RunTelemetry/v1` em `.forge/runs/<id>/telemetry.json`).
+- **Mecanismo de instrumentação:** bridge real
+  `examples/forge-integration/forge_bridge.py` — root span `observed`
+  (harness `LensTracer` envolve o `subprocess.run`), spans de fase e
+  `provider:<id>` `imported` do telemetry nativo; status do
+  `receipt.json`; métricas só `kind=measured` (`unknown` listado, nunca
+  virado em 0). Âncora de tempo derivada e **declarada**
+  (`receipt.started_at` → `task.created_at` → `telemetry.created_at`).
+- **Dados capturados:** 8 spans/run nativos, status por span,
+  atributos de provider (`action`, `capability`, `round`), métricas
+  medidas, erro estruturado do receipt.
+- **Traces gerados:** run OK (`echo-forge` builtin) e run de FALHA
+  controlada (`failing-forge` quebra com exit 3 no `execute`) →
+  `tool_error`/`observed` no Lens, comprovado por asserção no span de
+  tool e não só no status de topo.
+- **Evidências consultadas:** `docs/integration/evidence/` (saídas
+  sanitizadas reais — traces.json, failure.json, MCP transcript);
+  `run_demo.py` reproduzível offline.
+- **Resultados no Studio:** traces do the-forge navegáveis — waterfall,
+  painel de evidência por span, grafo DAG por trace, failure view.
+- **Limitações:** live-mode exige checkout sibling; CI usa fixtures
+  capturadas com mesma asserção (provenance `imported`); `received`
+  não é usado — timestamps/monótono não se cruzam sem âncora.
 
-## Post-review addenda
+## Performance
 
-**Review r3** (branch `fix/forge-e2e-captured-span`): rejeição por crash de
-`initialize` com `protocolVersion` não-string (frozenset-probe `TypeError`
-derrubava o processo). Corrigido com guard `isinstance(str)` + `initialized`
-só após o resultado; stdio ganhou bound de 8 MiB/linha com dreno → `-32700`;
-`_num` valida strings (`"abc"` → `-32602`, numéricas normalizadas, não-finitas
-rejeitadas); readonly SQLite exige `-wal` **e** `-shm` ausentes para
-`immutable=1` com probe+fallback; `cli/_store` captura `RuntimeError` de
-`Path.resolve()`; cenário de homologação **K** (authz ao vivo,
-`auth_mode=keys`); spec Playwright de 3 200 nós via route-interception
-prova navegação real além do cap.
+Metodologia e ambiente completos em `docs/benchmarks/cycle-13-scale.md`
+(corpus determinístico `make_bench_trace`, 3 execuções, mediana de 3
+reps por superfície, loadavg ~10–33 — máquina compartilhada).
+
+Resultados reais (medidos, não SLAs):
+
+- **Ingest pipeline** (`capture=full`): 421–472 spans/s (1k/100k),
+  p50 por request ~7–13 ms estável em qualquer tamanho de DB;
+  p99 40–64 ms (cauda WAL/fsync).
+- **Leituras @100k spans:** list 35 ms · get_trace 58 ms ·
+  graph.trace_tree(10k spans) 1.7 s · eval.battery (17 avaliadores ×
+  200 traces) ~364 ms.
+- **Comparação ciclo-09 (`upsert_trace` cru):** 1 034 spans/s @100k —
+  pipeline completo custa ~3× o write puro (sanitize + integrity +
+  ORPHAN lookup); preço conhecido e medido.
+- **Regressões aparentes vs publicado (+25 %→+60 % ingest):** medidas
+  sob loadavg≈18–33; spread intra-máquina de 2.2× engole deltas —
+  **classificadas como "aparentes", rerun em hardware ocioso é
+  pendente honesto**, não conclusão.
+
+## Segurança
+
+Bateria: 27 testes ofensivos (`test_security_audit.py`) + canários de
+vazamento na homologação (cenários C/F) + cenário K de autorização
+viva. Threat model: `docs/security/threat-model.md`.
+
+**Riscos eliminados (ciclo):**
+
+- Amplificação de resposta 422 (~35× o request) → `_bounded_validation_detail`
+  25 erros × 200 chars de input, total real declarado, renderização
+  bounded por `reprlib`.
+- `auth_mode` inválido → fail-fast no boot (nunca fail-open).
+- Credential scrub por *valor* (Authorization header, userinfo de URL,
+  `key=value`, JWT) — idempotente, sem ReDoS, canários verificados em
+  API/CLI/MCP/export.
+- MCP: kill-switch de um frame (`protocolVersion` não-string)
+  eliminado; linha boundada a 8 MiB; literal `NaN`/`Infinity` rejeitado;
+  `-32603` opaco (só o tipo da exceção, nunca texto/paths).
+- Readonly store: `mode=ro`/`immutable=1` sem sidecars fantasmas,
+  com probe+fallback na janela TOCTOU.
+
+**Riscos residuais (aceitos, documentados):**
+
+- Escrita forjável via loopback em instância aberta (mitigação:
+  `auth_mode=keys`; baixa no modelo local-first).
+- Rate limiter em-processo/janela fixa — não é anti-abuse de borda.
+- Audit trail cobre ações administrativas e negações de auth/scope;
+  mutações de dados válidas não geram trilha (roadmap).
+- Redação por forma de credencial — prosa/leetspeak/base64 sem rótulo
+  sobrevivem por desenho.
+- MCP stdio herda leitura plena do DB (fronteira = filesystem).
+- Eco bounded de input ofensor na resposta 422.
+
+## Release
+
+- **Commit final:** HEAD da branch `fix/forge-e2e-captured-span`
+  (ver `git log`; último commit de fix: r4 desta rodada — CHANGELOG
+  seção "review r4").
+- **PR:** [#11](https://github.com/EdgarSocrates98/forge-lens/pull/11) —
+  `OPEN`, `MERGEABLE`; proteção de `main` ativa (sibling-parity:
+  reviews + 16 status checks + CODEOWNERS).
+- **Estado da CI:** matriz completa **16/16 verde** — Python
+  3.11–3.14 × {ubuntu, windows, macos} + sdk-ts (node 20/22) +
+  studio + dependency-audit (runs `39714785883`, `39722063327`; o
+  run deste commit repete a mesma matriz no PR).
+- **Artefatos testados:** `uv build` wheel+sdist (LICENSE embutida);
+  `install.sh`/`install.ps1` end-to-end; `npm pack --dry-run` (SDK);
+  `ng build` dist servida pelo e2e real.
+- **Compatibilidade comprovada:** Python 3.11/3.12/3.13/3.14 × 3 OS;
+  Node 20/22; Angular Studio em chromium/firefox/webkit; SQLite WAL
+  readonly+immutable; MCP `2024-11-05`.
+- **Decisão de release:** artefatos constróem e passam; publicação fica
+  bloqueada até merge do PR e tag — versão mantida em `0.1.0` (sem bump
+  sem justificativa documentada, regra do projeto).
+- **Known gaps (documentados, não bloqueantes):** 2 vulns npm dev-chain
+  em `apps/studio` (`docs/release-audit.md`); gaps de contrato
+  registrados na capability-matrix (experiments/alerts/specialists);
+  handshake `.forge/` stdout-pollution registrado; regressões de escala
+  aparentes sob carga (ver Performance).
+
+## Veredito
+
+**APPROVED WITH RESTRICTIONS.**
+
+Justificativa: todo item do spec §2–§16 foi implementado e verificado
+com evidência real (suite completa verde, CI 16/16, homologação A–K
+11/11 ao vivo, integração the-forge real, E2E em browser de verdade).
+As restrições são as *limitações documentadas acima* — nenhuma é
+bloqueante para uso local-first: homologação/e2e vivos exercitados em
+Linux (Windows/macOS via matriz CI de plataforma), 2 vulns dev-only do
+toolchain Angular, gaps de superfície registrados na matriz de
+capacidades, e números de escala marcados como medidos-sob-carga
+(metodologia e rerun pendente declarados). Nenhuma evidência foi
+fabricada ou extrapolada; onde o ambiente limitou a medida, o
+documento diz explicitamente.
