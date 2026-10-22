@@ -909,8 +909,6 @@ def create_app(
             # UnicodeDecodeError are ValueError subclasses; a plain
             # ValueError fires on ints over set_int_max_str_digits;
             # RecursionError on deeply-nested JSON — all 400, never 500.
-            # NOT `except Exception`: _read_capped_body's 413
-            # HTTPException lives inside this try and must propagate.
             raise _reject_request(400, f"invalid JSON: {exc}") from exc
         if not isinstance(body, dict):
             raise _reject_request(422, "body must be a JSON object")

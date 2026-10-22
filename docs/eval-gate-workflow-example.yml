@@ -44,7 +44,9 @@ jobs:
       # SQLite e o CLI `forge-lens`. <<< ajuste a ref/fonte.
       - name: Install forge-lens
         run: |
-          pip install "forge-lens @ git+https://github.com/EdgarSocrates98/forge-lens.git@main"
+          # <<< pin a released tag or commit SHA — a floating @main can
+          # drift mid-pipeline (substitua pela tag publicada)
+          pip install "forge-lens @ git+https://github.com/EdgarSocrates98/forge-lens.git@8a9ecf2648ab05aa943e6305aea276331b601a8d"
 
       # ── 1. Produza as traces da coorte candidata ─────────────────────
       # Seu harness de teste roda o agente instrumentado e exporta as

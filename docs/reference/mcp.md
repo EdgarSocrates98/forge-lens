@@ -43,9 +43,12 @@ existir um **ponto de instrumentação real**:
 JSON-RPC 2.0 sobre stdin/stdout (uma mensagem por linha, JSON estrito —
 literais `NaN`/`Infinity` são erro de parse), store SQLite aberta em modo
 **readonly**. Métodos: `initialize`, `ping`, `tools/list`, `tools/call`.
+Cada linha é limitada a **8 MiB** (o mesmo bound do corpo HTTP) — frames
+maiores viram `-32700` e o restante é drenado sem re-parsear.
 
 **Lifecycle.** `initialize` negocia `protocolVersion`: a única revisão
-suportada é `2024-11-05` — pedida compatível é ecoada, qualquer outra
+suportada é `2024-11-05` — uma string pedida compatível é ecoada,
+qualquer outro valor (versão desconhecida, objeto, array, número, nulo)
 recebe a suportada de volta (o cliente decide se prossegue); a resposta
 anuncia `capabilities: {"tools": {"listChanged": false}}` e
 `serverInfo`. **Toda request exige `initialize` antes, exceto `ping`** —
@@ -63,7 +66,7 @@ uma chamada malformada nunca derruba o servidor.
 | JSON válido que não é Request (não-objeto; `id` sem `method`) | `-32600` invalid request |
 | método desconhecido | `-32601` |
 | request pré-`initialize` (exceto `ping`) | `-32602` |
-| `params`/`arguments` não-objeto, `name` ausente/mistipado, `TypeError` de validação (tipo errado, `offset` fora de int64, float não-finito) | `-32602` invalid params |
+| `params`/`arguments` não-objeto, `name` ausente/mistipado, `TypeError` de validação (tipo errado, `offset` fora de int64, float não-finito, string numérica que não parseia — ex. `"limit": "abc"`) | `-32602` invalid params |
 | falha interna da tool | `-32603` **opaco** — `internal tool error: {TipoDaExcecao}`, nunca o texto (pode embutir payload/paths) |
 | tool desconhecida ou miss de dados (trace inexistente) | `result` com `isError: true` |
 

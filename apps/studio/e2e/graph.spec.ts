@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures';
 import { manifest } from './seed';
+import { bigTraceGraph } from './graph-scale';
 
 const m = manifest();
 
@@ -76,6 +77,36 @@ test.describe('graph explorer', () => {
     // revealed: the needle is drawn, hit-marked, and the camera
     // centered on it (viewport culling means only in-view nodes are
     // in the DOM now — the count is smaller than the cap, not larger)
+    await expect(needle).toHaveCount(1);
+    await expect(needle).toHaveClass(/hit/);
+    expect(await svg.getAttribute('viewBox')).not.toBe(vb0);
+  });
+
+  test('3k-node trace: find reveals and centers beyond the cap', async ({ page }) => {
+    // §14 cenário F — real navigation at ≥3 000 vértices. The payload is
+    // synthetic (route interception, no backend needed) but a real
+    // browser drives the full BFS-cap → find → reveal → center path.
+    const id = '3'.repeat(32);
+    await page.route(/\/v1\/graph\/traces\/[^/]+$/, route =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(bigTraceGraph(3200, id)),
+      }));
+
+    await page.goto(`/graph?trace_id=${id}`);
+    const svg = page.locator('svg[aria-label="execution graph"]');
+    await expect(page.locator('.err-banner')).toContainText('graph truncated');
+    await expect(svg.locator('g.node')).toHaveCount(500);
+
+    // the deepest node sits far past the BFS prefix — undrawn until
+    // the search reveals it
+    const needle = svg.locator('g.node', { hasText: 'op 3199' });
+    await expect(needle).toHaveCount(0);
+
+    await page.getByLabel('find node').fill('n3199');
+    const vb0 = await svg.getAttribute('viewBox');
+    await page.getByRole('button', { name: 'find', exact: true }).click();
+
     await expect(needle).toHaveCount(1);
     await expect(needle).toHaveClass(/hit/);
     expect(await svg.getAttribute('viewBox')).not.toBe(vb0);

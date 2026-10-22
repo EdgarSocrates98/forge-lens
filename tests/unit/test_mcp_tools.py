@@ -402,11 +402,10 @@ def test_malformed_args_error_never_kills_loop(
         ],
         capsys,
     )
-    for rid in range(1, 6):
+    # "lots" can't parse as a number — invalid params like the rest
+    # (a str that reached int() used to leak -32603 for a client error)
+    for rid in range(1, 7):
         assert by_id[rid]["error"]["code"] == -32602, rid
-    # "lots" passes the type check then fails int() — a real internal
-    # ValueError, i.e. -32603, not invalid-params
-    assert by_id[6]["error"]["code"] == -32603
     assert "tools" in by_id[7]["result"]
 
 
@@ -428,16 +427,22 @@ def test_ping_allowed_before_initialize(
 
 
 def test_internal_error_is_opaque_on_the_wire(
-    seeded_db: Path, capsys: pytest.CaptureFixture[str]
+    seeded_db: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """-32603 carries the exception TYPE only — exception text can
     embed payload fragments/paths/secrets and never crosses."""
     secret = "sk-ant-oat01-SECRET-VALUE-9f8e7d6c"
+    # An impl raising mid-call is the -32603 path — stage it via the
+    # store seam so the ValueError message itself carries the secret.
+    def _boom(*a: Any, **kw: Any) -> Any:
+        raise ValueError(secret)
+
+    monkeypatch.setattr(SQLiteTraceStore, "list_traces", _boom)
     by_id = _serve(
         seeded_db,
-        # a str limit passes the arg type check, then int() raises
-        # ValueError whose message embeds the literal — the secret
-        [_call_tool(1, "lens.list_traces", {"limit": secret})],
+        [_call_tool(1, "lens.list_traces", {"limit": 5})],
         capsys,
     )
     resp = by_id[1]
@@ -489,7 +494,7 @@ def test_sessions_tool_rolls_up(
         "session_id", "traces", "spans",
         "first_started_at", "last_activity_at",
     }
-    assert by_id[2]["error"]["code"] == -32603
+    assert by_id[2]["error"]["code"] == -32602
 
 
 def test_sessions_tools_offset_pages(
@@ -516,9 +521,9 @@ def test_sessions_tools_offset_pages(
     t1 = _payload(by_id[4])["tools"]
     if t1:
         assert t0[0]["tool"] != t1[0]["tool"]
-    # "x" fails int() — a real ValueError → -32603; a bool trips the
-    # authored arg-type check → -32602 invalid params
-    assert by_id[5]["error"]["code"] == -32603
+    # an unparseable str is invalid params like the bool — both trip
+    # the authored arg check now (-32602), not an internal fault
+    assert by_id[5]["error"]["code"] == -32602
     assert by_id[6]["error"]["code"] == -32602
 
 
@@ -544,4 +549,4 @@ def test_tools_tool_rolls_up(
     ws = [r for r in rows if r["tool"] == "web_search"]
     assert ws
     assert ws[0]["calls"] >= 4  # seeded fixture may add more web_search calls
-    assert by_id[2]["error"]["code"] == -32603
+    assert by_id[2]["error"]["code"] == -32602
