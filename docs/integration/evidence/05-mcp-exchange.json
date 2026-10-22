@@ -1,0 +1,88 @@
+{
+  "failure": {
+    "payload": {
+      "category": "tool_error",
+      "confidence": "observed",
+      "detail": "tool_error: ['provider:failing-forge']",
+      "evidence": {
+        "messages": [
+          "FORGE-PROTO-EXIT: execute: exit code 3; stderr: failing-forge: deliberate crash on execute"
+        ],
+        "names": [
+          "provider:failing-forge"
+        ],
+        "span_ids": [
+          "6a294f87a4861690"
+        ]
+      },
+      "failed": true,
+      "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+    },
+    "result_meta": {}
+  },
+  "initialize": {
+    "capabilities": {
+      "tools": {
+        "listChanged": false
+      }
+    },
+    "protocolVersion": "2024-11-05",
+    "serverInfo": {
+      "name": "forge-lens",
+      "version": "0.1.0"
+    }
+  },
+  "list_traces": {
+    "payload": {
+      "traces": [
+        {
+          "ended_at": "2026-10-22T00:24:50.588389+00:00",
+          "error_count": 2,
+          "project_id": "forge-integration",
+          "root_span_id": "0ce95890bfd9db0d",
+          "session_id": "forge-integration-demo",
+          "span_count": 9,
+          "started_at": "2026-10-22T00:24:35.759225+00:00",
+          "status": "error",
+          "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+        },
+        {
+          "ended_at": "2026-10-22T00:24:35.755744+00:00",
+          "error_count": 0,
+          "project_id": "forge-integration",
+          "root_span_id": "b9269ba4f3cb2ec9",
+          "session_id": "forge-integration-demo",
+          "span_count": 9,
+          "started_at": "2026-10-22T00:24:10.372095+00:00",
+          "status": "ok",
+          "trace_id": "fc42c61a699c7bfd16f1c5bf9ddef7fc"
+        }
+      ]
+    },
+    "result_meta": {}
+  },
+  "stats": {
+    "payload": {
+      "db_size_bytes": 391216,
+      "error_spans": 2,
+      "schema_version": "1.0.0",
+      "spans": 18,
+      "traces": 2
+    },
+    "result_meta": {}
+  },
+  "tools_listed": [
+    "lens.capabilities",
+    "lens.cost",
+    "lens.detect_loops",
+    "lens.failure",
+    "lens.get_trace",
+    "lens.list_datasets",
+    "lens.list_traces",
+    "lens.sessions",
+    "lens.stats",
+    "lens.tools",
+    "lens.trace_efficiency",
+    "lens.correlate"
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "candidates": [
+    {
+      "capability": "demo.failcrash",
+      "matched": {
+        "dependencies": [],
+        "file_globs": [],
+        "keywords": []
+      },
+      "provider": "failing-forge",
+      "rank_key": [
+        3
+      ],
+      "state": "supported"
+    }
+  ],
+  "confidence": {
+    "level": "high",
+    "measured_signals": [
+      "requested_capability"
+    ],
+    "unresolved": []
+  },
+  "created_at": "2026-10-22T00:14:03.211615Z",
+  "fallbacks_used": [],
+  "limitations": [],
+  "negotiation": [],
+  "pattern": "route",
+  "producer": {
+    "id": "theforge",
+    "version": "0.5.6"
+  },
+  "reason": "requested capability demo.failcrash; pinned provider failing-forge",
+  "schema": "theforge/RoutingDecision/v1",
+  "selected": [
+    {
+      "action": "explode",
+      "capability": "demo.failcrash",
+      "provider": "failing-forge",
+      "role": "primary"
+    }
+  ],
+  "shadow": null,
+  "status": "routed",
+  "task_id": "20261022T001402Z-d554648c",
+  "unknowns": []
+}

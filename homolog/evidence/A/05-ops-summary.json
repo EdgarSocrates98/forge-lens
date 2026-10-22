@@ -1,0 +1,1 @@
+{"project_id":"default","stats":{"traces":1,"spans":3,"error_spans":0,"db_size_bytes":172112,"schema_version":"1.0.0"},"recent_traces":1,"recent_failures":[],"note":"bounded window (200 traces) — not a fleet-wide total"}

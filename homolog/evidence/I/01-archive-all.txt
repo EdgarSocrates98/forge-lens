@@ -1,0 +1,6 @@
+$ forge-lens archive --db /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/I/data.db --before 2260-01-01T00:00:00+00:00 --out /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/I/backup.ndjson
+rc=0
+--- stdout ---
+archived 2 trace(s) → /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/I/backup.ndjson
+
+--- stderr ---

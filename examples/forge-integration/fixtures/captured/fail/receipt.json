@@ -1,0 +1,67 @@
+{
+  "created_at": "2026-10-22T00:14:03.991573Z",
+  "error": {
+    "code": "FORGE-PROTO-EXIT",
+    "detail": "execute: exit code 3; stderr: failing-forge: deliberate crash on execute",
+    "field": null,
+    "unlock": null
+  },
+  "finished_at": "2026-10-22T00:14:03.991768Z",
+  "forge_version": "0.5.6",
+  "inputs": {
+    "budget_sha256": "48813300151a7bfce6bf7bdfc512e573cbe380e2567cfebdbf6fadb8a16118f9",
+    "complexity_sha256": "48f206e25c5cca9baaac5a9b5bab3db6bc227fee35cfa2e8b2f2742e8d9b067e",
+    "context_round_sha256": [],
+    "context_sha256": "96f495cab09904c08207ca0dffe8297787dfd74afef43128b4878d1babae4f52",
+    "handoff_sha256": null,
+    "risk_sha256": "df0843bdad1505b68705dc86218d31794f1ca37f934f298296eb1ed08c0ef585",
+    "routing_proposal_sha256": null,
+    "routing_sha256": "c2a8ba277a3e8ecee9c2f187c760610eb7d9dbe73ae819df6c4a0d23247ac5e4",
+    "task_sha256": "1cf12a78283a8ea35abf86ed8980dc9b207ca1b0f31d413b87546e2e937650b1"
+  },
+  "kind": "run",
+  "limitations": [
+    "complexity: repositories: unknown: no workspace descriptor",
+    "complexity: technologies: unknown: no workspace descriptor",
+    "complexity: estimated_context: unknown: context bytes not estimated pre-broker",
+    "git: not a repository",
+    "provider-revalidation-undeclared"
+  ],
+  "parent_run": null,
+  "plan": null,
+  "plan_node": null,
+  "producer": {
+    "id": "theforge",
+    "version": "0.5.6"
+  },
+  "provider": {
+    "executable": "<forges>/the-forge/.venv/bin/python3",
+    "fingerprint": "3289e69fdea64a84ce3ef31fd7ef76322166e30fb0d5ada5499b73783348b0d0",
+    "id": "failing-forge",
+    "manifest_sha256": "0aceb0ead86806be1613566bd3ed289be24c4ba460afd21b352f916dface72bc",
+    "native_surface_fingerprint": null,
+    "observed_version": "0.0.1",
+    "surface_fingerprint": "3ddcd10a82f9ad6a3d6b1a0d10bfe2e4de453c0a8f46b4add32323197a8f0d78",
+    "trust": "unverified",
+    "version": "0.0.1"
+  },
+  "provider_receipt": null,
+  "replay_of": null,
+  "reproducibility": {
+    "level": "partially_reproducible",
+    "reasons": [
+      "context verification not performed",
+      "forge verification not_performed",
+      "run status is provider_failure"
+    ]
+  },
+  "result_sha256": null,
+  "resumed_from": null,
+  "run_id": "20261022T001402Z-d554648c",
+  "schema": "theforge/ExecutionReceipt/v1",
+  "started_at": "2026-10-22T00:14:02.953542Z",
+  "status": "provider_failure",
+  "telemetry_sha256": "ed2c0b24e66f67abadabd1fa6cd98eef1a773ad9c0a8f3b056338b4859efa5c6",
+  "unknowns": [],
+  "verification_sha256": "5028417ef6511d17c615729cb5300ad3bee3f0ca0cb3464e4f8cbcb6aeffcf36"
+}

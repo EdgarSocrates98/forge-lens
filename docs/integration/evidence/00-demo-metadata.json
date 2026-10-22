@@ -1,0 +1,15 @@
+{
+  "fail_run_id": "20261022T002445Z-479d51e1",
+  "fail_trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4",
+  "live": true,
+  "mechanism": {
+    "child_spans": "imported — theforge/RunTelemetry/v1 de .forge/runs/<id>/telemetry.json, âncora derivada de receipt.started_at",
+    "reads": "REST /v1/traces(+failure) + MCP stdio tools/call",
+    "root_spans": "observed — subprocess wall-clock via LensTracer",
+    "transport": "HTTPExporter → POST /v1/traces (socket real)"
+  },
+  "ok_run_id": "20261022T002417Z-f85e0e79",
+  "theforge_argv": [
+    "<forges>/the-forge/.venv/bin/theforge"
+  ]
+}

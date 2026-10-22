@@ -1,0 +1,112 @@
+[
+  {
+    "anchored_at": "receipt.started_at",
+    "error": null,
+    "exit_code": 0,
+    "imported_spans": 8,
+    "limitations": [
+      "context-not-reverified"
+    ],
+    "measured_metrics": {
+      "bytes_hashed": 0.0,
+      "cache_hits": 0.0,
+      "cache_misses": 0.0,
+      "context_bytes": 0.0,
+      "context_ms": 87.151,
+      "evidence_returned": 0.0,
+      "fallbacks_used": 0.0,
+      "files_cited": 0.0,
+      "files_hashed": 0.0,
+      "files_scanned": 0.0,
+      "files_selected": 0.0,
+      "findings_returned": 1.0,
+      "negotiation_rounds": 0.0,
+      "provider_ms": 5919.198,
+      "providers_executed": 1.0,
+      "routing_ms": 11310.311,
+      "scan_ms": 1.759
+    },
+    "mode": "live",
+    "result": {
+      "evidence": 0,
+      "findings": 1,
+      "status": "ok"
+    },
+    "routing": {
+      "capability": "demo.echo",
+      "provider": "echo-forge",
+      "reason": "ambiguous: only 1 signal type matched for echo-forge/demo.echo (need 2); pinned provider echo-forge",
+      "status": "routed"
+    },
+    "run_id": "20261022T002417Z-f85e0e79",
+    "run_status": "ok",
+    "trace_root_span_id": "b9269ba4f3cb2ec9",
+    "unknowns": [
+      "agent_calls",
+      "knowledge_bytes",
+      "planning_calls",
+      "semantic_planner_calls",
+      "semantic_resolver_calls",
+      "skill_bytes",
+      "skills_considered",
+      "skills_loaded",
+      "subagent_calls",
+      "verification_calls"
+    ]
+  },
+  {
+    "anchored_at": "receipt.started_at",
+    "error": {
+      "code": "FORGE-PROTO-EXIT",
+      "detail": "execute: exit code 3; stderr: failing-forge: deliberate crash on execute",
+      "field": null,
+      "unlock": null
+    },
+    "exit_code": 4,
+    "imported_spans": 8,
+    "limitations": [
+      "provider-revalidation-undeclared"
+    ],
+    "measured_metrics": {
+      "bytes_hashed": 0.0,
+      "cache_hits": 0.0,
+      "cache_misses": 0.0,
+      "context_bytes": 0.0,
+      "context_ms": 183.511,
+      "evidence_returned": 0.0,
+      "fallbacks_used": 0.0,
+      "files_cited": 0.0,
+      "files_hashed": 0.0,
+      "files_scanned": 1.0,
+      "files_selected": 0.0,
+      "findings_returned": 0.0,
+      "negotiation_rounds": 0.0,
+      "provider_ms": 677.108,
+      "providers_executed": 1.0,
+      "routing_ms": 1839.51,
+      "scan_ms": 78.166
+    },
+    "mode": "live",
+    "routing": {
+      "capability": "demo.failcrash",
+      "provider": "failing-forge",
+      "reason": "requested capability demo.failcrash; pinned provider failing-forge",
+      "status": "routed"
+    },
+    "run_id": "20261022T002445Z-479d51e1",
+    "run_status": "provider_failure",
+    "trace_root_span_id": "0ce95890bfd9db0d",
+    "unknowns": [
+      "agent_calls",
+      "knowledge_bytes",
+      "planning_calls",
+      "semantic_planner_calls",
+      "semantic_resolver_calls",
+      "skill_bytes",
+      "skills_considered",
+      "skills_loaded",
+      "subagent_calls",
+      "verification_calls"
+    ]
+  }
+]

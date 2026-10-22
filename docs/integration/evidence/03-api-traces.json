@@ -1,0 +1,570 @@
+{
+  "f6c8dfe3a2c250569125edcc9ca3a1e4": {
+    "ended_at": "2026-10-22T00:24:50.588389Z",
+    "project_id": "forge-integration",
+    "provenance": "observed",
+    "resource_attributes": {},
+    "root_span_id": "0ce95890bfd9db0d",
+    "schema_version": "1.0.0",
+    "session_id": "forge-integration-demo",
+    "source": {
+      "host": null,
+      "language": "python",
+      "runtime": "python-3.14",
+      "sdk_name": "forge-lens-sdk-python",
+      "sdk_version": "0.1.0",
+      "system": "forge-integration-harness"
+    },
+    "spans": [
+      {
+        "attributes": {
+          "forge_lens.integration": "theforge",
+          "forge_lens.provenance.note": "root=observed(subprocess wall-clock); children=imported(theforge/RunTelemetry/v1)",
+          "process.exit_code": 4,
+          "theforge.error.code": "FORGE-PROTO-EXIT",
+          "theforge.error.detail": "execute: exit code 3; stderr: failing-forge: deliberate crash on execute",
+          "theforge.metric.bytes_hashed": 0.0,
+          "theforge.metric.cache_hits": 0.0,
+          "theforge.metric.cache_misses": 0.0,
+          "theforge.metric.context_bytes": 0.0,
+          "theforge.metric.context_ms": 183.511,
+          "theforge.metric.evidence_returned": 0.0,
+          "theforge.metric.fallbacks_used": 0.0,
+          "theforge.metric.files_cited": 0.0,
+          "theforge.metric.files_hashed": 0.0,
+          "theforge.metric.files_scanned": 1.0,
+          "theforge.metric.files_selected": 0.0,
+          "theforge.metric.findings_returned": 0.0,
+          "theforge.metric.negotiation_rounds": 0.0,
+          "theforge.metric.provider_ms": 677.108,
+          "theforge.metric.providers_executed": 1.0,
+          "theforge.metric.routing_ms": 1839.51,
+          "theforge.metric.scan_ms": 78.166,
+          "theforge.run.status": "provider_failure",
+          "theforge.run_id": "20261022T002445Z-479d51e1",
+          "theforge.unknowns": "agent_calls,knowledge_bytes,planning_calls,semantic_planner_calls,semantic_resolver_calls,skill_bytes,skills_considered,skills_loaded,subagent_calls,verification_calls",
+          "theforge.workspace": "tf-workspace"
+        },
+        "end_time": "2026-10-22T00:24:50.588389Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge ask failing-forge",
+        "parent_span_id": null,
+        "provenance": "observed",
+        "schema_version": "1.0.0",
+        "span_id": "0ce95890bfd9db0d",
+        "start_time": "2026-10-22T00:24:35.759225Z",
+        "status": {
+          "code": "error",
+          "message": "run provider_failure (exit 4)"
+        },
+        "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+      },
+      {
+        "attributes": {
+          "theforge.duration_ms": 78.166,
+          "theforge.run_id": "20261022T002445Z-479d51e1",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "scan",
+          "theforge.span_id": "s1",
+          "theforge.start_ms": 0.0
+        },
+        "end_time": "2026-10-22T00:24:45.958009Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge.scan",
+        "parent_span_id": "0ce95890bfd9db0d",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "8e553ca9351671d9",
+        "start_time": "2026-10-22T00:24:45.879843Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+      },
+      {
+        "attributes": {
+          "theforge.duration_ms": 1327.746,
+          "theforge.run_id": "20261022T002445Z-479d51e1",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "routing",
+          "theforge.span_id": "s2",
+          "theforge.start_ms": 85.682
+        },
+        "end_time": "2026-10-22T00:24:47.293271Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge.routing",
+        "parent_span_id": "0ce95890bfd9db0d",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "4684158b01154852",
+        "start_time": "2026-10-22T00:24:45.965525Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+      },
+      {
+        "attributes": {
+          "theforge.duration_ms": 57.645,
+          "theforge.run_id": "20261022T002445Z-479d51e1",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "planning",
+          "theforge.span_id": "s3",
+          "theforge.start_ms": 1414.176
+        },
+        "end_time": "2026-10-22T00:24:47.351664Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge.planning",
+        "parent_span_id": "0ce95890bfd9db0d",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "1cf3aaf173474283",
+        "start_time": "2026-10-22T00:24:47.294019Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+      },
+      {
+        "attributes": {
+          "theforge.duration_ms": 511.765,
+          "theforge.run_id": "20261022T002445Z-479d51e1",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "routing",
+          "theforge.span_id": "s4",
+          "theforge.start_ms": 1472.098
+        },
+        "end_time": "2026-10-22T00:24:47.863706Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge.routing",
+        "parent_span_id": "0ce95890bfd9db0d",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "139c58d626197f0e",
+        "start_time": "2026-10-22T00:24:47.351941Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+      },
+      {
+        "attributes": {
+          "theforge.duration_ms": 183.511,
+          "theforge.run_id": "20261022T002445Z-479d51e1",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "context",
+          "theforge.span_id": "s5",
+          "theforge.start_ms": 2060.173
+        },
+        "end_time": "2026-10-22T00:24:48.123527Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge.context",
+        "parent_span_id": "0ce95890bfd9db0d",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "77a6dbf79276f2af",
+        "start_time": "2026-10-22T00:24:47.940016Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+      },
+      {
+        "attributes": {
+          "error.message": "execute: exit code 3; stderr: failing-forge: deliberate crash on execute",
+          "error.type": "FORGE-PROTO-EXIT",
+          "theforge.attr.action": "explode",
+          "theforge.attr.capability": "demo.failcrash",
+          "theforge.attr.round": "0",
+          "theforge.duration_ms": 677.108,
+          "theforge.run_id": "20261022T002445Z-479d51e1",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "provider:failing-forge",
+          "theforge.span_id": "s6",
+          "theforge.start_ms": 2244.752,
+          "tool.name": "theforge.provider:failing-forge"
+        },
+        "end_time": "2026-10-22T00:24:48.801703Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "tool",
+        "links": [],
+        "name": "provider:failing-forge",
+        "parent_span_id": "0ce95890bfd9db0d",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "6a294f87a4861690",
+        "start_time": "2026-10-22T00:24:48.124595Z",
+        "status": {
+          "code": "error",
+          "message": "FORGE-PROTO-EXIT: execute: exit code 3; stderr: failing-forge: deliberate crash on execute"
+        },
+        "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+      },
+      {
+        "attributes": {
+          "theforge.attr.provider": "failing-forge",
+          "theforge.duration_ms": 33.441,
+          "theforge.run_id": "20261022T002445Z-479d51e1",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "verification",
+          "theforge.span_id": "s7",
+          "theforge.start_ms": 2922.704
+        },
+        "end_time": "2026-10-22T00:24:48.835988Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge.verification",
+        "parent_span_id": "0ce95890bfd9db0d",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "06b3250eefef1d0b",
+        "start_time": "2026-10-22T00:24:48.802547Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+      },
+      {
+        "attributes": {
+          "theforge.duration_ms": 145.412,
+          "theforge.run_id": "20261022T002445Z-479d51e1",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "synthesis",
+          "theforge.span_id": "s8",
+          "theforge.start_ms": 2956.447
+        },
+        "end_time": "2026-10-22T00:24:48.981702Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge.synthesis",
+        "parent_span_id": "0ce95890bfd9db0d",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "0165ecd6abe7e4a2",
+        "start_time": "2026-10-22T00:24:48.836290Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+      }
+    ],
+    "started_at": "2026-10-22T00:24:35.759225Z",
+    "status": {
+      "code": "error",
+      "message": null
+    },
+    "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+  },
+  "fc42c61a699c7bfd16f1c5bf9ddef7fc": {
+    "ended_at": "2026-10-22T00:24:35.755744Z",
+    "project_id": "forge-integration",
+    "provenance": "observed",
+    "resource_attributes": {},
+    "root_span_id": "b9269ba4f3cb2ec9",
+    "schema_version": "1.0.0",
+    "session_id": "forge-integration-demo",
+    "source": {
+      "host": null,
+      "language": "python",
+      "runtime": "python-3.14",
+      "sdk_name": "forge-lens-sdk-python",
+      "sdk_version": "0.1.0",
+      "system": "forge-integration-harness"
+    },
+    "spans": [
+      {
+        "attributes": {
+          "forge_lens.integration": "theforge",
+          "forge_lens.provenance.note": "root=observed(subprocess wall-clock); children=imported(theforge/RunTelemetry/v1)",
+          "process.exit_code": 0,
+          "theforge.metric.bytes_hashed": 0.0,
+          "theforge.metric.cache_hits": 0.0,
+          "theforge.metric.cache_misses": 0.0,
+          "theforge.metric.context_bytes": 0.0,
+          "theforge.metric.context_ms": 87.151,
+          "theforge.metric.evidence_returned": 0.0,
+          "theforge.metric.fallbacks_used": 0.0,
+          "theforge.metric.files_cited": 0.0,
+          "theforge.metric.files_hashed": 0.0,
+          "theforge.metric.files_scanned": 0.0,
+          "theforge.metric.files_selected": 0.0,
+          "theforge.metric.findings_returned": 1.0,
+          "theforge.metric.negotiation_rounds": 0.0,
+          "theforge.metric.provider_ms": 5919.198,
+          "theforge.metric.providers_executed": 1.0,
+          "theforge.metric.routing_ms": 11310.311,
+          "theforge.metric.scan_ms": 1.759,
+          "theforge.run.status": "ok",
+          "theforge.run_id": "20261022T002417Z-f85e0e79",
+          "theforge.unknowns": "agent_calls,knowledge_bytes,planning_calls,semantic_planner_calls,semantic_resolver_calls,skill_bytes,skills_considered,skills_loaded,subagent_calls,verification_calls",
+          "theforge.workspace": "tf-workspace"
+        },
+        "end_time": "2026-10-22T00:24:35.755744Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge ask echo-forge",
+        "parent_span_id": null,
+        "provenance": "observed",
+        "schema_version": "1.0.0",
+        "span_id": "b9269ba4f3cb2ec9",
+        "start_time": "2026-10-22T00:24:10.372095Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "fc42c61a699c7bfd16f1c5bf9ddef7fc"
+      },
+      {
+        "attributes": {
+          "theforge.duration_ms": 1.759,
+          "theforge.run_id": "20261022T002417Z-f85e0e79",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "scan",
+          "theforge.span_id": "s1",
+          "theforge.start_ms": 0.0
+        },
+        "end_time": "2026-10-22T00:24:17.196566Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge.scan",
+        "parent_span_id": "b9269ba4f3cb2ec9",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "bf9301f1a2ca0098",
+        "start_time": "2026-10-22T00:24:17.194807Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "fc42c61a699c7bfd16f1c5bf9ddef7fc"
+      },
+      {
+        "attributes": {
+          "theforge.duration_ms": 7521.071,
+          "theforge.run_id": "20261022T002417Z-f85e0e79",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "routing",
+          "theforge.span_id": "s2",
+          "theforge.start_ms": 5.403
+        },
+        "end_time": "2026-10-22T00:24:24.721281Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge.routing",
+        "parent_span_id": "b9269ba4f3cb2ec9",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "cd29ce0409f9bfef",
+        "start_time": "2026-10-22T00:24:17.200210Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "fc42c61a699c7bfd16f1c5bf9ddef7fc"
+      },
+      {
+        "attributes": {
+          "theforge.duration_ms": 84.451,
+          "theforge.run_id": "20261022T002417Z-f85e0e79",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "planning",
+          "theforge.span_id": "s3",
+          "theforge.start_ms": 7527.235
+        },
+        "end_time": "2026-10-22T00:24:24.806493Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge.planning",
+        "parent_span_id": "b9269ba4f3cb2ec9",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "c4df8db185ec1980",
+        "start_time": "2026-10-22T00:24:24.722042Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "fc42c61a699c7bfd16f1c5bf9ddef7fc"
+      },
+      {
+        "attributes": {
+          "theforge.duration_ms": 3789.239,
+          "theforge.run_id": "20261022T002417Z-f85e0e79",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "routing",
+          "theforge.span_id": "s4",
+          "theforge.start_ms": 7612.056
+        },
+        "end_time": "2026-10-22T00:24:28.596102Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge.routing",
+        "parent_span_id": "b9269ba4f3cb2ec9",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "6c51dc3c7be6e661",
+        "start_time": "2026-10-22T00:24:24.806863Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "fc42c61a699c7bfd16f1c5bf9ddef7fc"
+      },
+      {
+        "attributes": {
+          "theforge.duration_ms": 87.151,
+          "theforge.run_id": "20261022T002417Z-f85e0e79",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "context",
+          "theforge.span_id": "s5",
+          "theforge.start_ms": 11492.353
+        },
+        "end_time": "2026-10-22T00:24:28.774311Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge.context",
+        "parent_span_id": "b9269ba4f3cb2ec9",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "8611f1c19d0eca46",
+        "start_time": "2026-10-22T00:24:28.687160Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "fc42c61a699c7bfd16f1c5bf9ddef7fc"
+      },
+      {
+        "attributes": {
+          "theforge.attr.action": "echo",
+          "theforge.attr.capability": "demo.echo",
+          "theforge.attr.round": "0",
+          "theforge.duration_ms": 5919.198,
+          "theforge.run_id": "20261022T002417Z-f85e0e79",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "provider:echo-forge",
+          "theforge.span_id": "s6",
+          "theforge.start_ms": 11580.579,
+          "tool.name": "theforge.provider:echo-forge"
+        },
+        "end_time": "2026-10-22T00:24:34.694584Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "tool",
+        "links": [],
+        "name": "provider:echo-forge",
+        "parent_span_id": "b9269ba4f3cb2ec9",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "ed77e43f834b43db",
+        "start_time": "2026-10-22T00:24:28.775386Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "fc42c61a699c7bfd16f1c5bf9ddef7fc"
+      },
+      {
+        "attributes": {
+          "theforge.attr.provider": "echo-forge",
+          "theforge.duration_ms": 228.692,
+          "theforge.run_id": "20261022T002417Z-f85e0e79",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "verification",
+          "theforge.span_id": "s7",
+          "theforge.start_ms": 17519.026
+        },
+        "end_time": "2026-10-22T00:24:34.942525Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge.verification",
+        "parent_span_id": "b9269ba4f3cb2ec9",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "7f467e8384670865",
+        "start_time": "2026-10-22T00:24:34.713833Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "fc42c61a699c7bfd16f1c5bf9ddef7fc"
+      },
+      {
+        "attributes": {
+          "theforge.duration_ms": 77.298,
+          "theforge.run_id": "20261022T002417Z-f85e0e79",
+          "theforge.schema": "theforge/RunTelemetry/v1",
+          "theforge.span.name": "synthesis",
+          "theforge.span_id": "s8",
+          "theforge.start_ms": 17791.781
+        },
+        "end_time": "2026-10-22T00:24:35.063886Z",
+        "events": [],
+        "integrity_flags": [],
+        "kind": "internal",
+        "links": [],
+        "name": "theforge.synthesis",
+        "parent_span_id": "b9269ba4f3cb2ec9",
+        "provenance": "imported",
+        "schema_version": "1.0.0",
+        "span_id": "ff9cd2b26275ee43",
+        "start_time": "2026-10-22T00:24:34.986588Z",
+        "status": {
+          "code": "ok",
+          "message": null
+        },
+        "trace_id": "fc42c61a699c7bfd16f1c5bf9ddef7fc"
+      }
+    ],
+    "started_at": "2026-10-22T00:24:10.372095Z",
+    "status": {
+      "code": "ok",
+      "message": null
+    },
+    "trace_id": "fc42c61a699c7bfd16f1c5bf9ddef7fc"
+  }
+}

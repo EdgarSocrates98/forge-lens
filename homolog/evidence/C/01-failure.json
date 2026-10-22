@@ -1,0 +1,1 @@
+{"trace_id":"cccccccccccccccccccccccccccccccc","failed":true,"category":"timeout","confidence":"observed","evidence":{"span_ids":["3333333333333333"],"signals":{"3333333333333333":["exception_type:ToolTimeoutError","message:timeout-terms"]},"names":["tool search_web"],"message":"timeout"},"detail":"timeout: ['tool search_web']"}

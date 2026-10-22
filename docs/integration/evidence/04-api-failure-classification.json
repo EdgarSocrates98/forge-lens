@@ -1,0 +1,21 @@
+{
+  "report": {
+    "category": "tool_error",
+    "confidence": "observed",
+    "detail": "tool_error: ['provider:failing-forge']",
+    "evidence": {
+      "messages": [
+        "FORGE-PROTO-EXIT: execute: exit code 3; stderr: failing-forge: deliberate crash on execute"
+      ],
+      "names": [
+        "provider:failing-forge"
+      ],
+      "span_ids": [
+        "6a294f87a4861690"
+      ]
+    },
+    "failed": true,
+    "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+  },
+  "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+}

@@ -1,0 +1,461 @@
+{
+  "generated_at": "2026-10-22T00:37:29.193703+00:00",
+  "scenarios": [
+    {
+      "id": "A",
+      "title": "A — Deploy local: init → doctor → serve → inspect",
+      "status": "PASS",
+      "objective": "Subir a stack local do zero e inspecionar saúde/capacidades.",
+      "expected": "init cria .forge-lens; doctor saudável; serve responde /v1/health, /v1/ops/summary e /v1/capabilities.",
+      "notes": [
+        "Studio (apps/studio) é servido separadamente (ng serve/build) — homologado na suíte E2E Playwright, ver docs/studio-e2e.md."
+      ],
+      "steps": [
+        {
+          "name": "init",
+          "ok": true,
+          "detail": "rc=0",
+          "evidence": "01-init.txt"
+        },
+        {
+          "name": "seed",
+          "ok": true,
+          "detail": "trace de exemplo persistido",
+          "evidence": null
+        },
+        {
+          "name": "doctor",
+          "ok": true,
+          "detail": "rc=0",
+          "evidence": "02-doctor.txt"
+        },
+        {
+          "name": "capabilities (CLI)",
+          "ok": true,
+          "detail": "rc=0",
+          "evidence": "03-capabilities.txt"
+        },
+        {
+          "name": "serve",
+          "ok": true,
+          "detail": "http://127.0.0.1:42251",
+          "evidence": null
+        },
+        {
+          "name": "GET /v1/health",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/A/04-health.json"
+        },
+        {
+          "name": "GET /v1/ops/summary",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/A/05-ops-summary.json"
+        },
+        {
+          "name": "GET /v1/capabilities",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/A/06-capabilities.json"
+        }
+      ]
+    },
+    {
+      "id": "B",
+      "title": "B — Ingest real → traces → detail → cost → graph → MCP",
+      "status": "PASS",
+      "objective": "Traços persistidos consultáveis via REST e via MCP stdio.",
+      "expected": "Traço visível em /v1/traces, detalhe completo, /cost deriva custo, /graph/traces monta a árvore, MCP lens.list_traces + lens.get_trace respondem.",
+      "notes": [
+        "Frames MCP completos em homolog/evidence/B/05-mcp-session.json"
+      ],
+      "steps": [
+        {
+          "name": "seed trace",
+          "ok": true,
+          "detail": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "evidence": null
+        },
+        {
+          "name": "serve",
+          "ok": true,
+          "detail": "http://127.0.0.1:43561",
+          "evidence": null
+        },
+        {
+          "name": "GET /v1/traces",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/B/01-traces.json"
+        },
+        {
+          "name": "GET /v1/traces/{id}",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/B/02-trace-detail.json"
+        },
+        {
+          "name": "GET /v1/traces/{id}/cost",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/B/03-cost.json"
+        },
+        {
+          "name": "GET /v1/graph/traces/{id}",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/B/04-graph.json"
+        },
+        {
+          "name": "MCP initialize",
+          "ok": true,
+          "detail": "{\"protocolVersion\": \"2024-11-05\", \"capabilities\": {\"tools\": {\"listChanged\": false}}, \"serverInfo\": {\"name\": \"forge-lens\", \"version\": \"0.1.0\"}}",
+          "evidence": null
+        },
+        {
+          "name": "MCP tools/list",
+          "ok": true,
+          "detail": "12 tools",
+          "evidence": null
+        },
+        {
+          "name": "MCP lens.list_traces",
+          "ok": true,
+          "detail": "",
+          "evidence": null
+        },
+        {
+          "name": "MCP lens.get_trace",
+          "ok": true,
+          "detail": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "evidence": null
+        }
+      ]
+    },
+    {
+      "id": "C",
+      "title": "C — Investigação: failure → replay → incident bundle",
+      "status": "PASS",
+      "objective": "Investigar um traço com falha e exportar o bundle de evidências.",
+      "expected": "failure classifica a falha; replay monta a timeline; incident gera bundle sem vazar segredos.",
+      "notes": [],
+      "steps": [
+        {
+          "name": "seed failing trace + embedded secret",
+          "ok": true,
+          "detail": "cccccccccccccccccccccccccccccccc",
+          "evidence": null
+        },
+        {
+          "name": "serve",
+          "ok": true,
+          "detail": "http://127.0.0.1:57447",
+          "evidence": null
+        },
+        {
+          "name": "GET /v1/traces/{id}/failure",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/C/01-failure.json"
+        },
+        {
+          "name": "GET /v1/traces/{id}/replay",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/C/02-replay.json"
+        },
+        {
+          "name": "GET /v1/traces/{id}/incident",
+          "ok": true,
+          "detail": "HTTP 200; segredo não vazado",
+          "evidence": "homolog/evidence/C/03-incident.json"
+        },
+        {
+          "name": "CLI failure",
+          "ok": true,
+          "detail": "rc=0",
+          "evidence": "04-cli-failure.txt"
+        },
+        {
+          "name": "CLI replay",
+          "ok": true,
+          "detail": "rc=0",
+          "evidence": "05-cli-replay.txt"
+        }
+      ]
+    },
+    {
+      "id": "D",
+      "title": "D — Graph em escala (≥1000 spans)",
+      "status": "PASS",
+      "objective": "Construir e consultar o grafo de um traço com ≥1000 spans.",
+      "expected": "/v1/graph/traces/{id} responde com todos os nós/arestas; navegação no Studio documentada em docs/graph-scale.md.",
+      "notes": [
+        "Render/navegação em escala (cap, busca, fit) é homologada no Studio — ver docs/graph-scale.md e os unit tests do apps/studio."
+      ],
+      "steps": [
+        {
+          "name": "seed 1200-span trace",
+          "ok": true,
+          "detail": "1200 spans",
+          "evidence": null
+        },
+        {
+          "name": "serve",
+          "ok": true,
+          "detail": "http://127.0.0.1:34309",
+          "evidence": null
+        },
+        {
+          "name": "GET /v1/graph/traces/{id} (1200 spans)",
+          "ok": true,
+          "detail": "HTTP 200, 938 ms, 485479 bytes",
+          "evidence": "homolog/evidence/D/01-graph-1200.json"
+        },
+        {
+          "name": "GET .../analysis",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/D/02-graph-analysis.json"
+        },
+        {
+          "name": "GET .../critical-path",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/D/03-critical-path.json"
+        }
+      ]
+    },
+    {
+      "id": "E",
+      "title": "E — Eval: baseline vs candidato → compare → gate",
+      "status": "PASS",
+      "objective": "Rodar avaliadores em coortes baseline/candidato e comparar com stats.",
+      "expected": "/v1/eval/run avalia; /v1/eval/compare retorna deltas + testes estatísticos; gate CI documentado (scripts/eval_gate.py).",
+      "notes": [
+        "Gate de CI para adoção por outros projetos: scripts/eval_gate.py + docs/eval-gate-workflow-example.yml."
+      ],
+      "steps": [
+        {
+          "name": "seed baseline ok + candidato regressado",
+          "ok": true,
+          "detail": "baseline=e000 cand=e111",
+          "evidence": null
+        },
+        {
+          "name": "serve",
+          "ok": true,
+          "detail": "http://127.0.0.1:44045",
+          "evidence": null
+        },
+        {
+          "name": "POST /v1/eval/run",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/E/01-eval-run.json"
+        },
+        {
+          "name": "POST /v1/eval/compare",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/E/02-eval-compare.json"
+        },
+        {
+          "name": "CLI eval",
+          "ok": true,
+          "detail": "rc=0",
+          "evidence": "03-cli-eval.txt"
+        }
+      ]
+    },
+    {
+      "id": "F",
+      "title": "F — Sanitização de segredos em todas as leituras",
+      "status": "PASS",
+      "objective": "Garantir que credenciais em spans nunca saem por nenhuma superfície.",
+      "expected": "API, CLI, MCP e incident export exibem conteúdo mascarado; contadores de sanitização são declarados.",
+      "notes": [],
+      "steps": [
+        {
+          "name": "serve",
+          "ok": true,
+          "detail": "http://127.0.0.1:35339",
+          "evidence": null
+        },
+        {
+          "name": "POST /v1/traces (ingest com segredos)",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": "homolog/evidence/F/00-ingest-response.json"
+        },
+        {
+          "name": "API GET /v1/traces/{id}",
+          "ok": true,
+          "detail": "HTTP 200; vazaram: nenhum",
+          "evidence": "homolog/evidence/F/01-api-trace.json"
+        },
+        {
+          "name": "API incident export",
+          "ok": true,
+          "detail": "HTTP 200; vazaram: nenhum",
+          "evidence": "homolog/evidence/F/02-api-incident.json"
+        },
+        {
+          "name": "CLI traces show",
+          "ok": true,
+          "detail": "rc=0; vazaram: nenhum",
+          "evidence": "03-cli-show.txt"
+        },
+        {
+          "name": "MCP lens.get_trace",
+          "ok": true,
+          "detail": "vazaram: nenhum",
+          "evidence": "homolog/evidence/F/04-mcp-trace.json"
+        }
+      ]
+    },
+    {
+      "id": "G",
+      "title": "G — Export/pack de evidências",
+      "status": "PASS",
+      "objective": "Exportar o pacote de evidências (incident bundle) e validar conteúdo.",
+      "expected": "Bundle contém trace + classificação + timeline + evidências; JSON parseável; contadores de export_sanitize declarados.",
+      "notes": [],
+      "steps": [
+        {
+          "name": "seed failing trace",
+          "ok": true,
+          "detail": "a7777777777777777777777777777777",
+          "evidence": null
+        },
+        {
+          "name": "serve",
+          "ok": true,
+          "detail": "http://127.0.0.1:50163",
+          "evidence": null
+        },
+        {
+          "name": "GET /v1/traces/{id}/incident",
+          "ok": true,
+          "detail": "HTTP 200; chaves=['bundle_version', 'cost', 'eval_suggestions', 'export_sanitize', 'failure', 'graph', 'hypotheses', 'project_id', 'replay', 'session_id', 'status', 'trace_id', 'waste']",
+          "evidence": "homolog/evidence/G/01-incident-bundle.json"
+        },
+        {
+          "name": "CLI incident",
+          "ok": true,
+          "detail": "rc=0",
+          "evidence": "02-cli-incident.txt"
+        }
+      ]
+    },
+    {
+      "id": "H",
+      "title": "H — Retenção: prune + archive",
+      "status": "PASS",
+      "objective": "Aplicar retenção: arquivar e apagar traços antigos com auditoria.",
+      "expected": "archive gera NDJSON; prune remove traços antigos; operação registrada em audit; traços novos permanecem.",
+      "notes": [],
+      "steps": [
+        {
+          "name": "seed 1 traço antigo (120d) + 1 recente",
+          "ok": true,
+          "detail": "",
+          "evidence": null
+        },
+        {
+          "name": "CLI archive",
+          "ok": true,
+          "detail": "rc=0; arquivo=ok",
+          "evidence": "01-archive.txt"
+        },
+        {
+          "name": "CLI prune -y",
+          "ok": true,
+          "detail": "rc=0",
+          "evidence": "02-prune.txt"
+        },
+        {
+          "name": "verificação pós-prune",
+          "ok": true,
+          "detail": "1 traço(s) restante(s)",
+          "evidence": null
+        },
+        {
+          "name": "traces list pós-prune",
+          "ok": true,
+          "detail": "rc=0",
+          "evidence": "03-traces-list.txt"
+        }
+      ]
+    },
+    {
+      "id": "I",
+      "title": "I — Backup e restauração",
+      "status": "PASS",
+      "objective": "Copiar a store (WAL checkpoint + cópia) e reabrir com conteúdo íntegro.",
+      "expected": "DB copiado abre readonly com os mesmos traços; archive NDJSON cobre o restore lógico.",
+      "notes": [],
+      "steps": [
+        {
+          "name": "seed 2 traços",
+          "ok": true,
+          "detail": "",
+          "evidence": null
+        },
+        {
+          "name": "WAL checkpoint + cópia física",
+          "ok": true,
+          "detail": "",
+          "evidence": null
+        },
+        {
+          "name": "abrir backup readonly",
+          "ok": true,
+          "detail": "2 traço(s) no backup",
+          "evidence": null
+        },
+        {
+          "name": "archive completo (backup lógico)",
+          "ok": true,
+          "detail": "2 linha(s) NDJSON",
+          "evidence": "01-archive-all.txt"
+        }
+      ]
+    },
+    {
+      "id": "J",
+      "title": "J — Operação 100% offline",
+      "status": "PASS",
+      "objective": "Provar que toda a superfície local opera sem rede (proxies mortos).",
+      "expected": "Com HTTP(S)_PROXY apontando para endereço morto e HOME isolada, init/serve/API/MCP funcionam — nenhuma chamada externa é tentada.",
+      "notes": [],
+      "steps": [
+        {
+          "name": "init offline",
+          "ok": true,
+          "detail": "rc=0",
+          "evidence": "01-init-offline.txt"
+        },
+        {
+          "name": "serve offline",
+          "ok": true,
+          "detail": "http://127.0.0.1:36267",
+          "evidence": null
+        },
+        {
+          "name": "GET /v1/traces offline",
+          "ok": true,
+          "detail": "HTTP 200",
+          "evidence": null
+        },
+        {
+          "name": "MCP offline",
+          "ok": true,
+          "detail": "",
+          "evidence": null
+        }
+      ]
+    }
+  ]
+}

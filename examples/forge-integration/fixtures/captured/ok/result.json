@@ -1,0 +1,42 @@
+{
+  "artifacts": [],
+  "assumptions": [],
+  "context_request": null,
+  "created_at": "2026-10-22T00:12:02.863470Z",
+  "evidence": [],
+  "findings": [
+    {
+      "evidence_ids": [],
+      "id": "f1",
+      "severity": "info",
+      "title": "echo: echo hello"
+    }
+  ],
+  "limitations": [
+    "demonstration provider; performs no domain analysis"
+  ],
+  "metrics": {
+    "context_bytes": {
+      "kind": "measured",
+      "value": 0.0
+    },
+    "duration_ms": {
+      "kind": "measured",
+      "value": 2840.378
+    },
+    "tokens": {
+      "kind": "unknown",
+      "value": null
+    }
+  },
+  "native_trace": null,
+  "producer": {
+    "id": "echo-forge",
+    "version": "0.5.6"
+  },
+  "provider_economy": null,
+  "provider_receipt": null,
+  "schema": "theforge/ExecutionResult/v1",
+  "status": "ok",
+  "unknowns": []
+}

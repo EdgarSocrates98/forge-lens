@@ -1,0 +1,28 @@
+{
+  "items": [
+    {
+      "ended_at": "2026-10-22T00:24:50.588389+00:00",
+      "error_count": 2,
+      "project_id": "forge-integration",
+      "root_span_id": "0ce95890bfd9db0d",
+      "session_id": "forge-integration-demo",
+      "span_count": 9,
+      "started_at": "2026-10-22T00:24:35.759225+00:00",
+      "status": "error",
+      "trace_id": "f6c8dfe3a2c250569125edcc9ca3a1e4"
+    },
+    {
+      "ended_at": "2026-10-22T00:24:35.755744+00:00",
+      "error_count": 0,
+      "project_id": "forge-integration",
+      "root_span_id": "b9269ba4f3cb2ec9",
+      "session_id": "forge-integration-demo",
+      "span_count": 9,
+      "started_at": "2026-10-22T00:24:10.372095+00:00",
+      "status": "ok",
+      "trace_id": "fc42c61a699c7bfd16f1c5bf9ddef7fc"
+    }
+  ],
+  "limit": 50,
+  "offset": 0
+}

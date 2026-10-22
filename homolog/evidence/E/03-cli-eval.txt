@@ -1,0 +1,7 @@
+$ forge-lens eval --db /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/E/data.db e0000000000000000000000000000000
+rc=0
+--- stdout ---
+  error_free/no_error_spans: 1
+  tool_success/tool_success_rate: 1
+
+--- stderr ---

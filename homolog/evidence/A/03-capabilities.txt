@@ -1,0 +1,39 @@
+$ forge-lens capabilities
+rc=0
+--- stdout ---
+claude_code  no native tracing
+  mechanism: hooks + session JSONL logs
+  adapter:   adapters.claude_code (JSONL import → Trace)
+  coverage:  tool calls, model usage, session boundaries
+  limits:    no in-process span capture; log-derived only
+codex  no native tracing
+  mechanism: session logs / rollout files
+  adapter:   not implemented — log format unstable
+  coverage:  none claimed
+  limits:    unsupported today
+copilot  no native tracing
+  mechanism: unsupported — closed surface
+  coverage:  none
+  limits:    unsupported
+cursor  no native tracing
+  mechanism: MCP instrumentation point exists (client-side)
+  adapter:   forge_lens.mcp_server used as gateway observer
+  coverage:  MCP tool list/call/result only — NOT agent internals
+  limits:    MCP traffic only; no claim of full tracing
+devin  no native tracing
+  mechanism: unsupported — no public instrumentation surface
+  coverage:  none
+  limits:    unsupported
+forge  native tracing
+  mechanism: in-process SDK instrumentation
+  adapter:   forge_lens.sdk (native)
+  coverage:  full spans, tools, tokens
+  limits:    requires opt-in tracing init
+generic_otlp  native tracing
+  mechanism: OTLP/HTTP JSON endpoint
+  adapter:   built-in
+  coverage:  whatever the runtime emits
+  limits:    span quality depends on emitter
+note: coverage claims are per-mechanism; 'unsupported' means no verified path exists today
+
+--- stderr ---

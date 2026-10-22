@@ -1,0 +1,8 @@
+$ forge-lens init .
+rc=0
+--- stdout ---
+Initialized Forge Lens project at /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/J/.forge-lens
+  config: /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/J/.forge-lens/config.toml
+  db:     /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/J/.forge-lens/lens.db (created on first ingest)
+
+--- stderr ---

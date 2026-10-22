@@ -1,0 +1,294 @@
+[
+  {
+    "request": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "protocolVersion": "2024-11-05",
+        "capabilities": {},
+        "clientInfo": {
+          "name": "homolog",
+          "version": "0"
+        }
+      }
+    },
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "protocolVersion": "2024-11-05",
+        "capabilities": {
+          "tools": {
+            "listChanged": false
+          }
+        },
+        "serverInfo": {
+          "name": "forge-lens",
+          "version": "0.1.0"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "tools/list"
+    },
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "tools": [
+          {
+            "name": "lens.capabilities",
+            "description": "Host adapter capability matrix — honest coverage claims.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          {
+            "name": "lens.cost",
+            "description": "Derived cost report for one trace (registry-priced; includes waste findings).",
+            "inputSchema": {
+              "type": "object",
+              "required": [
+                "trace_id"
+              ],
+              "properties": {
+                "trace_id": {
+                  "type": "string"
+                },
+                "project_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "name": "lens.detect_loops",
+            "description": "Heuristic loop/no-progress findings with span evidence.",
+            "inputSchema": {
+              "type": "object",
+              "required": [
+                "trace_id"
+              ],
+              "properties": {
+                "trace_id": {
+                  "type": "string"
+                },
+                "project_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "name": "lens.failure",
+            "description": "Deterministic failure classification with span evidence.",
+            "inputSchema": {
+              "type": "object",
+              "required": [
+                "trace_id"
+              ],
+              "properties": {
+                "trace_id": {
+                  "type": "string"
+                },
+                "project_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "name": "lens.get_trace",
+            "description": "Fetch one trace by id.",
+            "inputSchema": {
+              "type": "object",
+              "required": [
+                "trace_id"
+              ],
+              "properties": {
+                "trace_id": {
+                  "type": "string"
+                },
+                "project_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "name": "lens.list_datasets",
+            "description": "List eval datasets in the store.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "project_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "name": "lens.list_traces",
+            "description": "List recent traces (bounded, sorted).",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "limit": {
+                  "type": "integer",
+                  "default": 20
+                },
+                "project_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "name": "lens.sessions",
+            "description": "Session roll-up — one row per session_id, newest activity first (matches /v1/sessions).",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "limit": {
+                  "type": "integer",
+                  "default": 100
+                },
+                "offset": {
+                  "type": "integer",
+                  "default": 0
+                },
+                "project_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "name": "lens.stats",
+            "description": "Store statistics snapshot.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "project_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "name": "lens.tools",
+            "description": "Fleet-wide tool roll-up — calls/traces/errors/avg duration per tool.name (matches /v1/tools).",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "limit": {
+                  "type": "integer",
+                  "default": 100
+                },
+                "offset": {
+                  "type": "integer",
+                  "default": 0
+                },
+                "project_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "name": "lens.trace_efficiency",
+            "description": "Per-trace efficiency roll-up (tokens/tools/retries).",
+            "inputSchema": {
+              "type": "object",
+              "required": [
+                "trace_id"
+              ],
+              "properties": {
+                "trace_id": {
+                  "type": "string"
+                },
+                "project_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "name": "lens.correlate",
+            "description": "Temporal co-occurrence signals within a trace (retries→errors, model switches, context growth). Descriptive associations, never causal claims.",
+            "inputSchema": {
+              "type": "object",
+              "required": [
+                "trace_id"
+              ],
+              "properties": {
+                "trace_id": {
+                  "type": "string"
+                },
+                "project_id": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "request": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "method": "tools/call",
+      "params": {
+        "name": "lens.list_traces",
+        "arguments": {
+          "limit": 5
+        }
+      }
+    },
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"traces\": [{\"trace_id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"project_id\": \"default\", \"session_id\": \"sess-homolog\", \"root_span_id\": \"1111111111111111\", \"started_at\": \"2026-01-01T12:00:00+00:00\", \"ended_at\": \"2026-01-01T12:00:00.900000+00:00\", \"status\": \"ok\", \"span_count\": 3, \"error_count\": 0}]}"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "request": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "method": "tools/call",
+      "params": {
+        "name": "lens.get_trace",
+        "arguments": {
+          "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    },
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"trace\": {\"schema_version\": \"1.0.0\", \"trace_id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"project_id\": \"default\", \"session_id\": \"sess-homolog\", \"root_span_id\": \"1111111111111111\", \"started_at\": \"2026-01-01T12:00:00Z\", \"ended_at\": \"2026-01-01T12:00:00.900000Z\", \"status\": {\"code\": \"ok\", \"message\": null}, \"source\": {\"system\": \"homolog-runner\", \"sdk_name\": \"homolog\", \"sdk_version\": \"0.0.0\", \"host\": \"homolog-host\", \"runtime\": \"python-test\", \"language\": \"python\"}, \"resource_attributes\": {}, \"spans\": [{\"schema_version\": \"1.0.0\", \"trace_id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"span_id\": \"1111111111111111\", \"parent_span_id\": null, \"name\": \"agent.run\", \"kind\": \"agent\", \"start_time\": \"2026-01-01T12:00:00Z\", \"end_time\": \"2026-01-01T12:00:00.900000Z\", \"attributes\": {\"gen_ai.agent.name\": \"homolog-agent\", \"gen_ai.system\": \"forge-lens-homolog\"}, \"events\": [], \"links\": [], \"status\": {\"code\": \"ok\", \"message\": null}, \"provenance\": \"observed\", \"integrity_flags\": []}, {\"schema_version\": \"1.0.0\", \"trace_id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"span_id\": \"2222222222222222\", \"parent_span_id\": \"1111111111111111\", \"name\": \"llm gpt-test\", \"kind\": \"llm\", \"start_time\": \"2026-01-01T12:00:00.050000Z\", \"end_time\": \"2026-01-01T12:00:00.400000Z\", \"attributes\": {\"forge_lens.token_usage\": {\"input_tokens\": 100, \"measurement_source\": \"provider\", \"model\": \"gpt-test\", \"output_tokens\": 42, \"provider\": \"openai\", \"total_tokens\": 142}, \"gen_ai.request.model\": \"gpt-test\", \"llm.model_name\": \"gpt-test\"}, \"events\": [], \"links\": [], \"status\": {\"code\": \"ok\", \"message\": null}, \"provenance\": \"observed\", \"integrity_flags\": []}, {\"schema_version\": \"1.0.0\", \"trace_id\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"span_id\": \"3333333333333333\", \"parent_span_id\": \"1111111111111111\", \"name\": \"tool search_web\", \"kind\": \"tool\", \"start_time\": \"2026-01-01T12:00:00.420000Z\", \"end_time\": \"2026-01-01T12:00:00.900000Z\", \"attributes\": {\"gen_ai.operation.name\": \"execute_tool\", \"gen_ai.tool.name\": \"search_web\", \"tool.name\": \"search_web\"}, \"events\": [], \"links\": [], \"status\": {\"code\": \"ok\", \"message\": null}, \"provenance\": \"observed\", \"integrity_flags\": []}], \"provenance\": \"observed\"}}"
+          }
+        ]
+      }
+    }
+  }
+]

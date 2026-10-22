@@ -1,0 +1,22 @@
+{
+  "budget_profile": "auto",
+  "constraints": {},
+  "created_at": "2026-10-22T00:11:47.694704Z",
+  "id": "20261022T001147Z-9a4d05ff",
+  "intent": "echo hello",
+  "limitations": [],
+  "producer": {
+    "id": "theforge",
+    "version": "0.5.6"
+  },
+  "requested_action": null,
+  "requested_capability": null,
+  "requirement": null,
+  "schema": "theforge/TaskSpec/v1",
+  "status": "created",
+  "targets": [
+    "."
+  ],
+  "unknowns": [],
+  "workspace_root": "<workspace>"
+}

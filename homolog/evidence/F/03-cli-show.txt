@@ -1,0 +1,9 @@
+$ forge-lens traces show ffffffffffffffffffffffffffffffff --db /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/F/data.db
+rc=0
+--- stdout ---
+trace ffffffffffffffffffffffffffffffff  status=ok
+  source: homolog-runner (homolog)
+  spans:  1
+   agent.run [agent] 500.0ms
+
+--- stderr ---

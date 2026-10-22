@@ -1,0 +1,12 @@
+$ forge-lens incident a7777777777777777777777777777777 --db /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/G/data.db
+rc=0
+--- stdout ---
+trace a7777777777777777777777777777777  status=error  failed=True
+  category: timeout (observed)
+  detail:   timeout: ['tool search_web']
+  evidence: span 3333333333333333
+  critical path: 2 spans, 1380.0ms
+  replay: 6 timeline entries, 900.0ms
+  est. cost: $0.000000
+
+--- stderr ---

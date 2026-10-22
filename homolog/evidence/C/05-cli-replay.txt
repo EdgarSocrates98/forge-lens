@@ -1,0 +1,12 @@
+$ forge-lens replay cccccccccccccccccccccccccccccccc --db /home/edgar/Documentos/projetos/forjas/forge-lens/homolog/.work/C/data.db
+rc=0
+--- stdout ---
+trace cccccccccccccccccccccccccccccccc: 3 span(s), 6 timeline entries, 900.0ms
+  +    0.000ms span_start agent.run
+  +   50.000ms span_start llm gpt-test
+  +  400.000ms span_end   llm gpt-test status=ok
+  +  420.000ms span_start tool search_web
+  +  900.000ms span_end   agent.run status=ok
+  +  900.000ms span_end   tool search_web status=error
+
+--- stderr ---

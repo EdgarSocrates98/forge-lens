@@ -1,0 +1,53 @@
+{
+  "candidates": [
+    {
+      "capability": "demo.echo",
+      "matched": {
+        "dependencies": [],
+        "file_globs": [],
+        "keywords": [
+          "echo"
+        ]
+      },
+      "provider": "echo-forge",
+      "rank_key": [
+        1
+      ],
+      "state": "supported"
+    }
+  ],
+  "confidence": {
+    "level": "low",
+    "measured_signals": [
+      "keywords:echo"
+    ],
+    "unresolved": [
+      "only 1 signal type matched for echo-forge/demo.echo (need 2)"
+    ]
+  },
+  "created_at": "2026-10-22T00:11:54.103791Z",
+  "fallbacks_used": [],
+  "limitations": [
+    "registry-revalidated: echo-forge"
+  ],
+  "negotiation": [],
+  "pattern": "route",
+  "producer": {
+    "id": "theforge",
+    "version": "0.5.6"
+  },
+  "reason": "ambiguous: only 1 signal type matched for echo-forge/demo.echo (need 2); pinned provider echo-forge",
+  "schema": "theforge/RoutingDecision/v1",
+  "selected": [
+    {
+      "action": "echo",
+      "capability": "demo.echo",
+      "provider": "echo-forge",
+      "role": "primary"
+    }
+  ],
+  "shadow": null,
+  "status": "routed",
+  "task_id": "20261022T001147Z-9a4d05ff",
+  "unknowns": []
+}

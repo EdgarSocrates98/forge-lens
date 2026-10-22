@@ -1,0 +1,235 @@
+{
+  "agent_calls": {
+    "kind": "unknown",
+    "value": null
+  },
+  "bytes_hashed": {
+    "kind": "measured",
+    "value": 0.0
+  },
+  "cache_hits": {
+    "kind": "measured",
+    "value": 0.0
+  },
+  "cache_misses": {
+    "kind": "measured",
+    "value": 0.0
+  },
+  "context_bytes": {
+    "kind": "measured",
+    "value": 0.0
+  },
+  "context_drift": [],
+  "context_ms": {
+    "kind": "measured",
+    "value": 31.716
+  },
+  "correlation_id": null,
+  "created_at": "2026-10-22T00:12:03.138261Z",
+  "evidence_returned": {
+    "kind": "measured",
+    "value": 0.0
+  },
+  "fallbacks_used": {
+    "kind": "measured",
+    "value": 0.0
+  },
+  "files_cited": {
+    "kind": "measured",
+    "value": 0.0
+  },
+  "files_hashed": {
+    "kind": "measured",
+    "value": 0.0
+  },
+  "files_scanned": {
+    "kind": "measured",
+    "value": 0.0
+  },
+  "files_selected": {
+    "kind": "measured",
+    "value": 0.0
+  },
+  "findings_returned": {
+    "kind": "measured",
+    "value": 1.0
+  },
+  "knowledge_bytes": {
+    "kind": "unknown",
+    "value": null
+  },
+  "limitations": [
+    "context-not-reverified"
+  ],
+  "negotiation_rounds": {
+    "kind": "measured",
+    "value": 0.0
+  },
+  "parent_run": null,
+  "planning_calls": {
+    "kind": "unknown",
+    "value": null
+  },
+  "producer": {
+    "id": "theforge",
+    "version": "0.5.6"
+  },
+  "profile": {
+    "budget_bytes": 65536,
+    "effective_tiers": [
+      "metadata",
+      "reference"
+    ],
+    "execute_timeout_s": 60.0,
+    "fallback": false,
+    "max_files": 16,
+    "max_providers": 1,
+    "name": "economy",
+    "negotiation_rounds": 0,
+    "tiers": [
+      "metadata",
+      "reference"
+    ],
+    "verification": "minimal"
+  },
+  "provider_ms": {
+    "kind": "measured",
+    "value": 2840.006
+  },
+  "provider_revalidation": "hash",
+  "providers_executed": {
+    "kind": "measured",
+    "value": 1.0
+  },
+  "routing_ms": {
+    "kind": "measured",
+    "value": 12454.605
+  },
+  "run_id": "20261022T001147Z-9a4d05ff",
+  "scan_ms": {
+    "kind": "measured",
+    "value": 1.12
+  },
+  "schema": "theforge/RunTelemetry/v1",
+  "semantic_planner_calls": {
+    "kind": "unknown",
+    "value": null
+  },
+  "semantic_resolver_calls": {
+    "kind": "unknown",
+    "value": null
+  },
+  "skill_bytes": {
+    "kind": "unknown",
+    "value": null
+  },
+  "skills_considered": {
+    "kind": "unknown",
+    "value": null
+  },
+  "skills_loaded": {
+    "kind": "unknown",
+    "value": null
+  },
+  "spans": [
+    {
+      "attributes": {},
+      "duration_ms": 1.12,
+      "id": "s1",
+      "name": "scan",
+      "parent": null,
+      "start_ms": 0.0,
+      "status": "ok"
+    },
+    {
+      "attributes": {},
+      "duration_ms": 9519.387,
+      "id": "s2",
+      "name": "routing",
+      "parent": null,
+      "start_ms": 1.509,
+      "status": "ok"
+    },
+    {
+      "attributes": {},
+      "duration_ms": 18.472,
+      "id": "s3",
+      "name": "planning",
+      "parent": null,
+      "start_ms": 9521.761,
+      "status": "ok"
+    },
+    {
+      "attributes": {},
+      "duration_ms": 2935.218,
+      "id": "s4",
+      "name": "routing",
+      "parent": null,
+      "start_ms": 9540.508,
+      "status": "ok"
+    },
+    {
+      "attributes": {},
+      "duration_ms": 31.716,
+      "id": "s5",
+      "name": "context",
+      "parent": null,
+      "start_ms": 12496.572,
+      "status": "ok"
+    },
+    {
+      "attributes": {
+        "action": "echo",
+        "capability": "demo.echo",
+        "round": "0"
+      },
+      "duration_ms": 2840.006,
+      "id": "s6",
+      "name": "provider:echo-forge",
+      "parent": null,
+      "start_ms": 12529.419,
+      "status": "ok"
+    },
+    {
+      "attributes": {
+        "provider": "echo-forge"
+      },
+      "duration_ms": 27.971,
+      "id": "s7",
+      "name": "verification",
+      "parent": null,
+      "start_ms": 15375.939,
+      "status": "ok"
+    },
+    {
+      "attributes": {},
+      "duration_ms": 24.79,
+      "id": "s8",
+      "name": "synthesis",
+      "parent": null,
+      "start_ms": 15409.854,
+      "status": "ok"
+    }
+  ],
+  "subagent_calls": {
+    "kind": "unknown",
+    "value": null
+  },
+  "unknowns": [
+    "agent_calls",
+    "knowledge_bytes",
+    "planning_calls",
+    "semantic_planner_calls",
+    "semantic_resolver_calls",
+    "skill_bytes",
+    "skills_considered",
+    "skills_loaded",
+    "subagent_calls",
+    "verification_calls"
+  ],
+  "verification_calls": {
+    "kind": "unknown",
+    "value": null
+  },
+  "verification_performed": "minimal"
+}
