@@ -60,7 +60,8 @@ def test_traces_show_not_found(tmp_path: Path) -> None:
     r = runner.invoke(
         app, ["traces", "show", "0" * 32, "--db", str(db)]
     )
-    assert r.exit_code == 1
+    # exit 2 — not-found, uniform with every other trace-id command
+    assert r.exit_code == 2
 
 
 def test_ingest_otlp_file(tmp_path: Path, otlp_payload: dict) -> None:

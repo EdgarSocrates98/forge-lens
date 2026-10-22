@@ -250,6 +250,34 @@ def _check_i64(name: str, value: int) -> int:
     return value
 
 
+def _utf8_ok(value: str | None) -> bool:
+    """True when the driver can bind ``value`` as TEXT.
+
+    Lone surrogates (argv surrogateescape, WTF-8 request bodies) raise
+    ``UnicodeEncodeError`` inside sqlite3 at bind time. An unencodable
+    string can never equal a stored one, so *reads* treat it as absent
+    and *writes* reject it as ``ValidationError`` — never a raw driver
+    error."""
+    if value is None:
+        return True
+    try:
+        value.encode("utf-8")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def _require_utf8(bound: dict[str, str | None]) -> None:
+    """Reject TEXT binds the driver can't encode — store-level contract:
+    a lone surrogate is a ``ValidationError``, not a UnicodeEncodeError
+    surfacing mid-write."""
+    bad = [name for name, value in bound.items() if not _utf8_ok(value)]
+    if bad:
+        raise ValidationError(
+            f"unencodable string (lone surrogate) in: {', '.join(sorted(bad))}"
+        )
+
+
 def _like_escape(value: str) -> str:
     """Literal-ize LIKE metacharacters in a user-supplied substring.
 
@@ -345,7 +373,11 @@ class SQLiteTraceStore:
     """Thread-safe SQLite trace store (WAL)."""
 
     def __init__(self, path: Path | str, *, readonly: bool = False) -> None:
-        self.path = Path(path)
+        # expanduser: sqlite never sees a "~" — `--db ~/x.db` used to
+        # create a literal "./~" directory. resolve: a relative path must
+        # stay bound to the file it opened — stats() sizes by name and
+        # would silently report 0 after the caller's cwd moved on.
+        self.path = Path(path).expanduser().resolve()
         self._lock = threading.RLock()
         if readonly:
             # probe mode (e.g. doctor): never create dirs, never run
@@ -353,7 +385,15 @@ class SQLiteTraceStore:
             # not mutate the database it inspects. as_uri() percent-
             # encodes: a literal '?' or '%' in the path would be parsed
             # as the URI query and silently open a different file.
-            uri = self.path.absolute().as_uri() + "?mode=ro"
+            # A plain mode=ro open on a cold WAL db still *creates*
+            # -shm/-wal sidecars — ghost files a probe must not leave.
+            # With no -wal every byte lives in the checkpointed main
+            # file, so immutable=1 loses nothing; when a -wal does exist
+            # (live or crash-leftover) it may carry real data and plain
+            # ro reads it, recreating -shm only if the dir allows.
+            wal = self.path.with_name(self.path.name + "-wal")
+            mode = "ro" if wal.exists() else "ro&immutable=1"
+            uri = self.path.as_uri() + f"?mode={mode}"
             self._conn = sqlite3.connect(
                 uri, uri=True, check_same_thread=False
             )
@@ -402,6 +442,26 @@ class SQLiteTraceStore:
                 f"span trace_id mismatch: spans {mismatched!r} carry a "
                 f"trace_id != trace {trace.trace_id}"
             )
+        # Bound TEXT must be UTF-8-encodable — a lone surrogate (argv
+        # surrogateescape, WTF-8 producers) reaches the driver as
+        # UnicodeEncodeError otherwise. The pipeline screens its own
+        # path (_ensure_storable); this is the same guarantee for direct
+        # callers. Attributes/events/links ride json.dumps escapes, so
+        # only fields bound raw are listed.
+        bound: dict[str, str | None] = {
+            "trace_id": trace.trace_id,
+            "project_id": trace.project_id,
+            "session_id": trace.session_id,
+            "root_span_id": trace.root_span_id,
+            "status.message": trace.status.message,
+        }
+        for i, span in enumerate(trace.spans):
+            bound[f"spans[{i}].trace_id"] = span.trace_id
+            bound[f"spans[{i}].span_id"] = span.span_id
+            bound[f"spans[{i}].parent_span_id"] = span.parent_span_id
+            bound[f"spans[{i}].name"] = span.name
+            bound[f"spans[{i}].status.message"] = span.status.message
+        _require_utf8(bound)
         inserted = updated = duplicates = 0
         # Deterministic seen-markers derived from trace data — no wall clock.
         # ``started_at`` is required by the contract, so it is never None.
@@ -714,6 +774,8 @@ class SQLiteTraceStore:
         parent already delivered *here* doesn't produce a false ORPHAN,
         and remaining ties break on ``trace_id`` for determinism.
         """
+        if not all(_utf8_ok(v) for v in (project_id, span_id, trace_id)):
+            return None
         row = self._conn.execute(
             "SELECT trace_id FROM spans WHERE project_id=? AND span_id=? "
             "ORDER BY (trace_id = ?) DESC, trace_id LIMIT 1",
@@ -797,11 +859,7 @@ class SQLiteTraceStore:
         # a str carrying lone surrogates (argv surrogateescape, WTF-8
         # request bodies) raises UnicodeEncodeError in the driver — an
         # unencodable id can never match a stored one, so it is "absent"
-        try:
-            trace_id.encode("utf-8")
-            if project_id is not None:
-                project_id.encode("utf-8")
-        except UnicodeEncodeError:
+        if not _utf8_ok(trace_id) or not _utf8_ok(project_id):
             return None
         with self._lock:
             if project_id is not None:
@@ -898,6 +956,13 @@ class SQLiteTraceStore:
             if min_total_tokens < 0:
                 raise ValueError("min_total_tokens: non-negative required")
             _check_i64("min_total_tokens", min_total_tokens)
+        # an unencodable filter can never match stored TEXT → empty page,
+        # never a UnicodeEncodeError from the driver
+        if not all(
+            _utf8_ok(v)
+            for v in (project_id, session_id, status, q, tool, model, agent, host)
+        ):
+            return []
         clauses: list[str] = []
         params: list[Any] = []
         if project_id is not None:
@@ -1042,6 +1107,8 @@ class SQLiteTraceStore:
         """
         _check_i64("limit", limit)
         _check_i64("offset", offset)
+        if not _utf8_ok(project_id):
+            return []
         clauses = ["session_id IS NOT NULL"]
         params: list[Any] = []
         if project_id is not None:
@@ -1090,6 +1157,8 @@ class SQLiteTraceStore:
         ties on name ASC."""
         _check_i64("limit", limit)
         _check_i64("offset", offset)
+        if not _utf8_ok(project_id):
+            return []
         clauses = ["kind = 'tool'"]
         params: list[Any] = []
         if project_id is not None:
@@ -1124,19 +1193,24 @@ class SQLiteTraceStore:
 
     def stats(self, project_id: str | None = None) -> dict[str, Any]:
         with self._lock:
-            where = " WHERE project_id = ?" if project_id is not None else ""
-            params = (project_id,) if project_id is not None else ()
-            traces = self._conn.execute(
-                f"SELECT COUNT(*) c FROM traces{where}", params
-            ).fetchone()["c"]
-            spans = self._conn.execute(
-                f"SELECT COUNT(*) c FROM spans{where}", params
-            ).fetchone()["c"]
-            errors = self._conn.execute(
-                "SELECT COUNT(*) c FROM spans WHERE status_code='error'"
-                + (" AND project_id = ?" if project_id is not None else ""),
-                params if project_id is not None else (),
-            ).fetchone()["c"]
+            if project_id is not None and not _utf8_ok(project_id):
+                # unencodable id can never match a stored project — the
+                # counts are honestly zero; size/schema still computed
+                traces = spans = errors = 0
+            else:
+                where = " WHERE project_id = ?" if project_id is not None else ""
+                params = (project_id,) if project_id is not None else ()
+                traces = self._conn.execute(
+                    f"SELECT COUNT(*) c FROM traces{where}", params
+                ).fetchone()["c"]
+                spans = self._conn.execute(
+                    f"SELECT COUNT(*) c FROM spans{where}", params
+                ).fetchone()["c"]
+                errors = self._conn.execute(
+                    "SELECT COUNT(*) c FROM spans WHERE status_code='error'"
+                    + (" AND project_id = ?" if project_id is not None else ""),
+                    params if project_id is not None else (),
+                ).fetchone()["c"]
             # WAL mode: live data also sits in -wal/-shm sidecars.
             db_size = sum(
                 p.stat().st_size
@@ -1174,6 +1248,14 @@ class SQLiteTraceStore:
 
         Datasets themselves are mutable metadata; their *versions* are
         append-only (see ``upsert_dataset_version``)."""
+        _require_utf8(
+            {
+                "dataset_id": dataset_id,
+                "project_id": project_id,
+                "name": name,
+                "task": task,
+            }
+        )
         with self._lock, self._conn:
             self._conn.execute(
                 """INSERT INTO datasets(dataset_id, project_id, name, task,
@@ -1196,6 +1278,8 @@ class SQLiteTraceStore:
     def get_dataset(
         self, dataset_id: str, project_id: str = "default"
     ) -> dict[str, Any] | None:
+        if not _utf8_ok(dataset_id) or not _utf8_ok(project_id):
+            return None
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM datasets WHERE project_id=? AND dataset_id=?",
@@ -1213,6 +1297,8 @@ class SQLiteTraceStore:
         }
 
     def list_datasets(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        if not _utf8_ok(project_id):
+            return []
         with self._lock:
             if project_id is not None:
                 rows = self._conn.execute(
@@ -1255,6 +1341,15 @@ class SQLiteTraceStore:
         raises :class:`ConflictError` inside the same transaction — a
         racing PUT can never slip past a check-then-act gap to mutate
         an already-referenced version."""
+        bound: dict[str, str | None] = {
+            "dataset_id": dataset_id,
+            "project_id": project_id,
+            "version": version,
+            "description": description,
+        }
+        for i, c in enumerate(cases):
+            bound[f"cases[{i}].case_id"] = str(c.get("case_id", ""))
+        _require_utf8(bound)
         with self._lock, self._conn:
             cur = self._conn.execute(
                 """INSERT INTO dataset_versions(dataset_id, project_id, version,
@@ -1307,6 +1402,8 @@ class SQLiteTraceStore:
         version: str,
         project_id: str = "default",
     ) -> dict[str, Any] | None:
+        if not all(_utf8_ok(v) for v in (dataset_id, version, project_id)):
+            return None
         with self._lock:
             vrow = self._conn.execute(
                 "SELECT * FROM dataset_versions WHERE project_id=? "
@@ -1345,6 +1442,8 @@ class SQLiteTraceStore:
     def list_dataset_versions(
         self, dataset_id: str, project_id: str = "default"
     ) -> list[dict[str, Any]]:
+        if not _utf8_ok(dataset_id) or not _utf8_ok(project_id):
+            return []
         with self._lock:
             rows = self._conn.execute(
                 """SELECT v.*, COUNT(c.case_id) AS case_count
@@ -1414,6 +1513,17 @@ class SQLiteTraceStore:
         are never touched here. Prior runs stay pinned in
         ``experiment_results``; each report embeds the resolved inputs,
         so re-spec'ing cannot rewrite history."""
+        _require_utf8(
+            {
+                "experiment_id": experiment_id,
+                "project_id": project_id,
+                "name": name,
+                "description": description,
+                "dataset_id": dataset_id,
+                "dataset_version": dataset_version,
+                "provenance": provenance,
+            }
+        )
         with self._lock, self._conn:
             self._conn.execute(
                 """INSERT INTO experiments(experiment_id, project_id, name,
@@ -1450,6 +1560,8 @@ class SQLiteTraceStore:
     def get_experiment(
         self, experiment_id: str, project_id: str = "default"
     ) -> dict[str, Any] | None:
+        if not _utf8_ok(experiment_id) or not _utf8_ok(project_id):
+            return None
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM experiments WHERE project_id=? AND experiment_id=?",
@@ -1468,6 +1580,8 @@ class SQLiteTraceStore:
     ) -> list[dict[str, Any]]:
         _check_i64("limit", limit)
         _check_i64("offset", offset)
+        if not _utf8_ok(project_id):
+            return []
         with self._lock:
             if project_id is not None:
                 rows = self._conn.execute(
@@ -1501,6 +1615,9 @@ class SQLiteTraceStore:
         """Explicit lifecycle transition (e.g. reopen). ``status`` is a
         caller-validated ``open|completed`` — the store trusts the
         boundary like it does for span status codes."""
+        if not _utf8_ok(experiment_id) or not _utf8_ok(project_id):
+            return False  # unencodable id can never match a stored row
+        _require_utf8({"status": status})
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "UPDATE experiments SET status=? "
@@ -1523,6 +1640,7 @@ class SQLiteTraceStore:
         (``run:<id>`` becomes ``result_ref``), and the experiment flips
         to ``completed`` in the same transaction — a recorded run can
         never outlive the status that proves it happened."""
+        _require_utf8({"experiment_id": experiment_id, "project_id": project_id})
         with self._lock, self._conn:
             exists = self._conn.execute(
                 "SELECT 1 FROM experiments WHERE project_id=? AND experiment_id=?",
@@ -1563,6 +1681,8 @@ class SQLiteTraceStore:
     ) -> list[dict[str, Any]]:
         _check_i64("limit", limit)
         _check_i64("offset", offset)
+        if not _utf8_ok(experiment_id) or not _utf8_ok(project_id):
+            return []
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM experiment_results WHERE project_id=? "
@@ -1594,6 +1714,14 @@ class SQLiteTraceStore:
         projects: list[str] | None = None,
         now_ns: int | None = None,
     ) -> None:
+        _require_utf8(
+            {
+                "key_id": key_id,
+                "name": name,
+                "key_hash": key_hash,
+                "role": role,
+            }
+        )
         with self._lock, self._conn:
             self._conn.execute(
                 """INSERT INTO api_keys(key_id, name, key_hash, role,
@@ -1613,6 +1741,8 @@ class SQLiteTraceStore:
         """Resolve a presented secret's hash → key record (or None).
 
         Never returns secret material — the table stores hashes only."""
+        if not _utf8_ok(key_hash):
+            return None
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM api_keys WHERE key_hash=? AND revoked_ns IS NULL",
@@ -1623,6 +1753,8 @@ class SQLiteTraceStore:
         return self._api_key_dict(row)
 
     def get_api_key(self, key_id: str) -> dict[str, Any] | None:
+        if not _utf8_ok(key_id):
+            return None
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM api_keys WHERE key_id=?", (key_id,)
@@ -1652,6 +1784,8 @@ class SQLiteTraceStore:
         }
 
     def revoke_api_key(self, key_id: str, *, now_ns: int | None = None) -> bool:
+        if not _utf8_ok(key_id):
+            return False  # unencodable id can never match a stored row
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "UPDATE api_keys SET revoked_ns=? WHERE key_id=? AND revoked_ns IS NULL",
@@ -1671,6 +1805,14 @@ class SQLiteTraceStore:
     ) -> None:
         """Append an audit event. Detail must never carry secrets —
         callers pass key ids/names, never key material."""
+        _require_utf8(
+            {
+                "actor": actor,
+                "action": action,
+                "resource": resource,
+                "outcome": outcome,
+            }
+        )
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO audit_events(ts_ns, actor, action, resource,"
@@ -1696,6 +1838,8 @@ class SQLiteTraceStore:
     ) -> list[dict[str, Any]]:
         _check_i64("limit", limit)
         _check_i64("offset", offset)
+        if not _utf8_ok(action) or not _utf8_ok(actor):
+            return []
         clauses, params = [], []
         if action:
             clauses.append("action = ?")
@@ -1730,6 +1874,8 @@ class SQLiteTraceStore:
         """Retention: delete traces (and their spans) started before
         ``before_ns``. Bounded to trace granularity — partial-trace
         deletion would fabricate incomplete executions."""
+        if not _utf8_ok(project_id):
+            return {"traces": 0}  # unencodable id can never match
         clauses = ["started_ns < ?"]
         params: list[Any] = [before_ns]
         if project_id is not None:
@@ -1760,6 +1906,8 @@ class SQLiteTraceStore:
         doomed: list[tuple[str, str]] = []
         with self._lock, self._conn:
             for tid in trace_ids:
+                if not _utf8_ok(tid) or not _utf8_ok(project_id):
+                    continue  # an unencodable id was never stored
                 rows = self._conn.execute(
                     "SELECT project_id, trace_id FROM traces WHERE trace_id = ?"
                     + (" AND project_id = ?" if project_id is not None else ""),

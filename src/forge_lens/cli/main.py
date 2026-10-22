@@ -6,6 +6,7 @@ Local-first: every command works offline against the local store.
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -15,7 +16,12 @@ import typer
 
 from forge_lens import __version__
 from forge_lens.contracts.v1.trace import Span, Trace
-from forge_lens.core.config import LensConfig, init_project, load_config
+from forge_lens.core.config import (
+    DEFAULT_DIR_NAME,
+    LensConfig,
+    init_project,
+    load_config,
+)
 from forge_lens.storage.sqlite import SQLiteTraceStore
 
 app = typer.Typer(
@@ -43,14 +49,29 @@ app.add_typer(install_app, name="install")
 
 
 def _config(db: Path | None = None) -> LensConfig:
-    base = load_config()
+    try:
+        base = load_config()
+    except ValueError as exc:
+        # malformed config.toml / FORGE_LENS_* env is operator input —
+        # report it like any other invalid flag, never a traceback
+        typer.echo(f"invalid configuration: {exc}", err=True)
+        raise typer.Exit(2) from None
     if db is not None:
         return LensConfig(**{**base.__dict__, "db_path": db})
     return base
 
 
 def _store(cfg: LensConfig) -> SQLiteTraceStore:
-    return SQLiteTraceStore(cfg.resolved_db_path)
+    try:
+        return SQLiteTraceStore(cfg.resolved_db_path)
+    except (OSError, sqlite3.Error) as exc:
+        # a --db pointing at a directory, a non-sqlite file or an
+        # unwritable parent is invalid input — clean message + exit 2,
+        # same contract mcp-serve reports for an unopenable store
+        typer.echo(
+            f"cannot open store at {cfg.resolved_db_path}: {exc}", err=True
+        )
+        raise typer.Exit(2) from None
 
 
 def _get_trace_or_exit(
@@ -166,6 +187,13 @@ def serve(
             f"serve failed: invalid endpoint {cfg.endpoint!r}: {exc}", err=True
         )
         raise typer.Exit(2) from None
+    if port is not None and not 0 <= port <= 65535:
+        # invalid flag would otherwise crash inside uvicorn at bind time
+        typer.echo(
+            f"invalid --port {port}: range is 0-65535 (0 = ephemeral)",
+            err=True,
+        )
+        raise typer.Exit(2)
     host = host or ep.hostname or "127.0.0.1"
     # `or` would eat an explicit --port 0 (ephemeral bind) — None-checks
     # keep 0 meaningful at both levels
@@ -360,16 +388,22 @@ def traces_list(
             raise typer.Exit(2)
         return ns
 
-    store = _store(cfg)
+    # flag validation precedes the store open — an early Exit here would
+    # otherwise leak the connection (and a negative --limit must not
+    # reach the store's silent max(0, limit) clamp)
     if min_tokens is not None and (
         min_tokens < 0 or min_tokens > 2**63 - 1  # sqlite int64 bound
     ):
         typer.echo("invalid --min-tokens: integer in 0..2**63-1 expected",
                    err=True)
         raise typer.Exit(2)
+    if limit < 0:
+        typer.echo("invalid --limit: non-negative integer expected", err=True)
+        raise typer.Exit(2)
     if limit > 2**63 - 1:
         typer.echo("invalid --limit: out of int64 range", err=True)
         raise typer.Exit(2)
+    store = _store(cfg)
     try:
         items = store.list_traces(
             project_id=project or cfg.project_id,
@@ -411,15 +445,7 @@ def traces_show(
     json_out: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Show a trace: span tree, durations, errors, token usage."""
-    cfg = _config(db)
-    store = _store(cfg)
-    try:
-        trace = store.get_trace(trace_id, project_id=project or cfg.project_id)
-    finally:
-        store.close()
-    if trace is None:
-        typer.echo(f"trace {trace_id} not found", err=True)
-        raise typer.Exit(1)
+    trace = _get_trace_or_exit(trace_id, _config(db), project)
     if json_out:
         typer.echo(trace.model_dump_json(indent=2))
         return
@@ -482,15 +508,7 @@ def graph(
     """Execution graph for a trace: critical path + bottleneck ranking."""
     from forge_lens.graph import build_trace_graph, critical_path, self_time_ranking
 
-    cfg = _config(db)
-    store = _store(cfg)
-    try:
-        trace = store.get_trace(trace_id, project_id=project or cfg.project_id)
-    finally:
-        store.close()
-    if trace is None:
-        typer.echo(f"trace {trace_id} not found", err=True)
-        raise typer.Exit(1)
+    trace = _get_trace_or_exit(trace_id, _config(db), project)
     g = build_trace_graph(trace)
     if json_out:
         typer.echo(g.model_dump_json(indent=2))
@@ -651,14 +669,7 @@ def cost(
     from forge_lens.intel import PricingRegistry, detect_waste, trace_cost
 
     cfg = _config(db)
-    store = _store(cfg)
-    try:
-        trace = store.get_trace(trace_id, project_id=project or cfg.project_id)
-    finally:
-        store.close()
-    if trace is None:
-        typer.echo(f"trace {trace_id} not found", err=True)
-        raise typer.Exit(1)
+    trace = _get_trace_or_exit(trace_id, cfg, project)
     try:
         registry = (
             PricingRegistry.from_file(cfg.pricing_file)
@@ -712,14 +723,7 @@ def incident(
     from forge_lens.investigate import incident_bundle
 
     cfg = _config(db)
-    store = _store(cfg)
-    try:
-        trace = store.get_trace(trace_id, project_id=project or cfg.project_id)
-    finally:
-        store.close()
-    if trace is None:
-        typer.echo(f"trace {trace_id} not found", err=True)
-        raise typer.Exit(1)
+    trace = _get_trace_or_exit(trace_id, cfg, project)
     try:
         registry = (
             PricingRegistry.from_file(cfg.pricing_file)
@@ -764,15 +768,7 @@ def eval_cmd(
     """Run the deterministic evaluator battery on a stored trace."""
     from forge_lens.eval import run_evaluators
 
-    cfg = _config(db)
-    store = _store(cfg)
-    try:
-        trace = store.get_trace(trace_id, project_id=project or cfg.project_id)
-    finally:
-        store.close()
-    if trace is None:
-        typer.echo(f"trace {trace_id} not found", err=True)
-        raise typer.Exit(1)
+    trace = _get_trace_or_exit(trace_id, _config(db), project)
     specs: list[dict[str, object]] = [
         {"name": "error_free"},
         {"name": "tool_success"},
@@ -999,7 +995,15 @@ def doctor(
     db: Annotated[Path | None, typer.Option("--db")] = None,
 ) -> None:
     """Check the local Forge Lens installation and store health."""
-    base = load_config(project_dir=path.resolve())
+    cfg_error: str | None = None
+    try:
+        base = load_config(project_dir=path.resolve())
+    except ValueError as exc:
+        # a malformed config.toml is exactly what doctor exists to
+        # surface — report it as a failed check and keep diagnosing
+        # with defaults instead of dying on a bare exception
+        cfg_error = str(exc)
+        base = LensConfig(data_dir=path.resolve() / DEFAULT_DIR_NAME)
     cfg = LensConfig(**{**base.__dict__, "db_path": db}) if db is not None else base
     ok = True
 
@@ -1009,6 +1013,7 @@ def doctor(
         typer.echo(f"[{'ok' if passed else 'FAIL'}] {name} {detail}")
 
     check("python>=3.11", sys.version_info >= (3, 11), sys.version.split()[0])
+    check("config parseable", cfg_error is None, cfg_error or "")
     data_dir = cfg.data_dir
     check("data dir exists", data_dir.exists(), str(data_dir))
     db_path = cfg.resolved_db_path
@@ -1195,6 +1200,7 @@ def prune(
 
     Destructive: requires --yes or an interactive confirmation."""
     from forge_lens.api.clock import wall_clock_ns
+    from forge_lens.core.errors import ValidationError
     from forge_lens.core.time import ensure_aware, to_unix_nano
 
     cfg = _config(db)
@@ -1204,7 +1210,7 @@ def prune(
     if before is not None:
         try:
             cutoff = to_unix_nano(ensure_aware(datetime.fromisoformat(before)))
-        except ValueError:
+        except (ValueError, ValidationError):
             typer.echo(f"invalid --before {before!r}", err=True)
             raise typer.Exit(2) from None
     elif days is not None:
@@ -1259,11 +1265,12 @@ def archive(
     import json as _json
 
     from forge_lens.api.clock import wall_clock_ns
+    from forge_lens.core.errors import ValidationError
     from forge_lens.core.time import ensure_aware, to_unix_nano
 
     try:
         cutoff = to_unix_nano(ensure_aware(datetime.fromisoformat(before)))
-    except ValueError:
+    except (ValueError, ValidationError):
         typer.echo(f"invalid --before {before!r}", err=True)
         raise typer.Exit(2) from None
     if out.exists() and not append:

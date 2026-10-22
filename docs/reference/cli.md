@@ -8,13 +8,17 @@ forge-lens --version
 ## `forge-lens init [path] --project <id>`
 
 Cria `.forge-lens/` com `config.toml` e `artifacts/` no diretório.
+Idempotente: re-init preserva um `config.toml` existente — um
+`--project` diferente não sobrescreve o project_id já configurado.
 
-## `forge-lens serve [--host 127.0.0.1] [--port 7777] [--db <path>]`
+## `forge-lens serve [--host 127.0.0.1] [--port 7777] [--db <path>] [--ssl-certfile F] [--ssl-keyfile F]`
 
 Sobe a API (FastAPI+uvicorn). Requer o extra `server`
-(`uv sync --extra server`). Endpoints em `docs/reference/api.md`.
-Bind fora de loopback sem `api_key` configurada emite um aviso no
-stderr — leituras de `/v1/traces*` são abertas por design local.
+(`uv sync --extra server`); sem ele → exit 2. Endpoints em
+`docs/reference/api.md`. `--port` aceita 0–65535 (0 = porta efêmera);
+fora da faixa → exit 2 antes do bind. Bind fora de loopback sem
+`api_key` configurada emite um aviso no stderr — leituras de
+`/v1/traces*` são abertas por design local.
 
 ## `forge-lens ingest <file> [--db] [--project] [--format native|otlp|auto]`
 
@@ -135,13 +139,16 @@ tenancy; omitir = chave global.
 
 Expurgo por idade (Cycle 08). Sem `--before`/`--days` usa
 `retention_days` da config; uma das duas fontes é obrigatória.
-`--yes` confirma a deleção. Exit 2 sem critério/confirmação.
+`--yes` confirma a deleção. Sem critério de cutoff → exit 2; recusar
+a confirmação interativa → exit 1 (`Aborted.`).
 
-## `forge-lens archive <trace_id> [--db] [--project] [--out file] [--delete --yes] [--append]`
+## `forge-lens archive --before <ISO> --out <file> [--db] [--project] [--delete --yes] [--append]`
 
-Arquivamento frio (Cycle 08): exporta JSONL por trace. `--delete` apaga
-após exportar — só o que foi exportado. Sem `--append`, recusa
-sobrescrever um arquivo existente.
+Arquivamento frio (Cycle 08): exporta traces encerradas antes do
+cutoff em NDJSON (uma linha por trace; `--before` e `--out` são
+obrigatórios). Sem `--project`, exporta **todos** os projetos.
+`--delete` apaga após exportar — só o que foi exportado. Sem
+`--append`, recusa sobrescrever um arquivo existente (exit 2).
 
 ## `forge-lens import-claude <session.jsonl> [--db] [--project claude-code]`
 
@@ -209,6 +216,57 @@ register → report` lendo `forge.json`. Instala em
 `${XDG_CONFIG_HOME:-~/.config}/forjas/env.sh` (POSIX) ou HKCU (Windows).
 Flags: `--dry-run`, `--editable`, `--install-dir`, `--no-launcher`,
 `--python`, `--extras`. Detalhes em `docs/installation/standalone.md`.
+
+## Homologação
+
+Contrato verificado em `tests/unit/test_cli_homolog.py` (CliRunner, sem
+subprocess e sem bind de porta). Códigos de saída:
+
+| exit | significado |
+| --- | --- |
+| 0 | sucesso — inclusive resultados vazios (`no traces stored`, `pruned 0 trace(s)`, JSON `[]`) |
+| 1 | falha operacional genérica ou confirmação abortada (`Aborted.`) |
+| 2 | entrada inválida ou recurso inexistente — usage error do typer, flag fora de faixa, config/env malformados, `--db` inabível, trace/dataset não encontrado |
+
+Regras uniformes verificadas por sweep parametrizado:
+
+- Toda mensagem de erro vai para **stderr** (`err=True`); stdout fica
+  limpo em falha — nunca `Traceback` em erro de usuário.
+- Trace inexistente → `trace <id> not found` no stderr + exit 2 em
+  **todos** os comandos com `<trace_id>` (`traces show`, `graph`,
+  `cost`, `incident`, `eval`, `failure`, `loops`, `efficiency`,
+  `recommendations`, `correlate`, `security`, `replay`) — uniformizado
+  neste ciclo; antes os cinco primeiros retornavam 1.
+- `--db` apontando para diretório, arquivo não-sqlite ou destino sem
+  permissão → `cannot open store at <path>` + exit 2 em todos os
+  comandos de store (mesma mensagem que `mcp-serve` emite). `--db` com
+  path inexistente **cria** um store novo — local-first por design.
+- `FORGE_LENS_*` ou `config.toml` malformado → `invalid configuration:`
+  + exit 2 nos comandos; no `doctor` vira `[FAIL] config parseable`
+  + exit 1 (o health check reporta, não quebra).
+- `--json` emite JSON parseável no stdout em todos os comandos de
+  leitura/análise que o aceitam; `install status|doctor|uninstall`,
+  `install` (apply) e `install-status` já emitem JSON por padrão.
+
+Assimetrias registradas (comportamento atual, não alterado):
+
+- `keys revoke` → exit 1 para "not found **ou** already revoked" — o
+  store não distingue os dois casos (single bool).
+- `import-claude` com arquivo legível mas sem eventos utilizáveis →
+  exit 1 ("nothing imported"); `ingest` agrupa todo erro de
+  arquivo/payload sob `ingest failed:` + exit 1, enquanto
+  `import-otel` separa entrada inválida (2) de falha de pipeline (1).
+- `sessions`/`tools` clamam `--limit` a 0..500 (paridade com a API);
+  `traces list --limit` rejeita negativos (exit 2) e `--limit 0` lista
+  vazio — divergência deliberada, documentada.
+- Grupo sem subcomando (`forge-lens traces`, `keys`, `datasets`, raiz)
+  imprime help e sai **2** (comportamento `no_args_is_help`).
+- `install apply` não existe — `install` sem subcomando já é o apply.
+- `mcp-serve` fala JSON-RPC em stdout; erros vão para stderr via
+  `print` (correto para um servidor stdio — stdout é o canal do
+  protocolo).
+- `eval --budget-ms` inválido (negativo/NaN) não falha: o avaliador
+  `latency_budget` reporta `n/a` com motivo — evidência, não crash.
 
 ## Configuração
 

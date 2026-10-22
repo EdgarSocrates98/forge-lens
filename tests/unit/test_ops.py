@@ -533,11 +533,46 @@ def test_cli_ingest_surrogate_batch_leaves_zero_rows(tmp_path: Path) -> None:
 
 
 def test_readonly_store_uri_encoded(tmp_path: Path) -> None:
-    """Paths containing '?' or '%' must open the RIGHT file readonly —
-    a raw 'file:{path}?mode=ro' interpolation parses '?' as the URI
-    query and silently opens a different (empty) file."""
+    """Paths whose chars need URI escaping ('%', spaces, unicode) must
+    open the RIGHT file readonly — a raw 'file:{path}?mode=ro'
+    interpolation misparses them as URI syntax or another path.
+    (Reserved-FS-chars like '?' are covered by a posix-only test below —
+    Windows refuses those names at mkdir time, not at sqlite open.)"""
+    pct = tmp_path / "a%2fb"
+    pct.mkdir()
+    db = pct / "lens.db"
+    store = SQLiteTraceStore(db)
+    store.upsert_trace(_trace([_tool(0)]))
+    store.close()
+    ro = SQLiteTraceStore(db, readonly=True)
+    assert ro.stats()["traces"] == 1  # real data, not a phantom file
+    ro.close()
+
+    for name in ("dir with space", "unïcode-çãó"):
+        d = tmp_path / name
+        d.mkdir()
+        db2 = d / "lens.db"
+        SQLiteTraceStore(db2).close()
+        ro2 = SQLiteTraceStore(db2, readonly=True)
+        ro2.stats()
+        ro2.close()
+    # no phantom files created beside any of them
+    assert {p.name for p in tmp_path.iterdir()} == {
+        "a%2fb", "dir with space", "unïcode-çãó",
+    }
+
+
+def test_readonly_store_uri_reserved_chars(tmp_path: Path) -> None:
+    """'?' in a path is valid POSIX — and would silently redirect the
+    naive 'file:{path}?mode=ro' URI to a different file. Windows rejects
+    the name outright, so this coverage is POSIX-only."""
     weird = tmp_path / "we?ird"
-    weird.mkdir()
+    try:
+        weird.mkdir()
+    except OSError:  # Windows: WinError 123 — name can't even be created
+        import pytest
+
+        pytest.skip("filesystem rejects '?' in dir names")
     db = weird / "lens.db"
     store = SQLiteTraceStore(db)
     store.upsert_trace(_trace([_tool(0)]))
@@ -546,14 +581,6 @@ def test_readonly_store_uri_encoded(tmp_path: Path) -> None:
     assert ro.stats()["traces"] == 1  # real data, not a phantom file
     ro.close()
     assert not (tmp_path / "we").exists()  # no wrong-file creation
-
-    pct = tmp_path / "a%2fb"
-    pct.mkdir()
-    db2 = pct / "lens.db"
-    SQLiteTraceStore(db2).close()
-    ro2 = SQLiteTraceStore(db2, readonly=True)
-    ro2.stats()
-    ro2.close()
 
 
 def test_import_claude_surrogate_name_clean_error(tmp_path: Path) -> None:
