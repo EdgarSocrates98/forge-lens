@@ -3,12 +3,33 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
 from forge_lens.storage.sqlite import SQLiteTraceStore
+
+
+def percentile(samples: Sequence[float], q: float) -> float:
+    """Linear-interpolated percentile (numpy's default rule).
+
+    Deterministic given the sample set — used to collapse per-batch /
+    per-request latency distributions into p50/p95/p99 detail fields.
+    """
+    s = sorted(samples)
+    if not s:
+        return 0.0
+    if len(s) == 1:
+        return s[0]
+    rank = (q / 100.0) * (len(s) - 1)
+    lo = int(rank)
+    hi = min(lo + 1, len(s) - 1)
+    return s[lo] + (s[hi] - s[lo]) * (rank - lo)
+
+
+def median(samples: Sequence[float]) -> float:
+    return percentile(samples, 50.0)
 
 
 @dataclass

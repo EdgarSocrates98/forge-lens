@@ -47,7 +47,7 @@ varia.
 | `graph.build_trace_graph` | projeção nó/aresta de 1 trace | 2 000 spans (árvore binária) |
 | `graph.build_session_graph` | grafo temporal de sessão | 40 traces |
 | `eval.fetch_traces` | fan-out `get_trace` (espelha `POST /v1/eval/run`) | 200 traces |
-| `eval.battery` | `evaluate_traces` — registry completo | 12 avaliadores × 200 traces |
+| `eval.battery` | `evaluate_traces` — registry completo | 17 avaliadores × 200 traces |
 
 Assertivas: conteos exatos de seletividade (ex.: `status=error` → 100,
 `session-07` → 40, `q="code_review"` → 250) e integridade do output.
@@ -79,7 +79,13 @@ entre rodadas é normal.
 | `build_trace_graph` (2 000 spans) | ~233 ms |
 | `build_session_graph` (40 traces) | ~3 ms |
 | `eval.fetch_traces` (200 reads) | ~200–510 ms |
-| `eval.battery` (12 × 200) | ~180–470 ms (<2 ms por avaliação) |
+| `eval.battery` (17 × 200) | ~400–720 ms (<5 ms por avaliação) |
+
+> Escala além do baseline: volumetrias 1k/10k/100k spans com medidas
+> reais e comparação delta estão em
+> [`docs/benchmarks/cycle-13-scale.md`](../benchmarks/cycle-13-scale.md)
+> (ciclo 13.1 — inclui latências por filtro, grafos em escala e WAL sob
+> concorrência).
 
 ## Caveats honestos
 

@@ -40,6 +40,30 @@ SPANS_PER_TRACE = 4
 TOOL_SPANS_PER_TRACE = 2
 
 
+def scale_label(n_traces: int) -> str:
+    """``250`` → ``"1k"`` (spans), matching the published scale names."""
+    return f"{n_traces * SPANS_PER_TRACE // 1_000}k"
+
+
+def scale_project(n_traces: int) -> str:
+    return f"scale-{scale_label(n_traces)}"
+
+
+def residue_count(n: int, mod: int, residues: set[int]) -> int:
+    """Count ``i < n`` with ``i % mod in residues`` — closed-form corpus math."""
+    return sum(len(range(r, n, mod)) for r in residues)
+
+
+def tool_trace_hits(n: int, tool_index: int) -> int:
+    """Traces (of the first ``n``) whose trace carries ``TOOL_NAMES[tool_index]``.
+
+    Tool span ``k`` is named ``TOOL_NAMES[(i + 3k) % 8]``: k=0 hits when
+    ``i ≡ t``, k=1 when ``i ≡ t-3`` — a trace can't hit both (3 ≢ 0 mod 8),
+    so span calls and matched-trace counts share this closed form.
+    """
+    return residue_count(n, len(TOOL_NAMES), {tool_index % 8, (tool_index - 3) % 8})
+
+
 def trace_id_of(i: int) -> str:
     return f"{i:032x}"
 
