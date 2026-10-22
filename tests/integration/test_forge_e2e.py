@@ -223,8 +223,14 @@ def test_captured_fixtures_import_offline() -> None:
 
 def test_error_span_carries_real_theforge_evidence(flow: dict) -> None:
     t = flow["traces"][flow["fail_trace_id"]]
+    # the provider span specifically — in captured mode the ROOT span is
+    # also IMPORTED+ERROR (its own run-status replay), so a bare
+    # "first imported error" pick lands on the root, which carries
+    # theforge.run_id evidence but no theforge.span.name
     err = next(s for s in t.spans if s.status.code == StatusCode.ERROR
-               and s.provenance == Provenance.IMPORTED)
+               and s.provenance == Provenance.IMPORTED
+               and s.attributes.get("theforge.span.name")
+               == "provider:failing-forge")
     assert err.attributes["theforge.span.name"] == "provider:failing-forge"
     assert err.attributes["error.type"] == "FORGE-PROTO-EXIT"
     assert "exit code 3" in err.attributes["error.message"]
