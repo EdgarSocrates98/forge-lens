@@ -106,56 +106,64 @@ def test_initialize_handshake_and_capabilities(
 def test_initialize_version_negotiation(
     db: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Supported version is echoed; anything else gets the server's."""
-    rc, out = _drive(
-        db,
-        [
-            _req(
-                "initialize",
-                1,
-                params={"protocolVersion": "2024-11-05"},
-            ),
-            _req(
-                "initialize",
-                2,
-                params={"protocolVersion": "1999-01-01"},
-            ),
-            _req("initialize", 3),
-        ],
-        capsys,
-    )
-    assert rc == 0
-    # supported request → echoed back
-    assert out[0]["result"]["protocolVersion"] == "2024-11-05"
-    # unsupported request → the version the server actually speaks
-    assert out[1]["result"]["protocolVersion"] == "2024-11-05"
-    # missing params tolerated — still a valid InitializeResult
-    assert out[2]["result"]["protocolVersion"] == "2024-11-05"
+    """Supported version is echoed; anything else gets the server's.
+    One session per case — initialize is a once-per-connection
+    handshake (repeats are -32600, see test_second_initialize_*)."""
+    cases = [
+        {"protocolVersion": "2024-11-05"},
+        {"protocolVersion": "1999-01-01"},
+        None,  # missing params tolerated — still a valid result
+    ]
+    for params in cases:
+        rc, out = _drive(
+            db, [_req("initialize", 1, params=params)], capsys
+        )
+        assert rc == 0
+        assert out[0]["result"]["protocolVersion"] == "2024-11-05"
 
 
 def test_initialize_nonstring_protocol_version_never_crashes(
     db: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Object/array/null ``protocolVersion`` is unhashable — the `in`
-    probe would TypeError and kill the loop. Negotiation must answer
-    with the server's version and stay alive for the next frame."""
+    probe would TypeError and kill the loop. Each hostile version gets
+    its own session (initialize is once-per-connection), negotiates
+    down to the server's version, and the loop stays alive for ping."""
+    for ver in ({"x": 1}, ["2024-11-05"], None, 2024):
+        rc, out = _drive(
+            db,
+            [
+                _req("initialize", 1, params={"protocolVersion": ver}),
+                _req("ping", 2),
+            ],
+            capsys,
+        )
+        assert rc == 0, ver
+        assert out[0]["result"]["protocolVersion"] == "2024-11-05", ver
+        assert out[1]["result"] == {}, ver
+
+
+def test_second_initialize_rejected(
+    db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The handshake is once-per-connection — a repeated ``initialize``
+    is an invalid request (-32600), not a renegotiation, and the loop
+    keeps serving afterward."""
     rc, out = _drive(
         db,
         [
-            _req("initialize", 1, params={"protocolVersion": {"x": 1}}),
-            _req("initialize", 2, params={"protocolVersion": ["2024-11-05"]}),
-            _req("initialize", 3, params={"protocolVersion": None}),
-            _req("initialize", 4, params={"protocolVersion": 2024}),
-            _req("ping", 5),
+            _INIT,
+            _req("initialize", 9,
+                 params={"protocolVersion": "2024-11-05"}),
+            _req("ping", 10),
         ],
         capsys,
     )
     assert rc == 0
-    assert len(out) == 5
-    for resp in out[:4]:
-        assert resp["result"]["protocolVersion"] == "2024-11-05"
-    # the loop survived all four hostile handshakes — ping answered
-    assert out[4]["result"] == {}
+    assert len(out) == 3
+    assert out[1]["error"]["code"] == -32600
+    assert "already initialized" in out[1]["error"]["message"]
+    assert out[2]["result"] == {}
 
 
 def test_oversize_frame_bounded_and_recovered(
@@ -557,6 +565,13 @@ def test_argument_bounds_enforced(
             _call(4, "lens.list_traces", {"limit": 10**9}),  # clamped
             _call(5, "lens.sessions", {"offset": -5}),  # clamped to 0
             _call(6, "lens.tools", {"limit": True}),  # bool rejected
+            # fractional limit/offset is a client error, not a silent
+            # int() truncation that answers a different query
+            _call(7, "lens.list_traces", {"limit": 2.5}),
+            _call(8, "lens.sessions", {"offset": "1.5"}),
+            # integral float/string forms still normalize to int
+            _call(9, "lens.list_traces", {"limit": 2.0}),
+            _call(10, "lens.list_traces", {"limit": "3"}),
         ],
         capsys,
     )
@@ -567,3 +582,7 @@ def test_argument_bounds_enforced(
     assert "traces" in _payload(out[4])  # huge limit clamps, no fault
     assert "sessions" in _payload(out[5])
     assert out[6]["error"]["code"] == -32602
+    assert out[7]["error"]["code"] == -32602  # 2.5 not an integer
+    assert out[8]["error"]["code"] == -32602  # "1.5" not an integer
+    assert "traces" in _payload(out[9])
+    assert "traces" in _payload(out[10])

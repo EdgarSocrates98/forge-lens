@@ -496,6 +496,11 @@ class McpClient:
         assert self.proc.stdout is not None
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
+            # NB: a *blocking* readline cannot be interrupted — the
+            # deadline is only honored between lines, so a server that
+            # hangs without writing is not covered here. Harness-only
+            # code; mcp-serve's own loop is bounded, and close() kills
+            # the child on teardown either way.
             line = self.proc.stdout.readline()
             if not line:
                 raise RuntimeError(

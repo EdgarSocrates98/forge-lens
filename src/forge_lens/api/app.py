@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import json
 import math
+import reprlib
 import secrets
 import threading
 from collections.abc import Awaitable, Callable
@@ -64,6 +65,14 @@ def _reject_request(status_code: int, detail: str) -> HTTPException:
 _MAX_VALIDATION_ERRORS = 25
 _MAX_VALIDATION_INPUT = 200
 
+# repr() of an 8 MB input would materialize a multi-MB string before
+# truncation — reprlib bounds the *rendering* itself (truncates strings
+# and containers at the configured limits instead of repr-ing first).
+_BRIEF_REPR = reprlib.Repr()
+_BRIEF_REPR.maxstring = _MAX_VALIDATION_INPUT
+_BRIEF_REPR.maxother = _MAX_VALIDATION_INPUT
+_BRIEF_REPR.maxlevel = 3
+
 
 def _bounded_validation_detail(exc: PydanticValidationError) -> str:
     """422 detail with bounded size — ``str(exc)`` serializes *every*
@@ -75,7 +84,7 @@ def _bounded_validation_detail(exc: PydanticValidationError) -> str:
     for e in errors[:_MAX_VALIDATION_ERRORS]:
         loc = ".".join(str(p) for p in e.get("loc", ()))
         msg = e.get("msg", "")
-        inp = repr(e.get("input", ""))
+        inp = _BRIEF_REPR.repr(e.get("input", ""))
         if len(inp) > _MAX_VALIDATION_INPUT:
             inp = inp[:_MAX_VALIDATION_INPUT] + "…"
         parts.append(

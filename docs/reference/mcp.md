@@ -52,7 +52,9 @@ qualquer outro valor (versão desconhecida, objeto, array, número, nulo)
 recebe a suportada de volta (o cliente decide se prossegue); a resposta
 anuncia `capabilities: {"tools": {"listChanged": false}}` e
 `serverInfo`. **Toda request exige `initialize` antes, exceto `ping`** —
-o lifecycle MCP permite ping durante o handshake. Frames **sem `id`**
+o lifecycle MCP permite ping durante o handshake — e `initialize` é
+uma vez por conexão: um segundo `initialize` é `-32600`, não uma
+renegociação. Frames **sem `id`**
 são notifications e nunca recebem resposta. Um frame
 `notifications/*` **com** `id` é um Request malformado (notifications
 não carregam `id`) → `-32600`. EOF/disconnect encerra o loop com exit 0 —
@@ -104,5 +106,8 @@ Notas:
   no payload (→ `isError`) — not-found é dado, não falha de protocolo.
   Exceção deliberada: `lens.get_trace` retorna `{"trace": null}` sem
   `isError`, espelhando o 404/200-shape da API.
-- `limit`/`offset` são bounded: `limit` clampa em `[0, 500]`; `offset`
-  fora do range int64 do SQLite é `-32602`, não um erro de driver.
+- `limit`/`offset` são bounded **inteiros**: `limit` clampa em `[0, 500]`;
+  `offset` fora do range int64 do SQLite é `-32602`, não um erro de
+  driver. Formas integrais (`2`, `2.0`, `"3"`) normalizam; frações
+  (`2.5`, `"1.5"`) são `-32602` — nunca um truncamento silencioso via
+  `int()` que responderia outra query.

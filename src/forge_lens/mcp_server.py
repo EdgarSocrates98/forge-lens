@@ -47,7 +47,8 @@ def _reject_constant(value: str) -> NoReturn:
     raise ValueError(f"non-JSON literal {value}")
 
 
-def _num(args: dict[str, Any], name: str) -> int | float | None:
+def _num(args: dict[str, Any], name: str,
+         *, integer: bool = False) -> int | float | None:
     """Optional numeric arg — bools, non-numerics and non-finite floats
     raise the authored TypeError that maps to -32602 invalid params.
 
@@ -55,7 +56,12 @@ def _num(args: dict[str, Any], name: str) -> int | float | None:
     consumer wants), ``float`` as the fractional fallback. Anything
     unparseable is invalid-params (-32602) — letting it ride through
     would make ``int()`` raise ValueError inside the call and leak an
-    -32603 internal error for what is plainly a client mistake."""
+    -32603 internal error for what is plainly a client mistake.
+
+    ``integer=True`` (limit/offset-style params) requires an integral
+    value — a fractional ``2.5`` is a client error (-32602), not a
+    silent ``int()`` truncation that would answer a different query
+    than the one asked. Integral floats/strings still normalize."""
     v = args.get(name)
     if v is None:
         return None
@@ -74,7 +80,11 @@ def _num(args: dict[str, Any], name: str) -> int | float | None:
             raise TypeError(f"{name} must be a number") from None
         if not math.isfinite(f):
             raise TypeError(f"{name} must be a number")
-        return f
+        v = f
+    if integer and isinstance(v, float):
+        if not v.is_integer():
+            raise TypeError(f"{name} must be an integer")
+        return int(v)
     return v
 
 _TRACE_INPUT = {
@@ -199,7 +209,7 @@ def serve(db_path: str) -> int:
     def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name == "lens.list_traces":
             pid = _pid(args)
-            raw_lim = _num(args, "limit")
+            raw_lim = _num(args, "limit", integer=True)
             limit = 20 if raw_lim is None else int(raw_lim)
             return {"traces": store.list_traces(
                 project_id=pid,
@@ -256,8 +266,8 @@ def serve(db_path: str) -> int:
             return {"datasets": store.list_datasets(_pid(args))}
         def _page_args(default_limit: int) -> tuple[int, int]:
             """Bounded limit/offset shared by the roll-up tools."""
-            lim_raw = _num(args, "limit")
-            off_raw = _num(args, "offset")
+            lim_raw = _num(args, "limit", integer=True)
+            off_raw = _num(args, "offset", integer=True)
             lim = default_limit if lim_raw is None else int(lim_raw)
             off = 0 if off_raw is None else int(off_raw)
             if off > 2**63 - 1:
@@ -345,6 +355,13 @@ def serve(db_path: str) -> int:
             continue
         result: dict[str, Any]
         if method == "initialize":
+            if initialized:
+                # initialize is a once-per-connection handshake — a
+                # repeat is an invalid request (-32600), not a
+                # renegotiation. The spec's lifecycle binds it to the
+                # pre-initialized window only.
+                _err(rid, -32600, "already initialized")
+                continue
             params = req.get("params")
             requested = (
                 params.get("protocolVersion")

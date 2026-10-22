@@ -874,6 +874,41 @@ def test_gate_bad_config_exits_64(
     assert exc.value.code == 64
 
 
+def test_gate_engine_valueerror_is_70_not_64(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Narrow-catch contract: only apply_gate's authored spec errors are
+    usage (64). A ValueError raised inside evaluate/compare is an
+    engine fault — it must surface as exit 70, never masquerade as a
+    usage mistake."""
+    import forge_lens.eval
+
+    gate = _load_gate_module()
+    base, cand = _seed_gate_db(tmp_path / "lens.db")
+
+    def boom(*a: Any, **k: Any) -> Any:
+        raise ValueError("engine invariant broke")
+
+    monkeypatch.setattr(forge_lens.eval, "compare_runs", boom)
+    code = gate.main(_gate_args(tmp_path, base, cand))
+    assert code == 70
+    out = json.loads(capsys.readouterr().out)
+    assert out["verdict"]["status"] == "internal_error"
+    assert "engine invariant broke" in out["verdict"]["reason"]
+
+    # …while a malformed gate criterion still maps to usage (64):
+    # apply_gate's authored ValueError path is intact.
+    monkeypatch.undo()
+    with pytest.raises(SystemExit) as exc:
+        gate.main(_gate_args(
+            tmp_path, base, cand,
+            gate='{"metrics": {"error_free/no_error_spans": '
+                 '{"min_pass_rate_b": "not-a-number"}}}',
+        ))
+    assert exc.value.code == 64
+
+
 def test_gate_reason_strings_match_compare_contract() -> None:
     """eval_gate.py classifies apply_gate failures by their ``reason``
     strings — this pins the exact wording so a drift in compare.py is

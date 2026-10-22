@@ -5,6 +5,32 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 
 ## [Unreleased]
 
+### Fixed — ciclo 13.1 (review r4)
+
+- **Relatório final no formato §17**: `docs/cycles/cycle-13.1-final-report.md`
+  reescrito no esqueleto obrigatório — Executive Summary, tabela
+  Correções (ID/severidade/causa-raiz/correção/teste/status), **Matriz
+  de validação** por plataforma com evidência, Integração Forge,
+  Performance, Segurança, Release e **Veredito** classificado
+  (`APPROVED WITH RESTRICTIONS` — restrições documentadas).
+- **MCP lifecycle**: segundo `initialize` na mesma conexão agora é
+  `-32600` invalid request (era aceito como re-handshake — desvio do
+  lifecycle MCP). `limit`/`offset` fracionários (`2.5`, `"1.5"`) viram
+  `-32602` em vez de truncar silenciosamente via `int()`; formas
+  integrais (`2.0`, `"3"`) continuam normalizando.
+- **`eval_gate` narrow-catch**: `except (ValueError, TypeError)`→64
+  agora cobre só `apply_gate` (suas raises authored são validação de
+  spec de gate); `evaluate_traces`/`compare_runs` ficam sob
+  `except Exception`→70 — um bug de engine não é mais reportado como
+  erro de uso.
+- **`_bounded_validation_detail`**: `reprlib` bounda a renderização
+  (trunca strings/containers antes de repr) — input de 8 MB não
+  materializa mais um repr multi-MB transitório.
+- **Docs**: threat-model residual contraditório reescrito (risco de
+  amplificação eliminado; residual = eco bounded); comentários de
+  caveats em `forge_bridge.McpClient` (deadline não interrompe
+  `readline` bloqueante) e `run-tests.mjs` (processo compartilhado).
+
 ### Fixed — ciclo 13.1 (review r3)
 
 - **`mcp_server.initialize` crash**: `protocolVersion` não-string
