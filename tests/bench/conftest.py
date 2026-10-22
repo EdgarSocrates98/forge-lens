@@ -159,11 +159,14 @@ def _env_info() -> dict[str, object]:
     platform doesn't publish that file, never a failure.
     """
     info: dict[str, object] = {"cpu_count": os.cpu_count()}
-    try:
-        la1, la5, la15 = os.getloadavg()
-        info["loadavg"] = [round(la1, 2), round(la5, 2), round(la15, 2)]
-    except OSError:
-        pass
+    # getloadavg does not exist on Windows — attribute lookup itself
+    # raises AttributeError; OSError covers the exists-but-fails case.
+    if hasattr(os, "getloadavg"):
+        try:
+            la1, la5, la15 = os.getloadavg()
+            info["loadavg"] = [round(la1, 2), round(la5, 2), round(la15, 2)]
+        except OSError:
+            pass
     try:
         with open("/proc/cpuinfo", encoding="utf-8") as fh:
             for line in fh:

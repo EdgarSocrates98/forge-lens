@@ -56,6 +56,31 @@ test.describe('graph explorer', () => {
     expect(await svg.getAttribute('viewBox')).toBe(vb0);
   });
 
+  test('search reveals and centers a node beyond the draw cap', async ({ page }) => {
+    // 620-node seeded trace — the BFS prefix draws exactly MAX_NODES
+    // and the truncation banner explains what happened to the rest
+    await page.goto(`/graph?trace_id=${m.named.wide_trace}`);
+    const svg = page.locator('svg[aria-label="execution graph"]');
+    await expect(page.locator('.err-banner')).toContainText('graph truncated');
+    await expect(svg.locator('g.node')).toHaveCount(500);
+
+    // the needle sits past the BFS prefix — absent until revealed
+    // (workers are 000-618; the last is deepest in the cap's tail)
+    const needle = svg.locator('g.node', { hasText: 'worker span 618' });
+    await expect(needle).toHaveCount(0);
+
+    await page.getByLabel('find node').fill('worker span 618');
+    const vb0 = await svg.getAttribute('viewBox');
+    await page.getByRole('button', { name: 'find', exact: true }).click();
+
+    // revealed: the needle is drawn, hit-marked, and the camera
+    // centered on it (viewport culling means only in-view nodes are
+    // in the DOM now — the count is smaller than the cap, not larger)
+    await expect(needle).toHaveCount(1);
+    await expect(needle).toHaveClass(/hit/);
+    expect(await svg.getAttribute('viewBox')).not.toBe(vb0);
+  });
+
   test('session mode renders one node per trace with sequence edges', async ({ page }) => {
     await page.goto(`/graph?session_id=${m.sessions['alpha'].id}`);
     const svg = page.locator('svg[aria-label="execution graph"]');

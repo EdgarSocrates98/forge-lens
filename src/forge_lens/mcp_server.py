@@ -279,8 +279,13 @@ def serve(db_path: str) -> int:
             continue
         method = req.get("method")
         rid = req.get("id")
-        if rid is None or method == "notifications/initialized":
+        if rid is None:
             continue  # notifications need no reply
+        if method == "notifications/initialized":
+            # A frame carrying an id is a Request object — it can't be a
+            # notification, so the spec-true reply is invalid-request.
+            _err(rid, -32600, "invalid request")
+            continue
         if not isinstance(method, str):
             # An id without a dispatchable method is an invalid request.
             _err(rid, -32600, "invalid request")

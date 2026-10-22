@@ -448,7 +448,10 @@ def create_app(
             traces = normalize_otlp_request(
                 payload, project_id=cfg.project_id, errors=quarantine
             )
-        except (ValidationError, PydanticValidationError) as exc:
+        except PydanticValidationError as exc:
+            raise _reject_ingest(
+                422, _bounded_validation_detail(exc)) from exc
+        except ValidationError as exc:
             raise _reject_ingest(422, str(exc)) from exc
         _require_scope(request, cfg.project_id)
         for _t in traces:

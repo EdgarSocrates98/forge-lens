@@ -800,6 +800,80 @@ def test_gate_usage_errors_exit_64(tmp_path: Path) -> None:
     assert exc3.value.code == 64
 
 
+def test_apply_gate_max_drop_null_pass_rate_fails_as_unmeasured(
+) -> None:
+    """max_drop on a metric never observed on one side is a
+    missing-evidence failure — never a vacuous pass."""
+    from forge_lens.eval.compare import apply_gate
+
+    result = {"deltas": [{
+        "evaluator": "token_f1", "metric": "score",
+        "pass_rate_a": 0.9, "pass_rate_b": None,
+        "n_a": 12, "n_b": 0,
+    }]}
+    out = apply_gate(
+        result, {"metrics": {"token_f1/score": {"max_drop": 0.10}}})
+    assert out["gate_passed"] is False
+    (f,) = out["failures"]
+    assert f["observed"] is None
+    assert "unmeasured" in f["reason"]
+
+
+def test_gate_max_drop_unmeasured_is_insufficient_e2e(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Candidate cohort with no tool spans → tool_success yields
+    pass_rate_b=None → max_drop cannot be evaluated → exit 2, not 0."""
+    from forge_lens.storage.sqlite import SQLiteTraceStore
+
+    gate = _load_gate_module()
+    store = SQLiteTraceStore(tmp_path / "lens.db")
+
+    def mk(tid: str, with_tool: bool) -> Trace:
+        spans = [_span("11", "agent", kind=SpanKind.AGENT)]
+        if with_tool:
+            spans.append(_span("22", "call", kind=SpanKind.TOOL,
+                               attrs={"tool.name": "web_search"}))
+        for s in spans:
+            s.trace_id = tid
+        return Trace(trace_id=tid, project_id="default", started_at=T0,
+                     ended_at=T0 + timedelta(seconds=2), spans=spans)
+
+    base = [f"{0xCCCC000000000000000000000000 + i:032x}" for i in range(4)]
+    cand = [f"{0xDDDD000000000000000000000000 + i:032x}" for i in range(4)]
+    for tid in base:
+        store.upsert_trace(mk(tid, with_tool=True))
+    for tid in cand:
+        store.upsert_trace(mk(tid, with_tool=False))
+    store.close()
+
+    code = gate.main(_gate_args(
+        tmp_path, base, cand,
+        gate='{"metrics": {"tool_success/tool_success_rate": '
+             '{"max_drop": 0.05}}}',
+    ))
+    assert code == 2
+    out = json.loads(capsys.readouterr().out)
+    assert out["verdict"]["status"] == "insufficient_data"
+    assert out["verdict"]["missing_evidence_failures"]
+
+
+def test_gate_bad_config_exits_64(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed FORGE_LENS_* config is a usage error — a traceback
+    exit-1 would be misread by CI as a regression."""
+    monkeypatch.setenv("FORGE_LENS_AUTH_MODE", "not-a-mode")
+    gate = _load_gate_module()
+    with pytest.raises(SystemExit) as exc:
+        gate.main([
+            "--dataset", "x",
+            "--baseline", json.dumps({"trace_ids": []}),
+            "--candidate", json.dumps({"trace_ids": []}),
+        ])
+    assert exc.value.code == 64
+
+
 def test_gate_reason_strings_match_compare_contract() -> None:
     """eval_gate.py classifies apply_gate failures by their ``reason``
     strings — this pins the exact wording so a drift in compare.py is
@@ -812,6 +886,7 @@ def test_gate_reason_strings_match_compare_contract() -> None:
         "metric not evaluated — cannot gate on unmeasured evidence",
         "pass_rate_b below minimum",
         "pass_rate dropped more than allowed",
+        "max_drop unmeasured — pass rate missing on one or both sides",
         "statistically significant regression",
         "metric gate spec must be an object",
         "gate.metrics must be an object",

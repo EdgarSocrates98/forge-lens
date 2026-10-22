@@ -104,6 +104,9 @@ _REASON_NOT_EVALUATED = (
     "metric not evaluated — cannot gate on unmeasured evidence"
 )
 _REASON_BELOW_MIN = "pass_rate_b below minimum"
+_REASON_DROP_UNMEASURED = (
+    "max_drop unmeasured — pass rate missing on one or both sides"
+)
 
 _USAGE_FAILURE_REASONS = frozenset(
     {_REASON_METRICS_NOT_OBJECT, _REASON_SPEC_NOT_OBJECT}
@@ -347,7 +350,7 @@ def _classify(
     missing_failures: list[dict[str, Any]] = []
     for f in failures:
         if f.get("reason") == _REASON_NOT_EVALUATED or (
-            f.get("reason") == _REASON_BELOW_MIN
+            f.get("reason") in {_REASON_BELOW_MIN, _REASON_DROP_UNMEASURED}
             and f.get("observed") is None
         ):
             missing_failures.append(f)
@@ -505,7 +508,12 @@ def main(argv: list[str] | None = None) -> int:
     from forge_lens.storage.sqlite import SQLiteTraceStore
 
     args = _build_parser().parse_args(argv)
-    cfg = load_config()
+    try:
+        cfg = load_config()
+    except ValueError as exc:
+        # malformed config.toml / FORGE_LENS_* — a usage problem (64),
+        # never a traceback that CI would misread as a regression
+        _usage_error(f"config: {exc}")
     default_project = args.project or cfg.project_id
     db_path = Path(args.db) if args.db else cfg.resolved_db_path
 

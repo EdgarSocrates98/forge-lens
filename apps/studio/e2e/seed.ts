@@ -23,6 +23,7 @@ export interface SeedManifest {
     unset_trace: string;
     events_trace: string;
     multi_tool_trace: string;
+    wide_trace: string;
   };
   tools: string[];
   dataset: { id: string; version: string; cases: number };

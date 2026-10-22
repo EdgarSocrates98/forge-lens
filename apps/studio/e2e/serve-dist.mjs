@@ -70,7 +70,10 @@ const server = createServer(async (req, res) => {
   // static file, else SPA fallback to index.html (Angular routes)
   const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
   let file = path.resolve(ROOT, rel || 'index.html');
-  if (!file.startsWith(ROOT)) file = path.join(ROOT, 'index.html'); // traversal guard
+  // prefix check alone would let a sibling dir "browser-evil" slip past
+  if (file !== ROOT && !file.startsWith(ROOT + path.sep)) {
+    file = path.join(ROOT, 'index.html');
+  }
   try {
     const body = await readFile(file);
     res.writeHead(200, {

@@ -100,9 +100,9 @@ test.describe('trace explorer', () => {
     // status sort desc: 'unset' > 'ok' > 'error'
     await page.getByRole('columnheader', { name: 'status' }).click();
     await expect(rows(page).first().locator('td').nth(2)).toHaveText('unset');
-    // spans sort desc: multi-tool trace has 4
+    // spans sort desc: the 620-node wide trace leads
     await page.getByRole('columnheader', { name: 'spans' }).click();
-    await expect(rows(page).first().locator('td').nth(3)).toHaveText('4');
+    await expect(rows(page).first().locator('td').nth(3)).toHaveText('620');
     // no client "show more" cap is hit at 10 rows
     await expect(page.getByRole('button', { name: /show more/ })).toHaveCount(0);
   });

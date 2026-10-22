@@ -318,7 +318,13 @@ def apply_gate(result: dict[str, Any], gate: dict[str, Any]) -> dict[str, Any]:
             if not math.isfinite(max_drop_f):
                 raise ValueError(f"{key}.max_drop must be finite")
             pa, pb = d.get("pass_rate_a"), d.get("pass_rate_b")
-            if pa is not None and pb is not None and (pa - pb) > max_drop_f:
+            if pa is None or pb is None:
+                failures.append({
+                    "metric": key,
+                    "reason": "max_drop unmeasured — pass rate missing on one or both sides",
+                    "observed": None,
+                })
+            elif (pa - pb) > max_drop_f:
                 failures.append({
                     "metric": key,
                     "reason": "pass_rate dropped more than allowed",

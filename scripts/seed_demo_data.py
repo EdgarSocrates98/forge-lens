@@ -330,6 +330,24 @@ def build_traces() -> list[Trace]:
     traces.append(_trace("standalone-mini", [root],
                          session_id=None, status=StatusCode.OK))
 
+    # wide fan-out — 1 root + 619 workers = 620 nodes, over the graph's
+    # MAX_NODES=500 draw cap; exercises the "search reveals a node the
+    # BFS prefix never drew" path end to end. Envelope deliberately
+    # short (2.6 s) and early (12:00:30) so the list-page duration and
+    # since-cutoff specs don't match it.
+    t = tid("standalone-wide")
+    root = _span("wide root", t, kind=SpanKind.AGENT, parent=None,
+                 start_ms=30_000, end_ms=32_600)
+    spans = [root]
+    for i in range(619):
+        spans.append(_span(
+            f"worker span {i:03d}", t, kind=SpanKind.TOOL,
+            parent=root.span_id,
+            start_ms=30_050 + i * 3, end_ms=30_052 + i * 3,
+            attributes={"tool.name": "batch_worker"}))
+    traces.append(_trace("standalone-wide", spans,
+                         session_id=None, status=StatusCode.OK))
+
     return traces
 
 
@@ -424,6 +442,7 @@ def seed(db_path: Path, manifest_path: Path | None) -> dict[str, Any]:
             "unset_trace": tid("standalone-unset"),
             "events_trace": tid("standalone-events"),
             "multi_tool_trace": tid("standalone-tools-multi"),
+            "wide_trace": tid("standalone-wide"),
         },
         "tools": sorted({
             str(s.attributes["tool.name"])

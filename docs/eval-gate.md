@@ -104,7 +104,9 @@ Spec exatamente o do `forge_lens.eval.compare.apply_gate`:
 - `metrics.<avaliador>/<métrica>.min_pass_rate_b` — o pass_rate do
   candidato precisa atingir o valor.
 - `metrics.<avaliador>/<métrica>.max_drop` — `pass_rate_a − pass_rate_b`
-  não pode exceder o valor.
+  não pode exceder o valor. Se qualquer lado é nulo (métrica avaliada
+  mas não observada), o critério falha por evidência ausente →
+  `insufficient_data`, nunca passe vazio.
 - `fail_on_significant_regression` — reprova quando qualquer delta tem
   `significance == "significant"` **e** `delta < 0` (cobre métricas
   contínuas via MWU + delta de média, além das binárias).
@@ -125,7 +127,9 @@ Os `failures` do `apply_gate` são classificados:
   `statistically significant regression`.
 - **Falha por evidência ausente** → `insufficient_data`: `metric not
   evaluated — cannot gate on unmeasured evidence` (a chave do gate não
-  foi avaliada), `pass_rate_b below minimum` com `observed: null`.
+  foi avaliada), `pass_rate_b below minimum` com `observed: null`,
+  `max_drop unmeasured — pass rate missing on one or both sides`
+  (`max_drop` sobre pass_rate nulo **nunca** passa em vacuidade).
 - **Spec malformado** (`gate.metrics must be an object`, `metric gate
   spec must be an object`) → erro de uso.
 

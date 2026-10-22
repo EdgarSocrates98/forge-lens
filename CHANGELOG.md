@@ -5,6 +5,35 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 
 ## [Unreleased]
 
+### Fixed — ciclo 13.1 (review r2)
+
+- **`tests/bench/conftest.py`**: `os.getloadavg` não existe no Windows —
+  o lookup levanta `AttributeError`, não `OSError`; guard `hasattr` no
+  `_env_info()` (o terminal-summary dos benches não crashava no
+  `windows-latest`).
+- **`eval/compare.py` `apply_gate`**: `max_drop` sobre `pass_rate` nulo
+  agora falha como evidência ausente (`observed: null`,
+  `max_drop unmeasured — …`) → `insufficient_data` — antes passava em
+  vacuidade, contradizendo o invariante "dados finos nunca passam"
+  (ex. `token_f1/score` com n=0 no candidato daria exit 0).
+- **`scripts/eval_gate.py`**: `load_config()` malformado (`config.toml`/
+  `FORGE_LENS_*`) → exit **64** via `_usage_error`, não traceback→exit 1
+  que o CI leria como regressão.
+- **OTLP 422 bounded**: a rota OTLP usa `_bounded_validation_detail`
+  para `PydanticValidationError` (mesma disciplina do nativo —
+  `str(exc)` podia amplificar o body hostil).
+- **`mcp_server`**: frame `notifications/*` **com** `id` é Request
+  malformado → `-32600` (era engolido silenciosamente).
+- **`serve-dist.mjs`**: traversal guard `file === ROOT || startsWith(
+  ROOT + path.sep)` — o prefix-check puro aceitaria um diretório irmão
+  `browser-evil`.
+- **E2E**: seed ganhou `standalone-wide` (1 root + 619 workers = 620
+  nós > cap); spec nova prova que `find` revela e centraliza um nó
+  além do cap (hit-marked, cauda BFS evictada, camera centrada) —
+  cobertura da claim de navegação >500 nós que antes era só unitária.
+  Trace posicionado fora dos filtros das specs de lista (envelope 2,6 s,
+  início 12:00:30).
+
 ### Fixed — ciclo 13.1 (hardening & homologação)
 
 **P0 — falhas cross-platform do CI:**

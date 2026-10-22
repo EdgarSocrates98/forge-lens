@@ -50,8 +50,9 @@ recebe a suportada de volta (o cliente decide se prossegue); a resposta
 anuncia `capabilities: {"tools": {"listChanged": false}}` e
 `serverInfo`. **Toda request exige `initialize` antes, exceto `ping`** —
 o lifecycle MCP permite ping durante o handshake. Frames **sem `id`**
-são notifications e nunca recebem resposta (`notifications/initialized`
-é tolerada mesmo com `id`). EOF/disconnect encerra o loop com exit 0 —
+são notifications e nunca recebem resposta. Um frame
+`notifications/*` **com** `id` é um Request malformado (notifications
+não carregam `id`) → `-32600`. EOF/disconnect encerra o loop com exit 0 —
 uma chamada malformada nunca derruba o servidor.
 
 **Classes de erro.**

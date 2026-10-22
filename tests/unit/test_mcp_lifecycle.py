@@ -175,8 +175,6 @@ def test_notifications_never_get_responses(
             '{"jsonrpc": "2.0", "method": "notifications/cancelled"}',
             # request-shaped but no id → notification, not an error
             '{"jsonrpc": "2.0", "method": "tools/list"}',
-            # notification name with an id: still no reply (tolerated)
-            '{"jsonrpc": "2.0", "id": 9, "method": "notifications/initialized"}',
             _req("ping", 5),
         ],
         capsys,
@@ -354,6 +352,27 @@ def test_missing_store_fails_fast(
     rc = serve(str(tmp_path / "does-not-exist.db"))
     assert rc == 2
     assert "cannot open store" in capsys.readouterr().err
+
+
+def test_notification_method_with_id_is_invalid_request(
+    db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A frame carrying ``id`` is a Request object — it cannot be a
+    notification, so ``notifications/initialized`` with an id is
+    -32600, not silently swallowed."""
+    rc, out = _drive(
+        db,
+        [_INIT, _req("notifications/initialized", 42),
+         json.dumps({"method": "notifications/initialized"})],
+        capsys,
+    )
+    assert rc == 0
+    # init reply + the -32600; the id-less notification got none
+    assert len(out) == 2
+    assert out[1] == {
+        "jsonrpc": "2.0", "id": 42,
+        "error": {"code": -32600, "message": "invalid request"},
+    }
 
 
 def test_string_ids_and_zero_id_echoed(

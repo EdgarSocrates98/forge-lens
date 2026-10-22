@@ -374,3 +374,19 @@ def test_scale_wal_concurrent_readers(
         p50_ms=round(percentile(write_lat, 50) * 1000, 3),
         p95_ms=round(percentile(write_lat, 95) * 1000, 3),
     )
+
+
+def test_env_info_survives_platforms_without_getloadavg(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """os.getloadavg does not exist on Windows — the attribute lookup
+    itself raises AttributeError, so the guard must be hasattr-based,
+    not OSError-based."""
+    import os
+
+    from .conftest import _env_info
+
+    monkeypatch.delattr(os, "getloadavg", raising=False)
+    info = _env_info()
+    assert "loadavg" not in info
+    assert info["cpu_count"]
