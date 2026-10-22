@@ -6,12 +6,14 @@ readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Edgar Sócrates Caria" }]
 license = "MIT"
+license-files = ["LICENSE"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
 ]
 keywords = ["observability", "opentelemetry", "openinference", "agents", "llm", "tracing"]
@@ -70,6 +72,8 @@ ignore = [
 "scripts/forge_bootstrap.py" = ["ALL"]
 "tests/**" = ["S101", "PT011", "PTH", "S105", "S106"]
 "examples/**" = ["S101", "T201"]
+# Homologation runner — subprocess/urllib against the local install is the point.
+"homolog/**" = ["S101", "S105", "S310", "S603", "PTH"]
 "src/forge_lens/cli/**" = ["T201"]
 
 [tool.pytest.ini_options]

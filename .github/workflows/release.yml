@@ -6,35 +6,49 @@ on:
       confirm:
         description: "Type the version to release (must match pyproject)"
         required: true
+
 permissions:
-  id-token: write   # OIDC trusted publishing — no stored token
   contents: read
+
+# one release run at a time — never cancel mid-publish
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync --frozen
+      - run: uv sync --locked --extra server --all-groups
       - run: uv run ruff check .
       - run: uv run mypy src
       - run: uv run python -m pytest -q
       - name: version gate — input must match pyproject
         run: |
-          V=$(grep '^version' pyproject.toml | cut -d'"' -f2)
+          V=$(uv run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
           test "$V" = "${{ inputs.confirm }}" || {
             echo "input '${{ inputs.confirm }}' != pyproject '$V'"; exit 1; }
       - run: uv build
-      - run: uv run python scripts/gen_sbom.py > dist/sbom.json
+      - name: sbom — runtime deps + server extra only (dev group pruned)
+        run: uv run --locked --exact --no-dev --extra server python scripts/gen_sbom.py > dist/sbom.json
       - uses: actions/upload-artifact@v4
-        with: { name: dist, path: dist/ }
+        with:
+          name: dist
+          path: dist/
+          retention-days: 30
   # publish job is manual-environment gated (trusted publishing to PyPI
   # requires the 'pypi' environment to be configured with required
   # reviewers — explicit human approval before any publish).
   publish:
     needs: verify
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write   # OIDC trusted publishing — no stored token
+      contents: read
     environment: pypi
     steps:
       - uses: actions/download-artifact@v4

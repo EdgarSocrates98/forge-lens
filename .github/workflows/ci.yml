@@ -5,32 +5,44 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   python:
-    name: python (${{ matrix.os }})
+    name: python ${{ matrix.python }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: uv sync --extra server --all-groups
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked --extra server --all-groups
       - run: uv run ruff check .
       - run: uv run mypy src
       - run: uv run pytest --cov=src/forge_lens --cov-report=term-missing
       - run: uv build
       - name: schemas are in sync with models
         run: |
-          uv run python -m forge_lens.contracts.jsonschema > /dev/null
+          # no `> /dev/null` — the default shell on windows runners is pwsh
+          uv run python -m forge_lens.contracts.jsonschema
           git diff --exit-code schemas/v1/ || (echo "schemas/v1 out of date — run python -m forge_lens.contracts.jsonschema" && exit 1)
 
   sdk-ts:
     name: sdk-ts (node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -51,6 +63,7 @@ jobs:
   studio:
     name: studio (angular)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: apps/studio
@@ -66,10 +79,19 @@ jobs:
       - run: npx ng test --watch=false
 
   security:
-    name: pip-audit
+    name: dependency-audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync --extra server --all-groups
+      - run: uv sync --locked --extra server --all-groups
       - run: uv run pip-audit
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: packages/forge-lens-sdk-ts/package-lock.json
+      - name: npm audit (published SDK)
+        run: npm audit --audit-level=high
+        working-directory: packages/forge-lens-sdk-ts

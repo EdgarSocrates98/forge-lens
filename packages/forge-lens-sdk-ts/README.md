@@ -2,6 +2,8 @@
 
 Zero-dependency TypeScript SDK for Forge Lens — local-first agentic observability.
 
+**Requirements**: Node.js ≥20 (the range tested in CI: 20 and 22).
+
 ```ts
 import { LensTracer, HTTPExporter } from "@forge-lens/sdk";
 

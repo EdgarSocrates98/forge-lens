@@ -8,7 +8,16 @@ Usage: python scripts/gen_sbom.py > sbom.json
 from __future__ import annotations
 
 import json
+import re
 from importlib.metadata import distributions, version
+
+
+def _purl(name: str, ver: str) -> str:
+    # purl spec requires the PEP 503 normalized name: lowercase with runs
+    # of `-`, `_`, `.` collapsed to a single hyphen (e.g. `importlib_metadata`
+    # -> `importlib-metadata`). A bare `name.lower()` emits invalid purls.
+    norm = re.sub(r"[-_.]+", "-", name).lower()
+    return f"pkg:pypi/{norm}@{ver}"
 
 
 def main() -> None:
@@ -17,12 +26,13 @@ def main() -> None:
         name = d.metadata["Name"]
         if not name:
             continue
+        purl = _purl(name, d.version)
         comps.append({
             "type": "library",
-            "bom-ref": f"pkg:pypi/{name.lower()}@{d.version}",
+            "bom-ref": purl,
             "name": name,
             "version": d.version,
-            "purl": f"pkg:pypi/{name.lower()}@{d.version}",
+            "purl": purl,
         })
     print(json.dumps({
         "bomFormat": "CycloneDX", "specVersion": "1.5",

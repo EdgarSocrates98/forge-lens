@@ -223,3 +223,10 @@ Notas:
     store em tempo de request.
 - Não coberto de propósito: `GET /v1/traces/{id}/stream` (SSE replay —
   stream de eventos, não um recurso JSON) e as rotas de ingest/admin.
+- Também sem método hoje (lacuna real, não decisão de design):
+  `/v1/experiments*` (specs persistidos de A/B — nem leitura nem
+  escrita), os writes `PUT /v1/datasets/*` e `PUT
+  /v1/experiments/{id}` (o `LensClient` é read-side; escrita de traces
+  é do `HTTPExporter`, não dele), e `POST|DELETE /v1/alerts/rules`
+  (admin — `alerts_evaluate` cobre apenas a avaliação). Ver
+  `docs/capability-matrix.md`.

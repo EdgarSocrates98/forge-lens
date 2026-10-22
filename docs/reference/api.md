@@ -23,7 +23,8 @@ Três modos (`auth_mode` no TOML / `FORGE_LENS_AUTH_MODE`; o default é
 Nível exigido por rota:
 
 - **writer** (`check_auth`): `POST /v1/traces`, `POST /v1/otlp/traces`,
-  `PUT /v1/datasets/*`.
+  `PUT /v1/datasets/*`, `PUT /v1/experiments/{id}` e
+  `POST /v1/experiments/{id}/run`.
 - **reader** (`read_deps`): todos os GETs de dados **e** os POSTs de
   consulta (`/v1/eval/*`, `/v1/intel/*`, `/v1/analyze/*`,
   `/v1/alerts/evaluate`) — exigido quando `auth_reads = true`
@@ -37,16 +38,28 @@ ou `project_id` fora do escopo. `project_id` omitido resolve para
 `cfg.project_id` na checagem **e** na query — uma chave com escopo não
 vira leitura global pelo parâmetro omitido.
 
-Erros comuns: `400` JSON inválido no corpo · `404` recurso inexistente
+Erros comuns: `400` JSON inválido no corpo **ou aninhamento acima de
+512 níveis** (`{`/`[` contados lexicamente fora de strings — bound
+plataforma-independent aplicado a todo corpo lido: ingest, eval/\*,
+intel/\*, datasets, experiments, admin, analyze, alerts) · `404`
+recurso inexistente
 · `409` dataset version já existe (append-only) · `413` corpo acima de
 `max_payload_bytes` (default 8 MiB — streaming aborta no primeiro byte
 excedente) · `415` OTLP protobuf · `422` parâmetro/corpo malformado ·
 `429` rate limit de **ingestão** (`rate_limit_per_minute`, default 0 =
 desligado — não se aplica a consultas).
 
+Envelope de erro: rejeições da rota respondem `{"detail": "<mensagem>"}`
+(string); um `422` de validação de query-param pelo próprio FastAPI
+(ex.: `limit=abc` num GET) responde `{"detail": [{loc, msg, type, …}]}`
+(lista de violações). `500` usa o handler padrão do Starlette —
+`Internal Server Error` em texto puro, sem vazar exceção nem payload.
+
 Convenções de resposta: as listas paginadas `traces`/`sessions`/`tools`
-retornam envelope `{items, limit, offset}` (`limit` clampa a 1..500,
-`offset` clampa a ≥0 — e todo parâmetro inteiro é limitado a int64:
+/`experiments` retornam envelope `{items, limit, offset}` (`limit`
+clampa a 1..500 — exceto `admin/audit`, que rejeita `limit` fora de
+0..500 com `422` — `offset` clampa a ≥0 — e todo parâmetro inteiro é
+limitado a int64:
 `offset`/`min_total_tokens` > `2^63−1` → `422`, nunca um bind no
 driver); `datasets`, dataset versions, `admin/keys`
 e `admin/audit` retornam **array puro**; `graph/.../bottlenecks`
@@ -62,10 +75,15 @@ amplificam a resposta.
 
 ### `POST /v1/traces`
 Envelope nativo `TraceIngest` (`schemas/v1/trace-ingest.json`).
-`project_id` do envelope é aplicado às traces.
+O `project_id` do envelope preenche apenas traces que ficaram com
+`"default"` — um `project_id` explícito por trace é autoritativo (e
+precisa estar dentro do escopo da chave); o `source` do envelope age da
+mesma forma para `source.system == "unknown"`. Um `sent_at` do envelope
+anterior ao `started_at` de alguma trace vira warning de clock skew.
 Resposta: `{accepted_spans, updated_spans, duplicate_spans, traces[],
 sanitize{}, warnings[]}`.
-Erros: `413` payload/limite excedido, `422` envelope inválido ou span com
+Erros: `400` JSON malformado ou aninhamento > 512 níveis, `413`
+payload/limite excedido, `422` envelope inválido ou span com
 `trace_id` divergente, `429` rate limit.
 
 `updated_spans` conta re-entregas **alteradas** mescladas no store
@@ -84,7 +102,9 @@ inválida, `429` rate limit.
 
 ### `GET /v1/traces?project_id&session_id&status&since&until&min_duration_ms&max_duration_ms&q&tool&model&agent&host&min_total_tokens&limit≤500&offset`
 `{items:[{trace_id, project_id, session_id, root_span_id, started_at,
-ended_at, status, span_count, error_count}], limit, offset}`.
+ended_at, status, span_count, error_count}], limit, offset}` (default
+`limit=50`). Ordenação determinística: `started_at` DESC, desempate por
+`project_id` ASC e `trace_id` ASC — as mais recentes primeiro.
 
 Todos os filtros combinam com `AND`; parâmetros malformados → `422`:
 
@@ -196,12 +216,15 @@ metadata?}` → `{experiment_id, stored: true}`. Upsert de spec:
 transição explícita (`open`/`completed`). `NaN`/`Infinity` no spec →
 `422` (dado declarado inválido não é coagido silenciosamente).
 
-### `GET /v1/experiments?project_id&limit&offset`
-Envelope `{items, limit, offset}` ordenado por `experiment_id`.
+### `GET /v1/experiments?project_id&limit≤500&offset`
+Envelope `{items, limit, offset}` (default `limit=100`) ordenado por
+`experiment_id`.
 
-### `GET /v1/experiments/{experiment_id}?project_id`
-Spec armazenado + `runs` paginado (append-only, ordenado por
-`run_id`) — ou `404`.
+### `GET /v1/experiments/{experiment_id}?project_id&limit≤500&offset`
+Spec armazenado + histórico append-only: resposta = campos do spec +
+`runs` (ordenado por `run_id`) + `run_limit` + `run_offset` — `limit`
+(default 500) e `offset` paginam a lista embutida, não o spec — ou
+`404`.
 
 ### `POST /v1/experiments/{experiment_id}/run` — writer
 Executa o spec armazenado pelo MESMO caminho de `/v1/eval/compare`
@@ -209,8 +232,8 @@ Executa o spec armazenado pelo MESMO caminho de `/v1/eval/compare`
 histórico — `status` → `completed`, `result_ref` → `run:<id>`.
 Cohorts resolvem apenas dentro do projeto do experiment (sem A/B
 cross-tenant, diferente do compare ad-hoc). Corpo opcional
-`{project_id?, gate?}`. Erros: `404` spec ausente, `422` spec
-inválido.
+`{project_id?, gate?}`. Erros: `404` spec ausente **ou trace de cohort
+inexistente**, `422` spec inválido / `gate` malformado.
 
 ## Inteligência — grafo e custo (Cycles 03/04/12)
 
@@ -455,8 +478,9 @@ reivindicação de causa. `404` se a trace não existe.
 
 ### `POST /v1/intel/correlate`
 §05.5 — tabelas de co-ocorrência da frota. Corpo:
-`{project_id?, limit?}` (`limit` ≤ 500, default 200 — janela das traces
-mais recentes). Resposta: `{project_id, window, outcomes, tables:
+`{project_id?, limit?}` (`limit` clampa a 0..500, default 200 — janela
+das traces mais recentes; valor não-inteiro → `422`, coerente com a
+política global de validação de corpo). Resposta: `{project_id, window, outcomes, tables:
 {tool_error, model_error, session_length_error, retry_eval},
 classification: "descriptive_co_occurrence"}`. Taxas por coorte
 falha/ok com `n` completo; janelas sem ≥5 traces por lado são
@@ -596,8 +620,8 @@ vazio/role inválido/`projects` não-lista.
 
 ### `GET /v1/admin/keys`
 Array puro `[{key_id, name, role, projects, created_at,
-revoked_at}]` — sem material de segredo. Admin com escopo vê apenas
-chaves inteiramente contidas no seu escopo.
+revoked_at}]` ordenado por `key_id` — sem material de segredo. Admin
+com escopo vê apenas chaves inteiramente contidas no seu escopo.
 
 ### `DELETE /v1/admin/keys/{key_id}`
 Revoga (soft-delete: `revoked_at` preenchido) → `{key_id, revoked:
