@@ -400,6 +400,56 @@ def test_final_frame_without_trailing_newline(
     assert out == [{"jsonrpc": "2.0", "id": 1, "result": {}}]
 
 
+def test_stdin_reconfigured_to_utf8(
+    db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Windows pipes decode text-mode stdio with the ANSI codepage
+    (cp1252), not UTF-8 — conforming MCP frames with non-ASCII ids
+    mojibake, and undefined codepage bytes (e.g. UTF-8 ``Ё`` = D0 81)
+    raise ``UnicodeDecodeError`` inside ``readline()`` and kill the
+    server. ``serve`` reconfigures real stdio to UTF-8/replace:
+    conforming frames decode and undecodable input degrades to
+    -32700 instead of a crash."""
+    call = json.dumps({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "lens.detect_loops",
+                   "arguments": {"trace_id": "трейс-Ёлки"}},
+    })
+    # D0 81 ('Ё') and the raw \xff\xfe line are both fatal under
+    # cp1252; under UTF-8 the first is text, the second is garbage.
+    payload = (
+        (_INIT + "\n" + call + "\n").encode("utf-8")
+        + b"\xff\xfe\n"
+        + (_req("ping", 4) + "\n").encode("utf-8")
+    )
+    # Real-pipe shape: a text wrapper on the wrong codec, like Windows
+    wrapper = io.TextIOWrapper(io.BytesIO(payload), encoding="cp1252")
+    old = sys.stdin
+    sys.stdin = wrapper
+    try:
+        rc = serve(str(db))
+    finally:
+        sys.stdin = old
+    assert rc == 0
+    assert wrapper.encoding == "utf-8"
+    assert wrapper.errors == "replace"
+    out = [
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if line
+    ]
+    assert len(out) == 4
+    assert out[0]["id"] == 0  # initialize reply
+    tool_result = json.loads(out[1]["result"]["content"][0]["text"])
+    assert tool_result["trace_id"] == "трейс-Ёлки"  # not mojibake
+    assert out[1]["result"]["isError"] is True
+    assert out[2] == {
+        "jsonrpc": "2.0", "id": None,
+        "error": {"code": -32700, "message": "parse error"},
+    }
+    assert out[3] == {"jsonrpc": "2.0", "id": 4, "result": {}}
+
+
 def test_missing_store_fails_fast(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

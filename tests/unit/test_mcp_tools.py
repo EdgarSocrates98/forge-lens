@@ -398,13 +398,15 @@ def test_malformed_args_error_never_kills_loop(
             _call_tool(4, "lens.trace_efficiency", {}),
             _call_tool(5, "lens.list_datasets", {"project_id": ["p"]}),
             _call_tool(6, "lens.list_traces", {"limit": "lots"}),
+            # Python-literal underscore isn't valid JSON-number syntax
+            _call_tool(8, "lens.list_traces", {"limit": "5_0"}),
             _rpc("tools/list", 7),
         ],
         capsys,
     )
     # "lots" can't parse as a number — invalid params like the rest
     # (a str that reached int() used to leak -32603 for a client error)
-    for rid in range(1, 7):
+    for rid in (*range(1, 7), 8):
         assert by_id[rid]["error"]["code"] == -32602, rid
     assert "tools" in by_id[7]["result"]
 

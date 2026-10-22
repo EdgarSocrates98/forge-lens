@@ -44,7 +44,11 @@ JSON-RPC 2.0 sobre stdin/stdout (uma mensagem por linha, JSON estrito —
 literais `NaN`/`Infinity` são erro de parse), store SQLite aberta em modo
 **readonly**. Métodos: `initialize`, `ping`, `tools/list`, `tools/call`.
 Cada linha é limitada a **8 MiB** (o mesmo bound do corpo HTTP) — frames
-maiores viram `-32700` e o restante é drenado sem re-parsear.
+maiores viram `-32700` e o restante é drenado sem re-parsear. O transporte
+stdio é **UTF-8** (`stdin` é reconfigurado para `utf-8`/`replace` no início
+do loop) — sem isso o Windows decodificaria pipes com a codepage ANSI
+(cp1252) e frames UTF-8 conformes virariam mojibake ou matariam o loop em
+`UnicodeDecodeError`; input indecodificável degrada para `-32700`.
 
 **Lifecycle.** `initialize` negocia `protocolVersion`: a única revisão
 suportada é `2024-11-05` — uma string pedida compatível é ecoada,
