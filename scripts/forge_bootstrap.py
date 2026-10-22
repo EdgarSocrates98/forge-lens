@@ -428,16 +428,18 @@ def install_package(
     if editable:
         cmd.append("-e")
     cmd.append(req)
-    r = _run(cmd, timeout=900)
-    if r.returncode != 0:
-        offline_hint = (
-            "" if allow_download else (" — retry with --allow-download if deps are missing")
-        )
-        raise Refusal(
-            "FORGE-INSTALL-RUNTIME-FAILED",
-            f"pip install failed{offline_hint}: {r.stderr.strip()[-400:]}",
-        )
-    shutil.rmtree(whl_dir, ignore_errors=True)
+    try:
+        r = _run(cmd, timeout=900)
+        if r.returncode != 0:
+            offline_hint = (
+                "" if allow_download else (" — retry with --allow-download if deps are missing")
+            )
+            raise Refusal(
+                "FORGE-INSTALL-RUNTIME-FAILED",
+                f"pip install failed{offline_hint}: {r.stderr.strip()[-400:]}",
+            )
+    finally:
+        shutil.rmtree(whl_dir, ignore_errors=True)
 
 
 # --------------------------------------------------------------------------

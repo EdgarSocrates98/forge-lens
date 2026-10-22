@@ -5,6 +5,38 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 
 ## [Unreleased]
 
+### Fixed — ciclo 13.1 (review r6)
+
+- **MCP stdin reconfigurado para UTF-8**: o loop lia
+  `sys.stdin.readline()` em modo texto com a codepage da plataforma —
+  no Windows (ANSI cp1252) frames MCP conformes em UTF-8 chegavam
+  mojibake (silencioso → "not found" errado) ou `UnicodeDecodeError`
+  dentro do `readline()` matava o processo (bytes como `D0 81` são
+  indefinidos em cp1252). `serve()` agora faz
+  `sys.stdin.reconfigure(encoding="utf-8", errors="replace")` quando o
+  stdin é `TextIOWrapper` real — input indecodificável degrada para
+  U+FFFD → `-32700` em vez de crash. `StringIO` de teste é pulado pelo
+  guard `isinstance`. Regressão `test_stdin_reconfigured_to_utf8`
+  alimenta um `TextIOWrapper(BytesIO, encoding="cp1252")` com UTF-8
+  multibyte + bytes inválidos + ping e prova decode correto, `-32700`
+  e sobrevivência do loop. Outbound já era seguro (`ensure_ascii` →
+  ASCII puro).
+- **`forge_bootstrap`: `.wheels` não fica órfão em falha de install** —
+  `install_root/.wheels` só era removido no caminho de sucesso; um
+  `pip install` falho deixava o diretório temporário. Agora limpo em
+  `finally`.
+- **`_num` rejeita underscore Python-literal**: `int("5_0")`/`float()`
+  aceitam separador `_` — `"5_0"` no wire normalizava para `50`. Como
+  `_` não é sintaxe JSON-number, a string agora é `-32602` invalid
+  params junto às demais formas não-numéricas.
+- **Nota — digest de spans (edge de esquema)**: `_dump_with_raw_attrs`
+  hasheia o objeto `attributes` cru; spans gravados por versões
+  antigas com valores não-JSON-nativos (`datetime`, `UUID` em
+  `attributes`) mostram **uma** reescrita espúria `updated` no
+  primeiro re-ingest sob o novo esquema antes de convergir para
+  `duplicate`. Auto-curativo, sem corrupção — o `attributes_json`
+  persistido usava `default=str` em ambos os esquemas.
+
 ### Fixed — ciclo 13.1 (review r5)
 
 - **`config.toml` `auth_mode` fail-open fechado**: `_toml_to_config`

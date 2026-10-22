@@ -55,6 +55,10 @@ Branch: `cycle-13.1/hardening-homologation` → review branch
 | R5-3 | baixa | evidência homolog com paths `/home/edgar/...` | `save_evidence` não sanitizava | `<work>`/`<repo>` substituídos antes de escrever; A–K regerados | `grep -rl /home/` → 0 | fixed |
 | R5-4 | baixa | `serve-dist.mjs` morria em `/%ZZ` | `decodeURIComponent` sem guarda | `try/catch` → HTTP 400 texto; traversal/fallback intactos | — | fixed |
 | R5-5 | informativa | `sys.path` global em homolog/forge-e2e | conveniência de import | pacote instalado preferido (`src/` só fallback); bridge via `importlib.util` isolado | forge-e2e verde | fixed |
+| R6-1 | média | MCP stdin em codepage da plataforma (cp1252 no Windows) | `readline` texto sem reconfigure — UTF-8 conforme mojibake/crashava | `reconfigure(utf-8, errors=replace)` em stdio real; U+FFFD → `-32700` | `test_stdin_reconfigured_to_utf8` (wrapper cp1252 + Cyrillic + bytes inválidos) | fixed |
+| R6-2 | baixa | `.wheels` órfão em falha de install | rmtree só no caminho feliz | cleanup em `finally` | — | fixed |
+| R6-3 | informativa | `int("5_0")`→50 silencioso | `int()`/`float()` aceitam `_` Python-literal | string com `_` → `-32602` | caso em `test_wrong_typed_args` | fixed |
+| R6-4 | informativa | uma reescrita espúria em spans de esquema antigo | base de digest mudou (raw attrs) | documentado no CHANGELOG — auto-curativo, sem corrupção | — | documented |
 
 ## Matriz de validação
 
@@ -166,9 +170,8 @@ viva. Threat model: `docs/security/threat-model.md`.
 ## Release
 
 - **Commit final:** HEAD da branch `fix/forge-e2e-captured-span`
-  (ver `git log`; último commit de fix: r5 desta rodada — CHANGELOG
-  seção "review r5", inclui o fechamento do fail-open de
-  `auth_mode` no TOML).
+  (ver `git log`; último commit de fix: r6 desta rodada — CHANGELOG
+  seção "review r6", inclui a correção UTF-8 do stdin MCP).
 - **PR:** [#11](https://github.com/EdgarSocrates98/forge-lens/pull/11) —
   `OPEN`, `MERGEABLE`; proteção de `main` ativa (sibling-parity:
   reviews + 16 status checks + CODEOWNERS).

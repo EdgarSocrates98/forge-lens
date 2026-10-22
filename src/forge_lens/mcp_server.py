@@ -18,6 +18,7 @@ faults — one bad frame or call never kills the loop.
 
 from __future__ import annotations
 
+import io
 import json
 import math
 import sys
@@ -70,6 +71,11 @@ def _num(args: dict[str, Any], name: str,
     if isinstance(v, float) and not math.isfinite(v):
         raise TypeError(f"{name} must be a number")
     if isinstance(v, str):
+        if "_" in v:
+            # int()/float() accept Python-literal underscores ("5_0"→50)
+            # — not valid JSON-number syntax, so a wire string carrying
+            # one is invalid params, not a silent normalization.
+            raise TypeError(f"{name} must be a number")
         try:
             return int(v)
         except ValueError:
@@ -178,6 +184,14 @@ def _missing(trace_id: str) -> dict[str, Any]:
 
 def serve(db_path: str) -> int:
     """Blocking stdio loop — one JSON-RPC message per line."""
+    # MCP stdio is UTF-8 on the wire. Without this, text-mode stdin
+    # decodes with the platform locale (cp1252 on Windows): conforming
+    # UTF-8 frames arrive mojibake'd or a UnicodeDecodeError inside
+    # readline() kills the loop. errors="replace" makes undecodable
+    # input degrade to a -32700 parse error instead of a crash.
+    # StringIO (tests) isn't a TextIOWrapper — skipped by the check.
+    if isinstance(sys.stdin, io.TextIOWrapper):
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace")
     try:
         store = SQLiteTraceStore(db_path, readonly=True)
     except Exception as exc:
