@@ -43,7 +43,7 @@ dev = [
     { include-group = "types" },
     { include-group = "audit" },
 ]
-lint = ["ruff>=0.8"]
+lint = ["ruff>=0.17.2"]
 test = [
     "pytest>=8.0",
     "pytest-cov>=6.0",
