@@ -39,21 +39,7 @@ jobs:
           name: dist
           path: dist/
           retention-days: 30
-  # publish job is manual-environment gated (trusted publishing to PyPI
-  # requires the 'pypi' environment to be configured with required
-  # reviewers — explicit human approval before any publish).
-  publish:
-    needs: verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      id-token: write   # OIDC trusted publishing — no stored token
-      contents: read
-    environment: pypi
-    steps:
-      - uses: actions/download-artifact@v4
-        with: { name: dist, path: dist/ }
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist/
-          print-hash: true
+  # PyPI publication does NOT live here — it lives in publish-pypi.yml,
+  # the standard pipeline shared across the FORJAS repos (build once →
+  # OIDC trusted publish → clean-venv verify). This workflow only proves
+  # the release candidate and stores dist/ as an artifact.

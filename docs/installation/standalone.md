@@ -57,7 +57,7 @@ uv run forge-lens doctor
 ## Via pip (quando publicado)
 
 ```bash
-pip install "forge-lens[server]"
+pip install "forge-lens-fl[server]"
 forge-lens doctor
 ```
 

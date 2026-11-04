@@ -62,7 +62,7 @@ levantar `ValueError` no startup — o server nem sobe.
 
 | Sintoma | Causa | Fix |
 |---|---|---|
-| `uvicorn not installed. Run: uv sync --extra server` → exit 2 | extra `server` ausente | `uv sync --extra server` (ou `pip install "forge-lens[server]"`) |
+| `uvicorn not installed. Run: uv sync --extra server` → exit 2 | extra `server` ausente | `uv sync --extra server` (ou `pip install "forge-lens-fl[server]"`) |
 | `serve failed: invalid endpoint …` → exit 2 | `endpoint`/`FORGE_LENS_ENDPOINT` malformado | Corrigir para `http://host:port` |
 | `warning: binding <host> with no api_key …` | bind não-loopback com ingest e reads abertos | Esperado — setar `api_key`/`auth_reads` ou voltar a loopback |
 | `forge-lens ingest` → `exceeds max_payload_bytes` | arquivo maior que o limite (o CLI aplica o mesmo bound da API) | `--db`/`config` com limite maior, ou splitar o arquivo |

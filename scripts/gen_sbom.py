@@ -38,8 +38,8 @@ def main() -> None:
         "bomFormat": "CycloneDX", "specVersion": "1.5",
         "version": 1,
         "metadata": {"component": {
-            "type": "application", "name": "forge-lens",
-            "version": version("forge-lens")}},
+            "type": "application", "name": "forge-lens-fl",
+            "version": version("forge-lens-fl")}},
         "components": comps,
     }, indent=2))
 

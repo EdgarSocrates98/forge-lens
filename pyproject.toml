@@ -1,5 +1,5 @@
 [project]
-name = "forge-lens"
+name = "forge-lens-fl"
 version = "0.2.0"
 description = "Local-first, open-source agentic observability: traces, tools, tokens, cost and evidence."
 readme = "README.md"
@@ -58,6 +58,11 @@ audit = ["pip-audit>=2.7"]
 [build-system]
 requires = ["uv_build>=0.8.0,<0.13"]
 build-backend = "uv_build"
+
+# The PyPI distribution is `forge-lens-fl` but the import package stays
+# `forge_lens` — without this, uv_build expects src/forge_lens_fl/.
+[tool.uv.build-backend]
+module-name = "forge_lens"
 
 [tool.ruff]
 line-length = 100
