@@ -5,6 +5,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-04
+
+### Fixed
+- Cross-platform Python executable selection in the installation workflow.
+
 ### Added — wave de paridade e maturação (pós-13.1)
 
 Wave de melhoria ampla sobre 5 frentes: paridade de superfícies CLI/

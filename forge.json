@@ -4,7 +4,7 @@
   "distribution": "forge-lens-fl",
   "cli": "forge-lens",
   "python": ">=3.11",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "extras": [
     "server"
   ],

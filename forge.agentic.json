@@ -1,7 +1,7 @@
 {
   "schema": "forge/SpecialistAgenticManifest/v1",
   "provider": "forge-lens",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "cli": "forge-lens",
   "cli_entry": "forge_lens.cli.main:main",
   "workflows": [
