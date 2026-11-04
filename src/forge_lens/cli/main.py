@@ -9,9 +9,10 @@ import json
 import math
 import sqlite3
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import typer
 
@@ -2609,7 +2610,11 @@ def main() -> None:
         try:
             encoding = (stream.encoding or "").lower().replace("-", "")
             if encoding not in {"utf8", "utf16", "utf32"}:
-                stream.reconfigure(encoding="utf-8", errors="replace")
+                reconfigure = cast(
+                    Callable[..., Any] | None, getattr(stream, "reconfigure", None)
+                )
+                if reconfigure is not None:
+                    reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, OSError):
             # Test runners and embedders may provide non-configurable streams.
             pass
