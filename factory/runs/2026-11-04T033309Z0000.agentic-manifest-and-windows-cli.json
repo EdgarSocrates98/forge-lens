@@ -1,0 +1,15 @@
+{
+  "agent": "codex",
+  "command": [
+    "codex",
+    "exec",
+    "$(cat E:\\projetos\\FORJAS\\forge-lens\\factory\\prompts\\agentic-manifest-and-windows-cli.implement.codex.md)"
+  ],
+  "created_at": "2026-11-04T03:33:09+00:00",
+  "id": "agentic-manifest-and-windows-cli",
+  "prompt_path": "E:\\projetos\\FORJAS\\forge-lens\\factory\\prompts\\agentic-manifest-and-windows-cli.implement.codex.md",
+  "spec_path": "E:\\projetos\\FORJAS\\forge-lens\\factory\\specs\\active\\agentic-manifest-and-windows-cli.md",
+  "spec_sha256": "c3cbd129e3cf252f5f5362577c11344975f7045785b702b3f73b2dcd06295073",
+  "status": "planned",
+  "title": "Forge Lens agentic manifest and Windows CLI safety"
+}

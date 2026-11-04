@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -10,6 +13,20 @@ from typer.testing import CliRunner
 from forge_lens.cli.main import app
 
 runner = CliRunner()
+
+
+def test_help_is_utf8_safe_when_windows_uses_legacy_codepage() -> None:
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+    result = subprocess.run(
+        [sys.executable, "-m", "forge_lens", "--help"],
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    output = result.stdout.decode("utf-8")
+    assert "forge-lens" in output
+    assert "capabilities" in output
 
 
 def test_init_and_doctor(tmp_path: Path) -> None:

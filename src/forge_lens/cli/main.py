@@ -2601,6 +2601,18 @@ def main() -> None:
     launches the guided wizard (same contract as `sparkforge-aws
     install` / `productforge install`); flags and pipes keep the
     Typer path unchanged."""
+    # Typer/Rich help contains useful Unicode (arrows, en-dashes, thresholds),
+    # but the default Windows console may still expose a legacy code page.
+    # Normalize the process streams before Rich renders help so a supported
+    # Windows install fails neither on `forge-lens --help` nor on diagnostics.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            encoding = (stream.encoding or "").lower().replace("-", "")
+            if encoding not in {"utf8", "utf16", "utf32"}:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            # Test runners and embedders may provide non-configurable streams.
+            pass
     if sys.argv[1:] == ["install"]:
         from forge_lens.install.guided import (
             guided_install_available,
