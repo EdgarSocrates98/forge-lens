@@ -34,7 +34,7 @@ jobs:
       - run: uv build
       - name: sbom — runtime deps + server extra only (dev group pruned)
         run: uv run --locked --exact --no-dev --extra server python scripts/gen_sbom.py > dist/sbom.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
