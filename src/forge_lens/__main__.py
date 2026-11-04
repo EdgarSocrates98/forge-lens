@@ -1,3 +1,3 @@
-from forge_lens.cli.main import app
+from forge_lens.cli.main import main
 
-app()
+main()

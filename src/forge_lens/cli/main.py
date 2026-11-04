@@ -135,7 +135,7 @@ def _version(value: bool) -> None:
 
 
 @app.callback()
-def main(
+def _main_callback(
     version: Annotated[
         bool,
         typer.Option("--version", callback=_version, is_eager=True, help="Show version."),
@@ -2596,5 +2596,25 @@ def intel_regress(
     typer.echo(f"  note: {out['note']}")
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Console entry point — bare `forge-lens install` on a real TTY
+    launches the guided wizard (same contract as `sparkforge-aws
+    install` / `productforge install`); flags and pipes keep the
+    Typer path unchanged."""
+    if sys.argv[1:] == ["install"]:
+        from forge_lens.install.guided import (
+            guided_install_available,
+            run_guided_install,
+        )
+        from forge_lens.ui.kit import NonInteractive
+
+        if guided_install_available():
+            try:
+                raise SystemExit(run_guided_install())
+            except NonInteractive:
+                pass
     app()
+
+
+if __name__ == "__main__":
+    main()

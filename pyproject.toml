@@ -34,7 +34,10 @@ Repository = "https://github.com/EdgarSocrates98/forge-lens"
 Issues = "https://github.com/EdgarSocrates98/forge-lens/issues"
 
 [project.scripts]
-forge-lens = "forge_lens.cli.main:app"
+# Route the installed command through the small dispatcher so a bare
+# `forge-lens install` gets the guided wizard on a real TTY.  Pointing the
+# entry point directly at the Typer object bypasses that contract in wheels.
+forge-lens = "forge_lens.cli.main:main"
 
 [dependency-groups]
 dev = [
@@ -77,6 +80,9 @@ ignore = [
 # Homologation runner — subprocess/urllib against the local install is the point.
 "homolog/**" = ["S101", "S105", "S310", "S603", "PTH"]
 "src/forge_lens/cli/**" = ["T201"]
+# Vendored Forge UI kit (canonical: the-forge/src/theforge/ui) —
+# byte-identical to the shared source; linted in the canonical repo.
+"src/forge_lens/ui/**/*.py" = ["ALL"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -102,3 +108,5 @@ mypy_path = "src"
 packages = ["forge_lens"]
 strict = true
 warn_unreachable = true
+# Vendored Forge UI kit — mesma razão da exclusão de lint.
+exclude = ["forge_lens.ui"]
