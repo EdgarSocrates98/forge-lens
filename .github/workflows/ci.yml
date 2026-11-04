@@ -52,7 +52,7 @@ jobs:
         working-directory: packages/forge-lens-sdk-ts
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -69,7 +69,7 @@ jobs:
         working-directory: apps/studio
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -87,7 +87,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --locked --extra server --all-groups
       - run: uv run pip-audit
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -112,7 +112,7 @@ jobs:
       # the server extra (no dev groups needed for e2e). `.venv/bin/*`
       # is invoked directly so nothing re-syncs this env.
       - run: uv sync --locked --extra server --no-default-groups
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
