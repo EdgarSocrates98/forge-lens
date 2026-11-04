@@ -10,7 +10,7 @@ try {
     $py = $null
     $pyArgs = @()
     foreach ($c in @("python3", "python", "py")) {
-        $cmd = Get-Command $c -CommandType Application -ErrorAction SilentlyContinue
+        $cmd = Get-Command $c -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($cmd) {
             $py = $cmd.Source
             if ([IO.Path]::GetFileName($py) -in @("py.exe", "py")) { $pyArgs = @("-3") }
