@@ -2618,6 +2618,14 @@ def main() -> None:
         except (AttributeError, OSError):
             # Test runners and embedders may provide non-configurable streams.
             pass
+    if sys.argv[1:] in ([], ["tui"]):
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            from forge_lens.ui.home import run_home
+
+            raise SystemExit(run_home())
+        if sys.argv[1:] == ["tui"]:
+            typer.echo("forge-lens tui requires an interactive TTY", err=True)
+            raise SystemExit(2)
     if sys.argv[1:] == ["install"]:
         from forge_lens.install.guided import (
             guided_install_available,
