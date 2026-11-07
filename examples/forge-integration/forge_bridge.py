@@ -118,11 +118,15 @@ def init_workspace(theforge: list[str], ws: Path, env: dict[str, str]) -> None:
         check=True, capture_output=True, text=True, env=env, timeout=120,
     )
     providers = ws / ".forge" / "config" / "providers.toml"
+    # TOML basic strings treat ``\\`` as an escape. Use a portable POSIX
+    # spelling in the generated fixture so the live path also works on
+    # Windows; Python accepts it as a native path when launching the provider.
+    fixture_provider = FIXTURE_PROVIDER.as_posix()
     with providers.open("a", encoding="utf-8") as fh:
         fh.write(
             '\n[[providers]]\n'
             f'id = "{FAIL_PROVIDER_ID}"\n'
-            f'argv = ["{{python}}", "{FIXTURE_PROVIDER}"]\n'
+            f'argv = ["{{python}}", "{fixture_provider}"]\n'
         )
 
 
