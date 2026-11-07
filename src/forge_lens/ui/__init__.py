@@ -18,6 +18,7 @@ from forge_lens.ui.kit import (
 )
 from forge_lens.ui.home import run_home
 from forge_lens.ui.tui import run_tui
+from forge_lens.ui.wizard import run_wizard
 
 __all__ = [
     "UIContext",
@@ -29,5 +30,6 @@ __all__ = [
     "status_table",
     "run_home",
     "run_tui",
+    "run_wizard",
     "t",
 ]

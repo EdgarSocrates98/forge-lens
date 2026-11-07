@@ -26,9 +26,9 @@ def _doctor() -> None:
 
 
 def _install() -> int:
-    from forge_lens.install.guided import run_guided_install
+    from forge_lens.ui.wizard import run_wizard
 
-    return run_guided_install()
+    return run_wizard()
 
 
 def entries() -> list[tuple[str, Callable[[], object]]]:
