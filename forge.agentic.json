@@ -35,7 +35,12 @@
     }
   ],
   "skills": [],
-  "agents": [],
+  "agents": [
+    "lens-trace-analyst",
+    "lens-observability-reviewer",
+    "lens-evidence-guard"
+  ],
+  "agent_roster_paths": ["src/forge_lens/installation/assets/agents"],
   "coordinators": [],
   "mcp_command": ["{cli}", "mcp-serve"],
   "host_adapters": ["claude"],
