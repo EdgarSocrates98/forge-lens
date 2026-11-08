@@ -31,3 +31,11 @@ def test_manifests_match_package_and_each_other() -> None:
 def test_distribution_manifest_version_matches_package() -> None:
     manifest = json.loads((REPO / "forge.json").read_text(encoding="utf-8"))
     assert manifest["version"] == _package_version()
+
+
+def test_agent_roster_matches_manifest() -> None:
+    manifest = json.loads((REPO / "forge.agentic.json").read_text(encoding="utf-8"))
+    roster_dir = REPO / manifest["agent_roster_paths"][0]
+    roster_ids = sorted(path.stem for path in roster_dir.glob("*.md"))
+    assert roster_ids == sorted(manifest["agents"])
+    assert all((roster_dir / f"{agent_id}.md").is_file() for agent_id in roster_ids)
