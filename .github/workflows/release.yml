@@ -20,8 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
       - run: uv sync --locked --extra server --all-groups
       - run: uv run ruff check .
       - run: uv run mypy src
@@ -34,7 +34,7 @@ jobs:
       - run: uv build
       - name: sbom — runtime deps + server extra only (dev group pruned)
         run: uv run --locked --exact --no-dev --extra server python scripts/gen_sbom.py > dist/sbom.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist
           path: dist/
