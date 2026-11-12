@@ -1,0 +1,9 @@
+{
+  "cycle": "unified-release",
+  "repository": "forge-lens",
+  "version": "0.2.4",
+  "tag": "v0.2.4",
+  "source_commit": "58777dbde302a93171d1b678770610351e0cc7fc",
+  "version_source": "pyproject.toml|package.json|__init__",
+  "verified_at": "2026-11-12"
+}
