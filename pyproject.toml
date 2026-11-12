@@ -18,6 +18,7 @@ classifiers = [
 ]
 keywords = ["observability", "opentelemetry", "openinference", "agents", "llm", "tracing"]
 dependencies = [
+    "pyyaml>=6.0",  # vendored _forge_obsidian
     "pydantic>=2.7",
     "typer>=0.12",
     "rich>=13.7",
