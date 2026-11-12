@@ -114,19 +114,22 @@
       "id": "lens-evidence-guard",
       "kind": "agent",
       "location": "src/forge_lens/installation/assets/agents/lens-evidence-guard.md",
-      "resource_class": "agentic"
+      "resource_class": "agentic",
+      "packaged_location": "installation/assets/agents/lens-evidence-guard.md"
     },
     {
       "id": "lens-observability-reviewer",
       "kind": "agent",
       "location": "src/forge_lens/installation/assets/agents/lens-observability-reviewer.md",
-      "resource_class": "agentic"
+      "resource_class": "agentic",
+      "packaged_location": "installation/assets/agents/lens-observability-reviewer.md"
     },
     {
       "id": "lens-trace-analyst",
       "kind": "agent",
       "location": "src/forge_lens/installation/assets/agents/lens-trace-analyst.md",
-      "resource_class": "agentic"
+      "resource_class": "agentic",
+      "packaged_location": "installation/assets/agents/lens-trace-analyst.md"
     },
     {
       "id": "schemas/v1",
