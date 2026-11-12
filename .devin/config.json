@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Exec(forge-lens --version)",
+      "Exec(forge-lens doctor)",
+      "Exec(forge-lens obsidian status)",
+      "Exec(forge-lens obsidian scan)",
+      "Exec(forge-lens obsidian preview)",
+      "Exec(forge-lens obsidian sync-plan)",
+      "Exec(forge-lens obsidian history)"
+    ]
+  }
+}

@@ -61,6 +61,10 @@ install_app = typer.Typer(
 )
 app.add_typer(install_app, name="install")
 
+from forge_lens._forge_obsidian.cli import obsidian_app as _obsidian_app  # noqa: E402
+
+app.add_typer(_obsidian_app("forge-lens"), name="obsidian")
+
 
 def _config(db: Path | None = None) -> LensConfig:
     try:
