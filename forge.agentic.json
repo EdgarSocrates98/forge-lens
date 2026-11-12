@@ -8,28 +8,41 @@
     {
       "id": "doctor",
       "mode": "DIAGNOSTIC_ONLY",
-      "command": ["{cli}", "doctor", "{path}"],
+      "command": [
+        "{cli}",
+        "doctor",
+        "{path}"
+      ],
       "description": "Check local Forge Lens installation and store health",
       "read_only": true
     },
     {
       "id": "capabilities",
       "mode": "DIAGNOSTIC_ONLY",
-      "command": ["{cli}", "capabilities"],
+      "command": [
+        "{cli}",
+        "capabilities"
+      ],
       "description": "Report the verified host adapter capability matrix",
       "read_only": true
     },
     {
       "id": "stats",
       "mode": "DIAGNOSTIC_ONLY",
-      "command": ["{cli}", "stats"],
+      "command": [
+        "{cli}",
+        "stats"
+      ],
       "description": "Summarize bounded local trace operations and failures",
       "read_only": true
     },
     {
       "id": "mcp-observer",
       "mode": "DIRECT_CAPABILITY",
-      "command": ["{cli}", "mcp-serve"],
+      "command": [
+        "{cli}",
+        "mcp-serve"
+      ],
       "description": "Serve the local read-only MCP observer over stdio",
       "read_only": true
     }
@@ -40,11 +53,136 @@
     "lens-observability-reviewer",
     "lens-evidence-guard"
   ],
-  "agent_roster_paths": ["src/forge_lens/installation/assets/agents"],
+  "agent_roster_paths": [
+    "src/forge_lens/installation/assets/agents"
+  ],
   "coordinators": [],
-  "mcp_command": ["{cli}", "mcp-serve"],
-  "host_adapters": ["claude"],
+  "mcp_command": [
+    "{cli}",
+    "mcp-serve"
+  ],
+  "host_adapters": [
+    "claude"
+  ],
   "read_only_default": true,
   "requires_credentials": false,
-  "requires_network": false
+  "requires_network": false,
+  "resources": [
+    {
+      "id": "forge-lens-context-analysis",
+      "kind": "skill",
+      "location": "skills/forge-lens-context-analysis/SKILL.md",
+      "resource_class": "agentic"
+    },
+    {
+      "id": "forge-lens-cost-analysis",
+      "kind": "skill",
+      "location": "skills/forge-lens-cost-analysis/SKILL.md",
+      "resource_class": "agentic"
+    },
+    {
+      "id": "forge-lens-evaluate-agent",
+      "kind": "skill",
+      "location": "skills/forge-lens-evaluate-agent/SKILL.md",
+      "resource_class": "agentic"
+    },
+    {
+      "id": "forge-lens-graph-explorer",
+      "kind": "skill",
+      "location": "skills/forge-lens-graph-explorer/SKILL.md",
+      "resource_class": "agentic"
+    },
+    {
+      "id": "forge-lens-investigate-failure",
+      "kind": "skill",
+      "location": "skills/forge-lens-investigate-failure/SKILL.md",
+      "resource_class": "agentic"
+    },
+    {
+      "id": "forge-lens-loop-detection",
+      "kind": "skill",
+      "location": "skills/forge-lens-loop-detection/SKILL.md",
+      "resource_class": "agentic"
+    },
+    {
+      "id": "forge-lens-trace-analysis",
+      "kind": "skill",
+      "location": "skills/forge-lens-trace-analysis/SKILL.md",
+      "resource_class": "agentic"
+    },
+    {
+      "id": "lens-evidence-guard",
+      "kind": "agent",
+      "location": "src/forge_lens/installation/assets/agents/lens-evidence-guard.md",
+      "resource_class": "agentic",
+      "packaged_location": "installation/assets/agents/lens-evidence-guard.md"
+    },
+    {
+      "id": "lens-observability-reviewer",
+      "kind": "agent",
+      "location": "src/forge_lens/installation/assets/agents/lens-observability-reviewer.md",
+      "resource_class": "agentic",
+      "packaged_location": "installation/assets/agents/lens-observability-reviewer.md"
+    },
+    {
+      "id": "lens-trace-analyst",
+      "kind": "agent",
+      "location": "src/forge_lens/installation/assets/agents/lens-trace-analyst.md",
+      "resource_class": "agentic",
+      "packaged_location": "installation/assets/agents/lens-trace-analyst.md"
+    },
+    {
+      "id": "schemas/v1",
+      "kind": "contract",
+      "location": "schemas/v1",
+      "resource_class": "validation"
+    },
+    {
+      "id": "examples/forge-integration",
+      "kind": "example",
+      "location": "examples/forge-integration",
+      "resource_class": "read-only"
+    },
+    {
+      "id": "examples/quickstart.py",
+      "kind": "example",
+      "location": "examples/quickstart.py",
+      "format": "python",
+      "resource_class": "read-only"
+    },
+    {
+      "id": "examples/sample-otlp.json",
+      "kind": "example",
+      "location": "examples/sample-otlp.json",
+      "format": "json",
+      "resource_class": "read-only"
+    },
+    {
+      "id": "tests/fixtures/eval-gate",
+      "kind": "fixture",
+      "location": "tests/fixtures/eval-gate",
+      "resource_class": "test-only"
+    },
+    {
+      "id": "tests/fixtures/golden-normalized-trace.json",
+      "kind": "fixture",
+      "location": "tests/fixtures/golden-normalized-trace.json",
+      "format": "json",
+      "resource_class": "test-only"
+    },
+    {
+      "id": "tests/fixtures/native-ingest.json",
+      "kind": "fixture",
+      "location": "tests/fixtures/native-ingest.json",
+      "format": "json",
+      "resource_class": "test-only"
+    },
+    {
+      "id": "tests/fixtures/otlp-request.json",
+      "kind": "fixture",
+      "location": "tests/fixtures/otlp-request.json",
+      "format": "json",
+      "resource_class": "test-only"
+    }
+  ]
 }
