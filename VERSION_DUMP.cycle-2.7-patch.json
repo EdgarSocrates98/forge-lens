@@ -1,0 +1,9 @@
+{
+  "cycle": "2.7-patch",
+  "repository": "forge-lens",
+  "version": "0.2.3",
+  "tag": "v0.2.3",
+  "source_commit": "9b459127f382c64ef756d918c4c48f30169c94e5",
+  "version_source": "pyproject.toml",
+  "verified_at": "2026-11-12"
+}
