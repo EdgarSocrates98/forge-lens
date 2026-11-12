@@ -41,13 +41,9 @@ experiments_app = typer.Typer(
     help="Persisted A/B eval experiments (Cycle 13).", no_args_is_help=True
 )
 app.add_typer(experiments_app, name="experiments")
-alerts_app = typer.Typer(
-    help="Threshold alert rules over store metrics.", no_args_is_help=True
-)
+alerts_app = typer.Typer(help="Threshold alert rules over store metrics.", no_args_is_help=True)
 app.add_typer(alerts_app, name="alerts")
-intel_app = typer.Typer(
-    help="Fleet-level intelligence over stored traces.", no_args_is_help=True
-)
+intel_app = typer.Typer(help="Fleet-level intelligence over stored traces.", no_args_is_help=True)
 app.add_typer(intel_app, name="intel")
 install_app = typer.Typer(
     help=(
@@ -88,15 +84,11 @@ def _store(cfg: LensConfig) -> SQLiteTraceStore:
         # RuntimeError there, not OSError) is invalid input — clean
         # message + exit 2, same contract mcp-serve reports for an
         # unopenable store
-        typer.echo(
-            f"cannot open store at {cfg.resolved_db_path}: {exc}", err=True
-        )
+        typer.echo(f"cannot open store at {cfg.resolved_db_path}: {exc}", err=True)
         raise typer.Exit(2) from None
 
 
-def _get_trace_or_exit(
-    trace_id: str, cfg: LensConfig, project: str | None
-) -> Trace:
+def _get_trace_or_exit(trace_id: str, cfg: LensConfig, project: str | None) -> Trace:
     """Store lookup shared by the per-trace analysis commands — a
     missing trace is a clean 'not found', never a traceback."""
     store = _store(cfg)
@@ -188,9 +180,7 @@ def serve(
     try:
         import uvicorn
     except ImportError:
-        typer.echo(
-            "uvicorn not installed. Run: uv sync --extra server", err=True
-        )
+        typer.echo("uvicorn not installed. Run: uv sync --extra server", err=True)
         raise typer.Exit(2) from None
     from forge_lens.api.app import create_app
 
@@ -198,14 +188,10 @@ def serve(
     try:
         # a schemeless "localhost:7777" would parse "localhost" as the
         # *scheme* — prefix // so it reads as host:port authority
-        ep = urlsplit(
-            cfg.endpoint if "://" in cfg.endpoint else f"//{cfg.endpoint}"
-        )
+        ep = urlsplit(cfg.endpoint if "://" in cfg.endpoint else f"//{cfg.endpoint}")
         ep_port = ep.port  # raises ValueError on a malformed port
     except ValueError as exc:
-        typer.echo(
-            f"serve failed: invalid endpoint {cfg.endpoint!r}: {exc}", err=True
-        )
+        typer.echo(f"serve failed: invalid endpoint {cfg.endpoint!r}: {exc}", err=True)
         raise typer.Exit(2) from None
     if port is not None and not 0 <= port <= 65535:
         # invalid flag would otherwise crash inside uvicorn at bind time
@@ -240,9 +226,7 @@ def serve(
 def ingest(
     file: Annotated[
         Path,
-        typer.Argument(
-            help="JSON file: native TraceIngest or OTLP ExportTraceServiceRequest."
-        ),
+        typer.Argument(help="JSON file: native TraceIngest or OTLP ExportTraceServiceRequest."),
     ],
     db: Annotated[Path | None, typer.Option("--db")] = None,
     fmt: Annotated[str, typer.Option("--format", "-f", help="native|otlp|auto")] = "auto",
@@ -255,9 +239,7 @@ def ingest(
     from forge_lens.otlp.normalize import normalize_otlp_request
 
     if fmt not in {"native", "otlp", "auto"}:
-        typer.echo(
-            f"ingest failed: unknown --format {fmt!r} (native|otlp|auto)", err=True
-        )
+        typer.echo(f"ingest failed: unknown --format {fmt!r} (native|otlp|auto)", err=True)
         raise typer.Exit(2)
 
     cfg = _config(db)
@@ -274,16 +256,11 @@ def ingest(
         max_bytes = cfg.max_payload_bytes
         size = file.stat().st_size
         if size > max_bytes:
-            raise ValueError(
-                f"file {file} ({size}B) exceeds "
-                f"max_payload_bytes ({max_bytes}B)"
-            )
+            raise ValueError(f"file {file} ({size}B) exceeds max_payload_bytes ({max_bytes}B)")
         with file.open("rb") as fh:
             raw = fh.read(max_bytes + 1)
         if len(raw) > max_bytes:
-            raise ValueError(
-                f"file {file} exceeds max_payload_bytes ({max_bytes}B)"
-            )
+            raise ValueError(f"file {file} exceeds max_payload_bytes ({max_bytes}B)")
         payload = json.loads(raw)
         if fmt == "otlp" or (fmt == "auto" and "resourceSpans" in payload):
             # file import — weaker provenance than a live OTLP push
@@ -328,23 +305,18 @@ def traces_list(
     db: Annotated[Path | None, typer.Option("--db")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     status: Annotated[str | None, typer.Option("--status")] = None,
-    session: Annotated[
-        str | None, typer.Option("--session", help="exact session_id")
-    ] = None,
+    session: Annotated[str | None, typer.Option("--session", help="exact session_id")] = None,
     tool: Annotated[
         str | None,
         typer.Option("--tool", help="substring match on span tool.name"),
     ] = None,
     model: Annotated[
         str | None,
-        typer.Option(
-            "--model", help="substring on gen_ai.request/response.model"),
+        typer.Option("--model", help="substring on gen_ai.request/response.model"),
     ] = None,
     agent: Annotated[
         str | None,
-        typer.Option(
-            "--agent",
-            help="substring on gen_ai.agent.name or producer identity"),
+        typer.Option("--agent", help="substring on gen_ai.agent.name or producer identity"),
     ] = None,
     host: Annotated[
         str | None,
@@ -352,9 +324,7 @@ def traces_list(
     ] = None,
     min_tokens: Annotated[
         int | None,
-        typer.Option(
-            "--min-tokens",
-            help="summed gen_ai.usage.total_tokens ≥ value"),
+        typer.Option("--min-tokens", help="summed gen_ai.usage.total_tokens ≥ value"),
     ] = None,
     q: Annotated[
         str | None,
@@ -366,16 +336,10 @@ def traces_list(
     until: Annotated[
         str | None, typer.Option("--until", help="ISO-8601 started_at upper bound")
     ] = None,
-    min_duration_ms: Annotated[
-        float | None, typer.Option("--min-duration-ms")
-    ] = None,
-    max_duration_ms: Annotated[
-        float | None, typer.Option("--max-duration-ms")
-    ] = None,
+    min_duration_ms: Annotated[float | None, typer.Option("--min-duration-ms")] = None,
+    max_duration_ms: Annotated[float | None, typer.Option("--max-duration-ms")] = None,
     limit: Annotated[int, typer.Option("--limit", "-n")] = 20,
-    offset: Annotated[
-        int, typer.Option("--offset", help="rows to skip (pagination)")
-    ] = 0,
+    offset: Annotated[int, typer.Option("--offset", help="rows to skip (pagination)")] = 0,
     json_out: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """List stored traces (most recent first)."""
@@ -404,8 +368,7 @@ def traces_list(
             raise typer.Exit(2)
         ns = int(value * 1_000_000)
         if ns > 2**63 - 1:  # finite floats still overflow the sqlite bind
-            typer.echo(f"invalid {opt} {value!r}: out of int64 range",
-                       err=True)
+            typer.echo(f"invalid {opt} {value!r}: out of int64 range", err=True)
             raise typer.Exit(2)
         return ns
 
@@ -415,8 +378,7 @@ def traces_list(
     if min_tokens is not None and (
         min_tokens < 0 or min_tokens > 2**63 - 1  # sqlite int64 bound
     ):
-        typer.echo("invalid --min-tokens: integer in 0..2**63-1 expected",
-                   err=True)
+        typer.echo("invalid --min-tokens: integer in 0..2**63-1 expected", err=True)
         raise typer.Exit(2)
     if limit < 0:
         typer.echo("invalid --limit: non-negative integer expected", err=True)
@@ -495,11 +457,7 @@ def traces_show(
             typer.echo(f"  {'  ' * depth}  ~ flag: {flag.value}")
         usage = s.attributes.get("forge_lens.token_usage")
         if isinstance(usage, dict):
-            parts = [
-                f"{k}={v}"
-                for k, v in usage.items()
-                if k.endswith("tokens") and v is not None
-            ]
+            parts = [f"{k}={v}" for k, v in usage.items() if k.endswith("tokens") and v is not None]
             if parts:
                 typer.echo(f"  {'  ' * depth}  ~ tokens: {', '.join(parts)}")
 
@@ -569,9 +527,7 @@ def sessions(
     cfg = _config(db)
     store = _store(cfg)
     try:
-        items = store.list_sessions(
-            project or cfg.project_id, limit=min(500, max(0, limit))
-        )
+        items = store.list_sessions(project or cfg.project_id, limit=min(500, max(0, limit)))
     finally:
         store.close()
     if json_out:
@@ -583,8 +539,7 @@ def sessions(
     for s in items:
         last = (s["last_activity_at"] or "?")[:19]
         typer.echo(
-            f"{s['session_id']:<28} traces={s['traces']:<5} "
-            f"spans={s['spans']:<6} last={last}"
+            f"{s['session_id']:<28} traces={s['traces']:<5} spans={s['spans']:<6} last={last}"
         )
 
 
@@ -599,9 +554,7 @@ def tools(
     cfg = _config(db)
     store = _store(cfg)
     try:
-        items = store.list_tools(
-            project or cfg.project_id, limit=min(500, max(0, limit))
-        )
+        items = store.list_tools(project or cfg.project_id, limit=min(500, max(0, limit)))
     finally:
         store.close()
     if json_out:
@@ -671,13 +624,9 @@ def stats(
         return
     s = out["stats"]
     typer.echo(
-        f"project {out['project_id']}  schema={s['schema_version']}  "
-        f"db={s['db_size_bytes']}B"
+        f"project {out['project_id']}  schema={s['schema_version']}  db={s['db_size_bytes']}B"
     )
-    typer.echo(
-        f"  traces={s['traces']} spans={s['spans']} "
-        f"error_spans={s['error_spans']}"
-    )
+    typer.echo(f"  traces={s['traces']} spans={s['spans']} error_spans={s['error_spans']}")
     typer.echo(f"  recent window: {out['recent_traces']} trace(s)")
     failures = out["recent_failures"]
     if failures:
@@ -700,9 +649,7 @@ def cost(
     trace = _get_trace_or_exit(trace_id, cfg, project)
     try:
         registry = (
-            PricingRegistry.from_file(cfg.pricing_file)
-            if cfg.pricing_file
-            else PricingRegistry()
+            PricingRegistry.from_file(cfg.pricing_file) if cfg.pricing_file else PricingRegistry()
         )
     except Exception as exc:
         typer.echo(f"cost failed: invalid pricing_file: {exc}", err=True)
@@ -754,9 +701,7 @@ def incident(
     trace = _get_trace_or_exit(trace_id, cfg, project)
     try:
         registry = (
-            PricingRegistry.from_file(cfg.pricing_file)
-            if cfg.pricing_file
-            else PricingRegistry()
+            PricingRegistry.from_file(cfg.pricing_file) if cfg.pricing_file else PricingRegistry()
         )
     except Exception as exc:
         typer.echo(f"incident failed: invalid pricing_file: {exc}", err=True)
@@ -766,10 +711,7 @@ def incident(
         typer.echo(json.dumps(bundle, indent=2))
         return
     f = bundle["failure"]
-    typer.echo(
-        f"trace {bundle['trace_id']}  status={bundle['status']}  "
-        f"failed={f['failed']}"
-    )
+    typer.echo(f"trace {bundle['trace_id']}  status={bundle['status']}  failed={f['failed']}")
     if f["failed"]:
         typer.echo(f"  category: {f['category']} ({f['confidence']})")
         typer.echo(f"  detail:   {f['detail']}")
@@ -818,16 +760,13 @@ def eval_cmd(
             typer.echo(f"invalid --params-json: {exc}", err=True)
             raise typer.Exit(2) from None
         if not isinstance(parsed, dict):
-            typer.echo(
-                "invalid --params-json: a JSON object is required", err=True
-            )
+            typer.echo("invalid --params-json: a JSON object is required", err=True)
             raise typer.Exit(2)
         params = parsed
     unknown = [n for n in (evaluator or []) if n not in EVALUATORS]
     if unknown:
         typer.echo(
-            f"unknown evaluator {unknown[0]!r} — one of "
-            f"{sorted(EVALUATORS)}",
+            f"unknown evaluator {unknown[0]!r} — one of {sorted(EVALUATORS)}",
             err=True,
         )
         raise typer.Exit(2)
@@ -923,17 +862,13 @@ def efficiency(
     if json_out:
         typer.echo(json.dumps(out, indent=2))
         return
-    typer.echo(
-        f"trace {out['trace_id']}  outcome={out['outcome']}  "
-        f"succeeded={out['succeeded']}"
-    )
+    typer.echo(f"trace {out['trace_id']}  outcome={out['outcome']}  succeeded={out['succeeded']}")
     typer.echo(
         f"  tools={out['tool_calls']} llm={out['llm_calls']} "
         f"errors={out['error_spans']} retries={out['retries_observed']}"
     )
     typer.echo(
-        f"  tokens: in={out['input_tokens']} out={out['output_tokens']} "
-        f"({out['usage_coverage']})"
+        f"  tokens: in={out['input_tokens']} out={out['output_tokens']} ({out['usage_coverage']})"
     )
 
 
@@ -990,8 +925,7 @@ def correlate(
         " — correlation is not causation"
     )
     for c in cors:
-        typer.echo(
-            f"  {c['kind']} (strength={c['strength']}): {c['detail']}")
+        typer.echo(f"  {c['kind']} (strength={c['strength']}): {c['detail']}")
 
 
 @app.command()
@@ -1019,9 +953,7 @@ def security(
         " (observer mode — evidence only)"
     )
     for o in observations:
-        typer.echo(
-            f"  [{o['severity']}] {o['kind']} span {o['span_id']}: {o['detail']}"
-        )
+        typer.echo(f"  [{o['severity']}] {o['kind']} span {o['span_id']}: {o['detail']}")
 
 
 @app.command()
@@ -1090,8 +1022,10 @@ def doctor(
             stats = store.stats()
             store.close()
             check("sqlite store readable", True, f"schema={stats['schema_version']}")
-            typer.echo(f"       traces={stats['traces']} spans={stats['spans']} "
-                       f"db={stats['db_size_bytes']}B")
+            typer.echo(
+                f"       traces={stats['traces']} spans={stats['spans']} "
+                f"db={stats['db_size_bytes']}B"
+            )
         except Exception as exc:
             check("sqlite store readable", False, str(exc))
     else:
@@ -1099,11 +1033,13 @@ def doctor(
     try:
         import fastapi  # noqa: F401
         import uvicorn  # noqa: F401
+
         check("server extras installed", True)
     except ImportError:
         typer.echo("[info] server extras missing — `uv sync --extra server` to enable `serve`")
     try:
         from forge_lens.sdk import LensTracer  # noqa: F401
+
         check("sdk importable", True)
     except Exception as exc:
         check("sdk importable", False, str(exc))
@@ -1139,8 +1075,12 @@ def keys_create(
     try:
         key_id, secret, hashed = generate_key()
         store.create_api_key(
-            key_id, name=name, key_hash=hashed, role=role,
-            projects=project, now_ns=wall_clock_ns(),
+            key_id,
+            name=name,
+            key_hash=hashed,
+            role=role,
+            projects=project,
+            now_ns=wall_clock_ns(),
         )
     finally:
         store.close()
@@ -1165,9 +1105,7 @@ def keys_list(db: Annotated[Path | None, typer.Option("--db")] = None) -> None:
 
 
 @keys_app.command("revoke")
-def keys_revoke(
-    key_id: str, db: Annotated[Path | None, typer.Option("--db")] = None
-) -> None:
+def keys_revoke(key_id: str, db: Annotated[Path | None, typer.Option("--db")] = None) -> None:
     from forge_lens.api.clock import wall_clock_ns
 
     store = _store(_config(db))
@@ -1202,8 +1140,7 @@ def datasets_list(
     for d in items:
         created = (d["created_at"] or "?")[:19]
         typer.echo(
-            f"{d['dataset_id']:<24} {d['name']:<24} "
-            f"task={d['task'] or '-'}  created={created}"
+            f"{d['dataset_id']:<24} {d['name']:<24} task={d['task'] or '-'}  created={created}"
         )
 
 
@@ -1251,9 +1188,7 @@ def datasets_show(
 
 @app.command()
 def prune(
-    before: Annotated[
-        str | None, typer.Option("--before", help="ISO datetime cutoff")
-    ] = None,
+    before: Annotated[str | None, typer.Option("--before", help="ISO datetime cutoff")] = None,
     days: Annotated[
         int | None, typer.Option("--days", help="delete traces older than N days")
     ] = None,
@@ -1301,9 +1236,12 @@ def prune(
             )
         deleted = store.prune_traces(before_ns=cutoff, project_id=project)
         store.record_audit(
-            actor="cli", action="traces.prune",
-            resource=project or "*", outcome="ok",
-            detail={"before_ns": cutoff, **deleted}, ts_ns=wall_clock_ns(),
+            actor="cli",
+            action="traces.prune",
+            resource=project or "*",
+            outcome="ok",
+            detail={"before_ns": cutoff, **deleted},
+            ts_ns=wall_clock_ns(),
         )
     finally:
         store.close()
@@ -1312,15 +1250,18 @@ def prune(
 
 @app.command()
 def archive(
-    before: Annotated[str, typer.Option(
-        "--before", help="ISO cutoff — traces ended before this are exported")],
+    before: Annotated[
+        str, typer.Option("--before", help="ISO cutoff — traces ended before this are exported")
+    ],
     out: Annotated[Path, typer.Option("--out", help="NDJSON archive path")],
     project: Annotated[str | None, typer.Option("--project")] = None,
     db: Annotated[Path | None, typer.Option("--db")] = None,
-    delete: Annotated[bool, typer.Option(
-        "--delete", help="prune after archiving (needs --yes)")] = False,
-    append: Annotated[bool, typer.Option(
-        "--append", help="append to an existing archive file")] = False,
+    delete: Annotated[
+        bool, typer.Option("--delete", help="prune after archiving (needs --yes)")
+    ] = False,
+    append: Annotated[
+        bool, typer.Option("--append", help="append to an existing archive file")
+    ] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
 ) -> None:
     """Tiered storage: export traces older than a cutoff to NDJSON.
@@ -1340,8 +1281,8 @@ def archive(
         raise typer.Exit(2) from None
     if out.exists() and not append:
         typer.echo(
-            f"{out} exists — refusing to truncate a prior archive "
-            "(pass --append to append)", err=True,
+            f"{out} exists — refusing to truncate a prior archive (pass --append to append)",
+            err=True,
         )
         raise typer.Exit(2)
     cfg = _config(db)
@@ -1352,29 +1293,20 @@ def archive(
         page = 1000
         with out.open("a" if append else "w", encoding="utf-8") as fh:
             while True:
-                rows = store.list_traces(
-                    project_id=project, limit=page, offset=offset
-                )
+                rows = store.list_traces(project_id=project, limit=page, offset=offset)
                 if not rows:
                     break
                 for row in rows:
                     end_iso = row.get("ended_at")
                     if end_iso is None:
                         continue  # un-ended trace: never archived
-                    if to_unix_nano(ensure_aware(
-                        datetime.fromisoformat(end_iso)
-                    )) >= cutoff:
+                    if to_unix_nano(ensure_aware(datetime.fromisoformat(end_iso))) >= cutoff:
                         continue
-                    tr = store.get_trace(
-                        row["trace_id"], project_id=row["project_id"]
-                    )
+                    tr = store.get_trace(row["trace_id"], project_id=row["project_id"])
                     if tr is None:
                         continue
-                    fh.write(_json.dumps(tr.model_dump(mode="json"),
-                                         default=str) + "\n")
-                    written_ids.append(
-                        (str(row["project_id"]), tr.trace_id)
-                    )
+                    fh.write(_json.dumps(tr.model_dump(mode="json"), default=str) + "\n")
+                    written_ids.append((str(row["project_id"]), tr.trace_id))
                 offset += len(rows)
                 if len(rows) < page:
                     break
@@ -1382,20 +1314,23 @@ def archive(
         if delete:
             if not yes:
                 typer.confirm(
-                    f"delete the {len(written_ids)} archived trace(s) "
-                    "from the hot store?",
+                    f"delete the {len(written_ids)} archived trace(s) from the hot store?",
                     abort=True,
                 )
             by_proj: dict[str, list[str]] = {}
             for _pid, _tid in written_ids:
                 by_proj.setdefault(_pid, []).append(_tid)
-            deleted = {"traces": sum(
-                store.delete_trace_ids(ids, project_id=_pid)["traces"]
-                for _pid, ids in sorted(by_proj.items())
-            )}
+            deleted = {
+                "traces": sum(
+                    store.delete_trace_ids(ids, project_id=_pid)["traces"]
+                    for _pid, ids in sorted(by_proj.items())
+                )
+            }
             store.record_audit(
-                actor="cli", action="traces.archive_prune",
-                resource=str(out), outcome="ok",
+                actor="cli",
+                action="traces.archive_prune",
+                resource=str(out),
+                outcome="ok",
                 detail={"archived": len(written_ids), **deleted},
                 ts_ns=wall_clock_ns(),
             )
@@ -1503,8 +1438,7 @@ def import_otel(
             raw = fh.read(max_bytes + 1)
         if len(raw) > max_bytes:
             typer.echo(
-                f"import-otel failed: file {file} exceeds "
-                f"max_payload_bytes ({max_bytes}B)",
+                f"import-otel failed: file {file} exceeds max_payload_bytes ({max_bytes}B)",
                 err=True,
             )
             raise typer.Exit(2)
@@ -1521,8 +1455,7 @@ def import_otel(
         raise typer.Exit(2) from None
     if not isinstance(payload, dict):
         typer.echo(
-            "import-otel failed: OTLP file must be a JSON object "
-            "(ExportTraceServiceRequest)",
+            "import-otel failed: OTLP file must be a JSON object (ExportTraceServiceRequest)",
             err=True,
         )
         raise typer.Exit(2)
@@ -1543,9 +1476,7 @@ def import_otel(
         # go through the pipeline, not a bare upsert — _ensure_storable
         # validates encodability/ranges so a hostile dump can't reach a
         # SQLite bind (same guarantee ingest has)
-        result = IngestPipeline(store, cfg).ingest(
-            traces, payload_bytes=len(raw)
-        )
+        result = IngestPipeline(store, cfg).ingest(traces, payload_bytes=len(raw))
     except (PayloadTooLargeError, RateLimitedError, ValidationError) as exc:
         typer.echo(f"import-otel failed: {exc}", err=True)
         raise typer.Exit(1) from None
@@ -1570,8 +1501,7 @@ def install_status(
     from forge_lens.install.lifecycle import doctor, status
 
     d = data_dir or Path("./.forge-lens")
-    typer.echo(_json.dumps(
-        {"status": status(d), "doctor": doctor(d)}, indent=2))
+    typer.echo(_json.dumps({"status": status(d), "doctor": doctor(d)}, indent=2))
 
 
 def _install_data_dir(data_dir: Path | None) -> Path:
@@ -1582,12 +1512,16 @@ def _install_data_dir(data_dir: Path | None) -> Path:
 def install_apply(
     ctx: typer.Context,
     data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
-    profile: Annotated[str, typer.Option(
-        "--profile", help="minimal|recommended|full.")] = "recommended",
-    source: Annotated[str, typer.Option(
-        "--source", help="pypi|wheel|git|zip|local|gitless|offline.")] = "local",
-    file: Annotated[list[str] | None, typer.Option(
-        "--file", help="Managed file (relative to data-dir); repeatable.")] = None,
+    profile: Annotated[
+        str, typer.Option("--profile", help="minimal|recommended|full.")
+    ] = "recommended",
+    source: Annotated[
+        str, typer.Option("--source", help="pypi|wheel|git|zip|local|gitless|offline.")
+    ] = "local",
+    file: Annotated[
+        list[str] | None,
+        typer.Option("--file", help="Managed file (relative to data-dir); repeatable."),
+    ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
 ) -> None:
     """Record an install receipt (no subcommand = apply)."""
@@ -1599,8 +1533,11 @@ def install_apply(
 
     out = install(
         _install_data_dir(data_dir),
-        profile=profile, source=source, files=list(file or []),
-        ts_ns=time.time_ns(), dry_run=dry_run,
+        profile=profile,
+        source=source,
+        files=list(file or []),
+        ts_ns=time.time_ns(),
+        dry_run=dry_run,
     )
     typer.echo(json.dumps(out, indent=2))
     if not out.get("ok"):
@@ -1656,9 +1593,7 @@ def _pricing_registry(cfg: LensConfig) -> Any:
 
     try:
         return (
-            PricingRegistry.from_file(cfg.pricing_file)
-            if cfg.pricing_file
-            else PricingRegistry()
+            PricingRegistry.from_file(cfg.pricing_file) if cfg.pricing_file else PricingRegistry()
         )
     except Exception as exc:
         typer.echo(f"invalid pricing_file: {exc}", err=True)
@@ -1688,28 +1623,17 @@ def _check_i64_opt(value: int, opt: str) -> int:
 
 
 _SPECIALIST_BLURB: dict[str, str] = {
-    "context_efficiency_analyst":
-        "cumulative input-token growth across LLM spans",
-    "cost_analyst":
-        "token + USD cost report via the pricing registry",
-    "evaluation_analyst":
-        "error_free + tool_success evaluator results",
-    "evidence_validator":
-        "spans missing name or start_time (evidence gaps)",
-    "failure_investigator":
-        "failure classification + hypotheses + eval suggestions",
-    "graph_analyst":
-        "critical path over the execution graph",
-    "loop_detection_specialist":
-        "heuristic loop / no-progress findings",
-    "report_specialist":
-        "report roll-up over the stored evidence",
-    "security_observation_analyst":
-        "MCP/tool-call security observations (observer mode)",
-    "tool_execution_analyst":
-        "TOOL span count + failed span ids",
-    "trace_investigator":
-        "span count + status summary",
+    "context_efficiency_analyst": "cumulative input-token growth across LLM spans",
+    "cost_analyst": "token + USD cost report via the pricing registry",
+    "evaluation_analyst": "error_free + tool_success evaluator results",
+    "evidence_validator": "spans missing name or start_time (evidence gaps)",
+    "failure_investigator": "failure classification + hypotheses + eval suggestions",
+    "graph_analyst": "critical path over the execution graph",
+    "loop_detection_specialist": "heuristic loop / no-progress findings",
+    "report_specialist": "report roll-up over the stored evidence",
+    "security_observation_analyst": "MCP/tool-call security observations (observer mode)",
+    "tool_execution_analyst": "TOOL span count + failed span ids",
+    "trace_investigator": "span count + status summary",
 }
 
 
@@ -1720,9 +1644,7 @@ def analyze(
         typer.Argument(help="registered specialist name — see --list"),
     ] = None,
     trace_id: Annotated[str | None, typer.Argument()] = None,
-    list_specs: Annotated[
-        bool, typer.Option("--list", help="list specialists and exit")
-    ] = False,
+    list_specs: Annotated[bool, typer.Option("--list", help="list specialists and exit")] = False,
     db: Annotated[Path | None, typer.Option("--db")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     json_out: Annotated[bool, typer.Option("--json")] = False,
@@ -1732,10 +1654,7 @@ def analyze(
     from forge_lens.ops.agents import SPECIALISTS, run_specialist
 
     if list_specs:
-        rows = [
-            {"name": n, "description": _SPECIALIST_BLURB.get(n, "")}
-            for n in SPECIALISTS
-        ]
+        rows = [{"name": n, "description": _SPECIALIST_BLURB.get(n, "")} for n in SPECIALISTS]
         if json_out:
             typer.echo(json.dumps(rows, indent=2))
             return
@@ -1744,14 +1663,13 @@ def analyze(
         return
     if specialist is None or trace_id is None:
         typer.echo(
-            "usage: forge-lens analyze <specialist> <trace_id> "
-            "(or --list)", err=True,
+            "usage: forge-lens analyze <specialist> <trace_id> (or --list)",
+            err=True,
         )
         raise typer.Exit(2)
     if specialist not in SPECIALISTS:
         typer.echo(
-            f"unknown specialist {specialist!r} — one of "
-            f"{list(SPECIALISTS)}",
+            f"unknown specialist {specialist!r} — one of {list(SPECIALISTS)}",
             err=True,
         )
         raise typer.Exit(2)
@@ -1762,7 +1680,8 @@ def analyze(
         # server-side objects can never arrive over a flag — inject the
         # registry like the API does, never a wire/dead value
         run = run_specialist(
-            specialist, trace,
+            specialist,
+            trace,
             context={"pricing": registry},
             run_id=f"{specialist}:{trace_id}",
         )
@@ -1792,12 +1711,8 @@ def analyze(
 @app.command()
 def audit(
     db: Annotated[Path | None, typer.Option("--db")] = None,
-    action: Annotated[
-        str | None, typer.Option("--action", help="exact action filter")
-    ] = None,
-    actor: Annotated[
-        str | None, typer.Option("--actor", help="exact actor filter")
-    ] = None,
+    action: Annotated[str | None, typer.Option("--action", help="exact action filter")] = None,
+    actor: Annotated[str | None, typer.Option("--actor", help="exact actor filter")] = None,
     limit: Annotated[int, typer.Option("--limit", "-n")] = 100,
     offset: Annotated[int, typer.Option("--offset")] = 0,
     json_out: Annotated[bool, typer.Option("--json")] = False,
@@ -1814,9 +1729,7 @@ def audit(
     _check_i64_opt(offset, "--offset")
     store = _store(cfg)
     try:
-        items = store.list_audit(
-            action=action, actor=actor, limit=limit, offset=offset
-        )
+        items = store.list_audit(action=action, actor=actor, limit=limit, offset=offset)
     finally:
         store.close()
     if json_out:
@@ -1827,10 +1740,7 @@ def audit(
         return
     for e in items:
         ts = (e["ts"] or "?")[:19]
-        typer.echo(
-            f"{ts}  {e['actor']:<12} {e['action']:<24} "
-            f"{e['resource']:<24} {e['outcome']}"
-        )
+        typer.echo(f"{ts}  {e['actor']:<12} {e['action']:<24} {e['resource']:<24} {e['outcome']}")
 
 
 # -- experiments (Cycle 13): persisted A/B eval specs ----------------------
@@ -1843,11 +1753,7 @@ def _experiment_eval_specs(raw: Any) -> list[Any]:
     """``--evaluators-json`` → spec list — same contract as the API's
     ``_eval_specs`` plus the per-spec dict/string-name check the runner
     itself relies on."""
-    if (
-        not isinstance(raw, list)
-        or not raw
-        or len(raw) > _EXPERIMENT_MAX_SPECS
-    ):
+    if not isinstance(raw, list) or not raw or len(raw) > _EXPERIMENT_MAX_SPECS:
         typer.echo(
             f"--evaluators-json: 1..{_EXPERIMENT_MAX_SPECS} specs required",
             err=True,
@@ -1856,8 +1762,7 @@ def _experiment_eval_specs(raw: Any) -> list[Any]:
     for spec in raw:
         if not isinstance(spec, dict) or not isinstance(spec.get("name"), str):
             typer.echo(
-                "--evaluators-json: every spec must be an object with "
-                "a string 'name'",
+                "--evaluators-json: every spec must be an object with a string 'name'",
                 err=True,
             )
             raise typer.Exit(2)
@@ -1868,9 +1773,7 @@ def _experiment_cohort(cohorts: Any, key: str) -> dict[str, Any]:
     """One stored cohort — mirrors ``api/app.py::_experiment_cohort``:
     ``{trace_ids: 1..500 strings, label?, config?}``."""
     if not isinstance(cohorts, dict):
-        typer.echo(
-            "--cohorts-json: object with 'a' and 'b' required", err=True
-        )
+        typer.echo("--cohorts-json: object with 'a' and 'b' required", err=True)
         raise typer.Exit(2)
     side = cohorts.get(key)
     if not isinstance(side, dict):
@@ -1884,8 +1787,7 @@ def _experiment_cohort(cohorts: Any, key: str) -> dict[str, Any]:
         or any(not isinstance(t, str) for t in ids)
     ):
         typer.echo(
-            f"cohorts.{key}.trace_ids: 1..{_EXPERIMENT_MAX_TRACE_IDS} "
-            "strings required",
+            f"cohorts.{key}.trace_ids: 1..{_EXPERIMENT_MAX_TRACE_IDS} strings required",
             err=True,
         )
         raise typer.Exit(2)
@@ -1907,9 +1809,7 @@ def _reject_non_finite(obj: Any) -> None:
     while stack:
         cur = stack.pop()
         if isinstance(cur, float) and not math.isfinite(cur):
-            typer.echo(
-                "non-finite number in experiment spec", err=True
-            )
+            typer.echo("non-finite number in experiment spec", err=True)
             raise typer.Exit(2)
         if isinstance(cur, dict):
             stack.extend(cur.values())
@@ -1921,13 +1821,9 @@ def _reject_non_finite(obj: Any) -> None:
 def experiments_create(
     experiment_id: Annotated[str, typer.Argument()],
     name: Annotated[str | None, typer.Option("--name")] = None,
-    description: Annotated[
-        str | None, typer.Option("--description")
-    ] = None,
+    description: Annotated[str | None, typer.Option("--description")] = None,
     dataset_id: Annotated[str | None, typer.Option("--dataset-id")] = None,
-    dataset_version: Annotated[
-        str | None, typer.Option("--dataset-version")
-    ] = None,
+    dataset_version: Annotated[str | None, typer.Option("--dataset-version")] = None,
     evaluators_json: Annotated[
         str,
         typer.Option(
@@ -1942,9 +1838,7 @@ def experiments_create(
             help="JSON object {a: {trace_ids,label?,config?}, b: {...}} (required)",
         ),
     ] = "",
-    metadata_json: Annotated[
-        str | None, typer.Option("--metadata-json")
-    ] = None,
+    metadata_json: Annotated[str | None, typer.Option("--metadata-json")] = None,
     db: Annotated[Path | None, typer.Option("--db")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     json_out: Annotated[bool, typer.Option("--json")] = False,
@@ -1953,8 +1847,7 @@ def experiments_create(
 
     The spec pins cohorts + evaluator specs so runs are reproducible;
     every ``experiments run`` appends to an append-only result list."""
-    specs = _experiment_eval_specs(_json_option(
-        evaluators_json, "--evaluators-json"))
+    specs = _experiment_eval_specs(_json_option(evaluators_json, "--evaluators-json"))
     cohorts_raw = _json_option(cohorts_json, "--cohorts-json")
     cohorts = {
         "a": _experiment_cohort(cohorts_raw, "a"),
@@ -1968,17 +1861,11 @@ def experiments_create(
     if dataset_version is not None and dataset_id is None:
         typer.echo("--dataset-version requires --dataset-id", err=True)
         raise typer.Exit(2)
-    metadata = (
-        _json_option(metadata_json, "--metadata-json")
-        if metadata_json is not None
-        else None
-    )
+    metadata = _json_option(metadata_json, "--metadata-json") if metadata_json is not None else None
     if metadata is not None and not isinstance(metadata, dict):
         typer.echo("--metadata-json: object required", err=True)
         raise typer.Exit(2)
-    _reject_non_finite(
-        {"evaluators": specs, "cohorts": cohorts, "metadata": metadata}
-    )
+    _reject_non_finite({"evaluators": specs, "cohorts": cohorts, "metadata": metadata})
     cfg = _config(db)
     pid = project or cfg.project_id
     store = _store(cfg)
@@ -2033,8 +1920,7 @@ def experiments_list(
         created = (e["created_at"] or "?")[:19]
         name = e["name"] or "-"
         typer.echo(
-            f"{e['experiment_id']:<24} {name:<24} "
-            f"status={e['status']:<10} created={created}"
+            f"{e['experiment_id']:<24} {name:<24} status={e['status']:<10} created={created}"
         )
 
 
@@ -2059,21 +1945,23 @@ def experiments_show(
             typer.echo(f"experiment {experiment_id!r} not found", err=True)
             raise typer.Exit(2)
         runs = store.list_experiment_results(
-            experiment_id, pid,
+            experiment_id,
+            pid,
             limit=max(1, min(500, limit)),
             offset=offset,
         )
     finally:
         store.close()
     if json_out:
-        typer.echo(json.dumps(
-            {**exp, "runs": runs, "run_limit": limit, "run_offset": offset},
-            indent=2,
-        ))
+        typer.echo(
+            json.dumps(
+                {**exp, "runs": runs, "run_limit": limit, "run_offset": offset},
+                indent=2,
+            )
+        )
         return
     typer.echo(
-        f"experiment {exp['experiment_id']}  project={exp['project_id']}  "
-        f"status={exp['status']}"
+        f"experiment {exp['experiment_id']}  project={exp['project_id']}  status={exp['status']}"
     )
     if exp["name"]:
         typer.echo(f"  name:        {exp['name']}")
@@ -2185,10 +2073,7 @@ def experiments_run(
     if json_out:
         typer.echo(json.dumps(out, indent=2))
         return
-    typer.echo(
-        f"run {run_id} recorded for experiment {experiment_id} "
-        f"at {out['run_at']}"
-    )
+    typer.echo(f"run {run_id} recorded for experiment {experiment_id} at {out['run_at']}")
     for d in result.get("deltas") or []:
         delta = "n/a" if d.get("delta") is None else f"{d['delta']:g}"
         typer.echo(
@@ -2255,10 +2140,7 @@ def alerts_save(
     # a saved file >100 rules would 422 every use_saved evaluation
     # forever — enforce the eval cap on writes too (replace ≠ grow)
     existing = load_rules(path)
-    if (
-        not any(r["rule_id"] == rule["rule_id"] for r in existing)
-        and len(existing) >= 100
-    ):
+    if not any(r["rule_id"] == rule["rule_id"] for r in existing) and len(existing) >= 100:
         typer.echo("saved rules cap is 100 — delete one first", err=True)
         raise typer.Exit(2)
     rules = save_rule(path, rule)
@@ -2295,7 +2177,8 @@ def alerts_evaluate(
     limit: Annotated[
         int,
         typer.Option(
-            "--limit", "-n",
+            "--limit",
+            "-n",
             help="recent-trace window for derived metrics (≤500)",
         ),
     ] = 200,
@@ -2329,11 +2212,15 @@ def alerts_evaluate(
         }
         # derived metrics (durations/cost/tokens/loops) resolve over a
         # bounded recent-trace window — ops/alerts.py documents each
-        metrics.update(resolve_metrics(
-            store, pid, _pricing_registry(cfg),
-            window=max(0, min(500, limit)),
-            only={str(r.get("metric")) for r in rules if isinstance(r, dict)},
-        ))
+        metrics.update(
+            resolve_metrics(
+                store,
+                pid,
+                _pricing_registry(cfg),
+                window=max(0, min(500, limit)),
+                only={str(r.get("metric")) for r in rules if isinstance(r, dict)},
+            )
+        )
     finally:
         store.close()
     out = evaluate_rules([r for r in rules if isinstance(r, dict)], metrics)
@@ -2342,13 +2229,9 @@ def alerts_evaluate(
         typer.echo(json.dumps(out, indent=2))
         return
     fired = out["fired"]
-    typer.echo(
-        f"evaluated {out['evaluated']} rule(s) — {len(fired)} fired"
-    )
+    typer.echo(f"evaluated {out['evaluated']} rule(s) — {len(fired)} fired")
     for f in fired:
-        typer.echo(
-            f"  [{f.get('severity', 'warning')}] {f['rule_id']}: {f['message']}"
-        )
+        typer.echo(f"  [{f.get('severity', 'warning')}] {f['rule_id']}: {f['message']}")
 
 
 # -- eval-suggest (Cycle 12 §12.7): suggestions from failure evidence ------
@@ -2397,10 +2280,7 @@ def eval_suggest(
         return
     suggestions = out["suggestions"]
     if not suggestions:
-        typer.echo(
-            "no eval suggestions — no classifiable failure evidence "
-            "in the given trace(s)"
-        )
+        typer.echo("no eval suggestions — no classifiable failure evidence in the given trace(s)")
         return
     typer.echo(
         f"{len(suggestions)} candidate suggestion(s) "
@@ -2416,15 +2296,12 @@ def eval_suggest(
             ev = s["evidence"]
             recurring = " recurring" if ev.get("recurring") else ""
             typer.echo(
-                f"    [{s['kind']}] ({ev.get('count', 0)} trace(s){recurring}) "
-                f"{s['rationale']}"
+                f"    [{s['kind']}] ({ev.get('count', 0)} trace(s){recurring}) {s['rationale']}"
             )
             if s.get("params"):
                 typer.echo(f"      params: {json.dumps(s['params'], sort_keys=True)}")
             if s.get("params_required"):
-                typer.echo(
-                    f"      params_required: {', '.join(s['params_required'])}"
-                )
+                typer.echo(f"      params_required: {', '.join(s['params_required'])}")
 
 
 # -- intel (Cycles 12/13): fleet-level intelligence -------------------------
@@ -2434,9 +2311,7 @@ def eval_suggest(
 def intel_efficiency(
     db: Annotated[Path | None, typer.Option("--db")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
-    session: Annotated[
-        str | None, typer.Option("--session", help="exact session_id")
-    ] = None,
+    session: Annotated[str | None, typer.Option("--session", help="exact session_id")] = None,
     tool: Annotated[
         str | None,
         typer.Option("--tool", help="substring match on span tool.name"),
@@ -2459,10 +2334,7 @@ def intel_efficiency(
             limit=max(0, min(500, limit)),
         )
         traces = [
-            t
-            for r in rows
-            if (t := store.get_trace(r["trace_id"], project_id=pid))
-            is not None
+            t for r in rows if (t := store.get_trace(r["trace_id"], project_id=pid)) is not None
         ]
     finally:
         store.close()
@@ -2470,13 +2342,15 @@ def intel_efficiency(
     if json_out:
         typer.echo(json.dumps(out, indent=2))
         return
-    typer.echo(
-        f"fleet: {out['traces']} trace(s), {out['succeeded']} succeeded"
-    )
+    typer.echo(f"fleet: {out['traces']} trace(s), {out['succeeded']} succeeded")
     for key in (
-        "success_rate", "tokens_per_trace", "tokens_per_success",
-        "tool_calls_per_trace", "tool_calls_per_success",
-        "retry_overhead", "error_rate",
+        "success_rate",
+        "tokens_per_trace",
+        "tokens_per_success",
+        "tool_calls_per_trace",
+        "tool_calls_per_success",
+        "retry_overhead",
+        "error_rate",
     ):
         v = out[key]
         typer.echo(f"  {key}: {'n/a' if v is None else f'{v:g}'}")
@@ -2552,8 +2426,7 @@ def intel_regress(
             or any(not isinstance(t, str) for t in parsed)
         ):
             typer.echo(
-                f"{opt}: 1..{_EXPERIMENT_MAX_TRACE_IDS} trace-id strings "
-                "required",
+                f"{opt}: 1..{_EXPERIMENT_MAX_TRACE_IDS} trace-id strings required",
                 err=True,
             )
             raise typer.Exit(2)
@@ -2592,10 +2465,7 @@ def intel_regress(
             typer.echo(f"  {m}: {d.get('reason', 'n/a')}")
         else:
             pct = "n/a" if d.get("pct") is None else f"{d['pct']:+.2f}%"
-            typer.echo(
-                f"  {m}: {d['base']:g} → {d['candidate']:g}  "
-                f"delta={d['delta']:g} ({pct})"
-            )
+            typer.echo(f"  {m}: {d['base']:g} → {d['candidate']:g}  delta={d['delta']:g} ({pct})")
     if missing["a"] or missing["b"]:
         typer.echo(f"  ~ missing_trace_ids: {json.dumps(missing, sort_keys=True)}")
     typer.echo(f"  note: {out['note']}")
@@ -2614,9 +2484,7 @@ def main() -> None:
         try:
             encoding = (stream.encoding or "").lower().replace("-", "")
             if encoding not in {"utf8", "utf16", "utf32"}:
-                reconfigure = cast(
-                    Callable[..., Any] | None, getattr(stream, "reconfigure", None)
-                )
+                reconfigure = cast(Callable[..., Any] | None, getattr(stream, "reconfigure", None))
                 if reconfigure is not None:
                     reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, OSError):

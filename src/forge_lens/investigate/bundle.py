@@ -30,10 +30,7 @@ def incident_bundle(trace: Trace, registry: PricingRegistry) -> dict[str, Any]:
         "session_id": trace.session_id,
         "status": trace.status.code.value,
         "failure": report.model_dump(mode="json"),
-        "hypotheses": [
-            h.model_dump(mode="json")
-            for h in build_hypotheses(trace, report=report)
-        ],
+        "hypotheses": [h.model_dump(mode="json") for h in build_hypotheses(trace, report=report)],
         "eval_suggestions": suggest_evaluators([report])["suggestions"],
         "graph": {
             "stats": graph.stats,

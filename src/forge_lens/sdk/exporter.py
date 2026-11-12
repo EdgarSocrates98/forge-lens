@@ -39,9 +39,7 @@ class InMemoryExporter:
         self.max_traces = max(0, int(max_traces))
         self.traces_dropped = 0
 
-    def export(
-        self, traces: list[Trace], source: TraceSource | None = None
-    ) -> dict[str, Any]:
+    def export(self, traces: list[Trace], source: TraceSource | None = None) -> dict[str, Any]:
         room = self.max_traces - len(self.traces)
         kept = traces[: max(0, room)]
         self.traces.extend(kept)
@@ -74,9 +72,7 @@ class HTTPExporter:
         self.timeout_s = timeout_s
 
     def export(self, traces: list[Trace], source: TraceSource | None = None) -> dict[str, Any]:
-        envelope = TraceIngest(
-            project_id=self.project_id, source=source, traces=traces
-        )
+        envelope = TraceIngest(project_id=self.project_id, source=source, traces=traces)
         body = envelope.model_dump_json().encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if self.api_key:

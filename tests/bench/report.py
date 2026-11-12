@@ -54,8 +54,8 @@ class BenchReport:
     def time(self, surface: str, **detail: Any) -> Iterator[None]:
         """Time a block whose detail is known up front::
 
-            with bench.time("store.list_sessions", seeded_traces=1000):
-                rows = store.list_sessions()
+        with bench.time("store.list_sessions", seeded_traces=1000):
+            rows = store.list_sessions()
         """
         t0 = time.perf_counter()
         yield

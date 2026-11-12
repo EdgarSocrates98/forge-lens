@@ -69,8 +69,8 @@ def run(data_dir: Path, evidence_dir: Path) -> dict[str, Any]:
         "mechanism": {
             "root_spans": "observed — subprocess wall-clock via LensTracer",
             "child_spans": "imported — theforge/RunTelemetry/v1 de "
-                           ".forge/runs/<id>/telemetry.json, âncora derivada "
-                           "de receipt.started_at",
+            ".forge/runs/<id>/telemetry.json, âncora derivada "
+            "de receipt.started_at",
             "transport": "HTTPExporter → POST /v1/traces (socket real)",
             "reads": "REST /v1/traces(+failure) + MCP stdio tools/call",
         },
@@ -105,22 +105,38 @@ def run(data_dir: Path, evidence_dir: Path) -> dict[str, Any]:
             env = fb.theforge_env(ws_root)
             fb.init_workspace(theforge, ws_root, env)
             _log("theforge init ok — executando run OK (echo-forge)")
-            runs.append(fb.traced_theforge_ask(
-                tracer, theforge, ws_root, env,
-                intent=OK_INTENT, use=fb.OK_PROVIDER_ID,
-                label="ask echo-forge"))
+            runs.append(
+                fb.traced_theforge_ask(
+                    tracer,
+                    theforge,
+                    ws_root,
+                    env,
+                    intent=OK_INTENT,
+                    use=fb.OK_PROVIDER_ID,
+                    label="ask echo-forge",
+                )
+            )
             _log("executando run FAIL (failing-forge → provider_failure)")
-            runs.append(fb.traced_theforge_ask(
-                tracer, theforge, ws_root, env,
-                intent=FAIL_INTENT, use=fb.FAIL_PROVIDER_ID,
-                capability=fb.FAIL_CAPABILITY, allow_unverified=True,
-                label="ask failing-forge"))
+            runs.append(
+                fb.traced_theforge_ask(
+                    tracer,
+                    theforge,
+                    ws_root,
+                    env,
+                    intent=FAIL_INTENT,
+                    use=fb.FAIL_PROVIDER_ID,
+                    capability=fb.FAIL_CAPABILITY,
+                    allow_unverified=True,
+                    label="ask failing-forge",
+                )
+            )
         else:
-            _log("the-forge não encontrado — replay dos artefatos REAIS "
-                 "capturados em fixtures/captured/")
+            _log(
+                "the-forge não encontrado — replay dos artefatos REAIS "
+                "capturados em fixtures/captured/"
+            )
             for name in ("ok", "fail"):
-                runs.append(fb.import_captured_run(
-                    tracer, fb.CAPTURED_DIR / name))
+                runs.append(fb.import_captured_run(tracer, fb.CAPTURED_DIR / name))
         tracer.flush()
         summary["runs"] = runs
         _log(f"runs: {[(r['run_id'], r['run_status']) for r in runs]}")
@@ -138,44 +154,52 @@ def run(data_dir: Path, evidence_dir: Path) -> dict[str, Any]:
         summary["evidence"]["traces"] = fetched
 
         fail_trace_id = next(
-            (tid for tid, t in fetched.items()
-             if any(s.get("status", {}).get("code") == "error"
+            (
+                tid
+                for tid, t in fetched.items()
+                if any(
+                    s.get("status", {}).get("code") == "error"
                     and "failing-forge" in str(s.get("attributes", {}))
-                    for s in t.get("spans", []))),
+                    for s in t.get("spans", [])
+                )
+            ),
             None,
-        ) or next((tid for tid, t in fetched.items()
-                   if t.get("status", {}).get("code") == "error"), None)
-        failure_report = (
-            client.trace_failure(fail_trace_id) if fail_trace_id else None
+        ) or next(
+            (tid for tid, t in fetched.items() if t.get("status", {}).get("code") == "error"), None
         )
+        failure_report = client.trace_failure(fail_trace_id) if fail_trace_id else None
         summary["evidence"]["failure_classification"] = {
-            "trace_id": fail_trace_id, "report": failure_report}
-        _log(f"falha classificada: "
-             f"{(failure_report or {}).get('category')} "
-             f"({(failure_report or {}).get('confidence')})")
+            "trace_id": fail_trace_id,
+            "report": failure_report,
+        }
+        _log(
+            f"falha classificada: "
+            f"{(failure_report or {}).get('category')} "
+            f"({(failure_report or {}).get('confidence')})"
+        )
 
         # -- MCP stdio -------------------------------------------------------
         with fb.McpClient(db, cwd=data_dir) as mcp:
-            init = mcp.request("initialize", {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "forge-integration-demo",
-                               "version": "0.1.0"},
-            })
+            init = mcp.request(
+                "initialize",
+                {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "forge-integration-demo", "version": "0.1.0"},
+                },
+            )
             mcp.notify("notifications/initialized")
             tools = mcp.request("tools/list")
-            listed = [t["name"] for t in
-                      (tools.get("result") or {}).get("tools", [])]
-            mcp_traces = mcp.call_tool("lens.list_traces",
-                                       {"project_id": fb.PROJECT_ID})
+            listed = [t["name"] for t in (tools.get("result") or {}).get("tools", [])]
+            mcp_traces = mcp.call_tool("lens.list_traces", {"project_id": fb.PROJECT_ID})
             mcp_failure = (
-                mcp.call_tool("lens.failure",
-                              {"trace_id": fail_trace_id,
-                               "project_id": fb.PROJECT_ID})
-                if fail_trace_id else None
+                mcp.call_tool(
+                    "lens.failure", {"trace_id": fail_trace_id, "project_id": fb.PROJECT_ID}
+                )
+                if fail_trace_id
+                else None
             )
-            mcp_stats = mcp.call_tool("lens.stats",
-                                      {"project_id": fb.PROJECT_ID})
+            mcp_stats = mcp.call_tool("lens.stats", {"project_id": fb.PROJECT_ID})
         summary["evidence"]["mcp"] = {
             "initialize": init.get("result"),
             "tools_listed": listed,
@@ -188,23 +212,26 @@ def run(data_dir: Path, evidence_dir: Path) -> dict[str, Any]:
     # -- evidência sanitizada -----------------------------------------------
     ev = evidence_dir
     fb.dump_json(ev / "01-run-summary.json", summary["runs"], sanitize_roots)
-    fb.dump_json(ev / "02-api-list-traces.json",
-                 summary["evidence"]["list_traces"], sanitize_roots)
-    fb.dump_json(ev / "03-api-traces.json",
-                 summary["evidence"]["traces"], sanitize_roots)
-    fb.dump_json(ev / "04-api-failure-classification.json",
-                 summary["evidence"]["failure_classification"],
-                 sanitize_roots)
-    fb.dump_json(ev / "05-mcp-exchange.json",
-                 summary["evidence"]["mcp"], sanitize_roots)
-    fb.dump_json(ev / "00-demo-metadata.json", {
-        "mechanism": summary["mechanism"],
-        "theforge_argv": summary["theforge_argv"],
-        "live": live,
-        "ok_run_id": ok_id,
-        "fail_run_id": fail_id,
-        "fail_trace_id": fail_trace_id,
-    }, sanitize_roots)
+    fb.dump_json(ev / "02-api-list-traces.json", summary["evidence"]["list_traces"], sanitize_roots)
+    fb.dump_json(ev / "03-api-traces.json", summary["evidence"]["traces"], sanitize_roots)
+    fb.dump_json(
+        ev / "04-api-failure-classification.json",
+        summary["evidence"]["failure_classification"],
+        sanitize_roots,
+    )
+    fb.dump_json(ev / "05-mcp-exchange.json", summary["evidence"]["mcp"], sanitize_roots)
+    fb.dump_json(
+        ev / "00-demo-metadata.json",
+        {
+            "mechanism": summary["mechanism"],
+            "theforge_argv": summary["theforge_argv"],
+            "live": live,
+            "ok_run_id": ok_id,
+            "fail_run_id": fail_id,
+            "fail_trace_id": fail_trace_id,
+        },
+        sanitize_roots,
+    )
     _log(f"evidência em {ev}")
     return summary
 
@@ -212,14 +239,19 @@ def run(data_dir: Path, evidence_dir: Path) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--data-dir", type=Path, default=None,
-        help="diretório de trabalho (default: tempdir efêmero)")
+        "--data-dir",
+        type=Path,
+        default=None,
+        help="diretório de trabalho (default: tempdir efêmero)",
+    )
     parser.add_argument(
-        "--evidence-dir", type=Path,
-        default=fb.REPO_ROOT / "docs" / "integration" / "evidence")
+        "--evidence-dir", type=Path, default=fb.REPO_ROOT / "docs" / "integration" / "evidence"
+    )
     parser.add_argument(
-        "--keep", action="store_true",
-        help="não apagar o tempdir ao final (só faz sentido sem --data-dir)")
+        "--keep",
+        action="store_true",
+        help="não apagar o tempdir ao final (só faz sentido sem --data-dir)",
+    )
     args = parser.parse_args()
 
     if args.data_dir is not None:
@@ -232,8 +264,7 @@ def main() -> int:
 
     ok = all(r.get("imported_spans", 0) > 0 for r in summary["runs"])
     failure = summary["evidence"]["failure_classification"]["report"] or {}
-    _log(f"resultado: runs={len(summary['runs'])} "
-         f"failure={failure.get('category')}")
+    _log(f"resultado: runs={len(summary['runs'])} failure={failure.get('category')}")
     return 0 if ok and failure.get("failed") else 1
 
 

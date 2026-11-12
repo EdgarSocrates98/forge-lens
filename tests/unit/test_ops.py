@@ -25,11 +25,13 @@ from forge_lens.storage.sqlite import SQLiteTraceStore
 _T0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
 
-def _tool(i: int, name: str = "read", *, error: bool = False,
-          args: dict | None = None) -> Span:
+def _tool(i: int, name: str = "read", *, error: bool = False, args: dict | None = None) -> Span:
     return Span(
-        trace_id="ab" * 16, span_id=f"{i:016x}", name=name,
-        kind=SpanKind.TOOL, start_time=_T0 + timedelta(milliseconds=i),
+        trace_id="ab" * 16,
+        span_id=f"{i:016x}",
+        name=name,
+        kind=SpanKind.TOOL,
+        start_time=_T0 + timedelta(milliseconds=i),
         end_time=_T0 + timedelta(milliseconds=i + 1),
         status=Status(code=StatusCode.ERROR if error else StatusCode.OK),
         attributes={"tool.args": args if args is not None else {"path": "/x"}},
@@ -37,9 +39,14 @@ def _tool(i: int, name: str = "read", *, error: bool = False,
 
 
 def _trace(spans: list[Span]) -> Trace:
-    return Trace(trace_id="ab" * 16, root_span_id=spans[0].span_id,
-                 started_at=_T0, ended_at=_T0, spans=spans,
-                 status=Status(code=StatusCode.OK))
+    return Trace(
+        trace_id="ab" * 16,
+        root_span_id=spans[0].span_id,
+        started_at=_T0,
+        ended_at=_T0,
+        spans=spans,
+        status=Status(code=StatusCode.OK),
+    )
 
 
 def test_detect_loops_repeated_identical() -> None:
@@ -52,28 +59,25 @@ def test_detect_loops_repeated_identical() -> None:
 def test_detect_loops_legit_pagination_not_flagged() -> None:
     spans = [_tool(i, name="poll", args={"cursor": i}) for i in range(5)]
     out = detect_loops(_trace(spans))
-    assert not any(
-        f["kind"] == "repeated_identical_tool" for f in out["findings"]
-    )
+    assert not any(f["kind"] == "repeated_identical_tool" for f in out["findings"])
 
 
 def test_retry_loop_all_errors() -> None:
-    kinds = {f["kind"] for f in
-             detect_loops(_trace([_tool(i, error=True) for i in range(4)]))["findings"]}
+    kinds = {
+        f["kind"]
+        for f in detect_loops(_trace([_tool(i, error=True) for i in range(4)]))["findings"]
+    }
     assert "retry_loop" in kinds
 
 
 def test_specialist_known_unknown_and_jsonable(
     synthetic_trace: Trace,
 ) -> None:
-    run = run_specialist("loop_detection_specialist", synthetic_trace,
-                         budget=AgentBudget())
+    run = run_specialist("loop_detection_specialist", synthetic_trace, budget=AgentBudget())
     assert run.stop_reason == "completed"
     assert run.findings
     json.dumps(run.findings)
-    assert run_specialist("nope", synthetic_trace).stop_reason == (
-        "unknown_specialist"
-    )
+    assert run_specialist("nope", synthetic_trace).stop_reason == ("unknown_specialist")
     fr = run_specialist("failure_investigator", synthetic_trace)
     json.dumps(fr.findings)
 
@@ -95,10 +99,15 @@ def client(tmp_path: Path):
 
 
 def test_alert_evaluate_endpoint(client: TestClient) -> None:
-    r = client.post("/v1/alerts/evaluate", json={"rules": [
-        {"rule_id": "r1", "metric": "trace_count", "op": ">", "threshold": -1},
-        {"rule_id": "r2", "metric": "error_rate", "op": ">", "threshold": 0.99},
-    ]})
+    r = client.post(
+        "/v1/alerts/evaluate",
+        json={
+            "rules": [
+                {"rule_id": "r1", "metric": "trace_count", "op": ">", "threshold": -1},
+                {"rule_id": "r2", "metric": "error_rate", "op": ">", "threshold": 0.99},
+            ]
+        },
+    )
     assert r.status_code == 200
     assert {f["rule_id"] for f in r.json()["fired"]} == {"r1"}
     r_bad = client.post("/v1/alerts/evaluate", json={"rules": "x"})
@@ -114,7 +123,8 @@ def test_ops_summary_and_specialists_endpoints(client: TestClient) -> None:
 
 
 def test_analyze_endpoint_runs_specialist(
-    client: TestClient, synthetic_trace: Trace,
+    client: TestClient,
+    synthetic_trace: Trace,
 ) -> None:
     env = {"traces": [synthetic_trace.model_dump(mode="json")]}
     assert client.post("/v1/traces", json=env).status_code == 200
@@ -138,9 +148,14 @@ def test_delete_trace_ids_exact_scope(tmp_path: Path) -> None:
     kept = _trace([_tool(0)])
     gone = _trace([_tool(1)])
     # different trace ids
-    gone2 = Trace(trace_id="cd" * 16, root_span_id=gone.spans[0].span_id,
-                  started_at=_T0, ended_at=_T0, spans=gone.spans,
-                  status=Status(code=StatusCode.OK))
+    gone2 = Trace(
+        trace_id="cd" * 16,
+        root_span_id=gone.spans[0].span_id,
+        started_at=_T0,
+        ended_at=_T0,
+        spans=gone.spans,
+        status=Status(code=StatusCode.OK),
+    )
     for s in gone2.spans:
         object.__setattr__(s, "trace_id", "cd" * 16)
     store.upsert_trace(kept)
@@ -162,10 +177,17 @@ def test_claude_code_adapter_any_session_id(tmp_path: Path) -> None:
     from forge_lens.adapters.claude_code import parse_session
 
     f = tmp_path / "sess.jsonl"
-    f.write_text(json.dumps({
-        "type": "tool_use", "tool_name": "read",
-        "sessionId": "not-hex-🎉-short",
-        "timestamp": "2026-01-01T10:00:00Z"}) + "\n")
+    f.write_text(
+        json.dumps(
+            {
+                "type": "tool_use",
+                "tool_name": "read",
+                "sessionId": "not-hex-🎉-short",
+                "timestamp": "2026-01-01T10:00:00Z",
+            }
+        )
+        + "\n"
+    )
     t = parse_session(f)
     assert t is not None
     assert len(t.trace_id) == 32
@@ -196,10 +218,18 @@ def test_mcp_server_survives_bad_call(tmp_path: Path, capsys) -> None:
     store.close()
     msgs = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
-        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-         "params": {"name": "lens.get_trace", "arguments": "notadict"}},
-        {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-         "params": {"name": "lens.get_trace", "arguments": {}}},
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "lens.get_trace", "arguments": "notadict"},
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "lens.get_trace", "arguments": {}},
+        },
         {"jsonrpc": "2.0", "id": 4, "method": "tools/list"},
         {"jsonrpc": "2.0", "id": 5, "method": "bogus"},
     ]
@@ -231,13 +261,13 @@ def test_claude_code_session_id_before_first_tool(tmp_path: Path) -> None:
 
     f = tmp_path / "s.jsonl"
     f.write_text(
-        _json.dumps({"type": "tool_use", "tool_name": "early",
-                     "timestamp": "2026-01-01T10:00:00Z"})
+        _json.dumps({"type": "tool_use", "tool_name": "early", "timestamp": "2026-01-01T10:00:00Z"})
         + "\n"
         + _json.dumps({"sessionId": "abc-non-hex", "type": "meta"})
         + "\n"
-        + _json.dumps({"type": "tool_use", "tool_name": "late",
-                       "timestamp": "2026-01-01T10:00:01Z"})
+        + _json.dumps(
+            {"type": "tool_use", "tool_name": "late", "timestamp": "2026-01-01T10:00:01Z"}
+        )
         + "\n"
     )
     t = parse_session(f)
@@ -253,11 +283,12 @@ def test_alerts_corrupt_rules_file(tmp_path: Path) -> None:
     p = tmp_path / "alert-rules.json"
     p.write_text('{"rules": [{"rule_id": 1}, "junk", {"rule_id": "ok"}')
     assert load_rules(p) == []  # truncated JSON → []
-    p.write_text('{"rules": [{"rule_id": 1}, "junk", {"rule_id": "good", '
-                 '"metric": "trace_count", "op": ">", "threshold": 0}]}')
+    p.write_text(
+        '{"rules": [{"rule_id": 1}, "junk", {"rule_id": "good", '
+        '"metric": "trace_count", "op": ">", "threshold": 0}]}'
+    )
     assert [r["rule_id"] for r in load_rules(p)] == ["good"]
-    out = save_rule(p, {"rule_id": "b", "metric": "error_rate",
-                        "op": ">", "threshold": 0.5})
+    out = save_rule(p, {"rule_id": "b", "metric": "error_rate", "op": ">", "threshold": 0.5})
     assert [r["rule_id"] for r in out] == ["b", "good"]
     assert [r["rule_id"] for r in delete_rule(p, "good")] == ["b"]
 
@@ -268,9 +299,15 @@ def test_delete_trace_ids_shared_id_across_projects(tmp_path: Path) -> None:
     store = SQLiteTraceStore(tmp_path / "m.db")
     for proj in ("a", "b"):
         tr = _trace([_tool(0)])
-        t2 = Trace(trace_id="ef" * 16, root_span_id=tr.spans[0].span_id,
-                   started_at=_T0, ended_at=_T0, spans=tr.spans,
-                   project_id=proj, status=Status(code=StatusCode.OK))
+        t2 = Trace(
+            trace_id="ef" * 16,
+            root_span_id=tr.spans[0].span_id,
+            started_at=_T0,
+            ended_at=_T0,
+            spans=tr.spans,
+            project_id=proj,
+            status=Status(code=StatusCode.OK),
+        )
         for s in t2.spans:
             object.__setattr__(s, "trace_id", "ef" * 16)
         store.upsert_trace(t2)
@@ -291,15 +328,25 @@ def test_archive_cli_deletes_only_exported(tmp_path: Path) -> None:
 
     db = tmp_path / "a.db"
     store = SQLiteTraceStore(db)
-    old = Trace(trace_id="aa" * 16, root_span_id="0" * 16,
-                started_at=_T0, ended_at=_T0, spans=[_tool(0)],
-                status=Status(code=StatusCode.OK))
+    old = Trace(
+        trace_id="aa" * 16,
+        root_span_id="0" * 16,
+        started_at=_T0,
+        ended_at=_T0,
+        spans=[_tool(0)],
+        status=Status(code=StatusCode.OK),
+    )
     for s in old.spans:
         object.__setattr__(s, "trace_id", "aa" * 16)
     # started before cutoff, ends AFTER it — must not be deleted
-    straddler = Trace(trace_id="bb" * 16, root_span_id="0" * 16,
-                      started_at=_T0, ended_at=_T0 + timedelta(days=30),
-                      spans=[_tool(1)], status=Status(code=StatusCode.OK))
+    straddler = Trace(
+        trace_id="bb" * 16,
+        root_span_id="0" * 16,
+        started_at=_T0,
+        ended_at=_T0 + timedelta(days=30),
+        spans=[_tool(1)],
+        status=Status(code=StatusCode.OK),
+    )
     for s in straddler.spans:
         object.__setattr__(s, "trace_id", "bb" * 16)
     store.upsert_trace(old)
@@ -307,10 +354,20 @@ def test_archive_cli_deletes_only_exported(tmp_path: Path) -> None:
     store.close()
 
     arc = tmp_path / "arch.ndjson"
-    r = CliRunner().invoke(app, [
-        "archive", "--db", str(db),
-        "--before", (_T0 + timedelta(days=1)).isoformat(),
-        "--out", str(arc), "--delete", "--yes"])
+    r = CliRunner().invoke(
+        app,
+        [
+            "archive",
+            "--db",
+            str(db),
+            "--before",
+            (_T0 + timedelta(days=1)).isoformat(),
+            "--out",
+            str(arc),
+            "--delete",
+            "--yes",
+        ],
+    )
     assert r.exit_code == 0, r.output
     assert "archived 1" in r.output
     assert "pruned 1" in r.output
@@ -319,10 +376,18 @@ def test_archive_cli_deletes_only_exported(tmp_path: Path) -> None:
     assert store.get_trace("bb" * 16) is not None  # survived — never archived
     store.close()
     # rerun to same path without --append → refused
-    r2 = CliRunner().invoke(app, [
-        "archive", "--db", str(db),
-        "--before", (_T0 + timedelta(days=1)).isoformat(),
-        "--out", str(arc)])
+    r2 = CliRunner().invoke(
+        app,
+        [
+            "archive",
+            "--db",
+            str(db),
+            "--before",
+            (_T0 + timedelta(days=1)).isoformat(),
+            "--out",
+            str(arc),
+        ],
+    )
     assert r2.exit_code == 2
 
 
@@ -340,19 +405,35 @@ def test_archive_cli_cross_project(tmp_path: Path) -> None:
     store = SQLiteTraceStore(db)
     for proj in ("p1", "p2"):
         tr = _trace([_tool(0)])
-        t2 = Trace(trace_id="cc" * 16, root_span_id=tr.spans[0].span_id,
-                   started_at=_T0, ended_at=_T0, spans=tr.spans,
-                   project_id=proj, status=Status(code=StatusCode.OK))
+        t2 = Trace(
+            trace_id="cc" * 16,
+            root_span_id=tr.spans[0].span_id,
+            started_at=_T0,
+            ended_at=_T0,
+            spans=tr.spans,
+            project_id=proj,
+            status=Status(code=StatusCode.OK),
+        )
         for s in t2.spans:
             object.__setattr__(s, "trace_id", "cc" * 16)
         store.upsert_trace(t2)
     store.close()
 
     arc = tmp_path / "both.ndjson"
-    r = CliRunner().invoke(app, [
-        "archive", "--db", str(db),
-        "--before", (_T0 + timedelta(days=1)).isoformat(),
-        "--out", str(arc), "--delete", "--yes"])
+    r = CliRunner().invoke(
+        app,
+        [
+            "archive",
+            "--db",
+            str(db),
+            "--before",
+            (_T0 + timedelta(days=1)).isoformat(),
+            "--out",
+            str(arc),
+            "--delete",
+            "--yes",
+        ],
+    )
     assert r.exit_code == 0, r.output
     lines = [ln for ln in arc.read_text().splitlines() if ln.strip()]
     assert len(lines) == 2
@@ -370,9 +451,17 @@ def test_parse_session_project_id_lands(tmp_path: Path) -> None:
     from forge_lens.adapters.claude_code import parse_session
 
     f = tmp_path / "s.jsonl"
-    f.write_text(_json.dumps(
-        {"sessionId": "s1", "type": "tool_use", "tool_name": "x",
-         "timestamp": "2026-01-01T10:00:00Z"}) + "\n")
+    f.write_text(
+        _json.dumps(
+            {
+                "sessionId": "s1",
+                "type": "tool_use",
+                "tool_name": "x",
+                "timestamp": "2026-01-01T10:00:00Z",
+            }
+        )
+        + "\n"
+    )
     t = parse_session(f, project_id="my-proj")
     assert t is not None
     assert t.project_id == "my-proj"
@@ -387,8 +476,7 @@ def test_alerts_non_list_rules_file(tmp_path: Path) -> None:
     for junk in ("42", '"x"', "null", '{"rules": 42}', "{", ""):
         p.write_text(junk)
         assert load_rules(p) == [], junk
-        out = save_rule(p, {"rule_id": "r", "metric": "trace_count",
-                            "op": ">", "threshold": 0})
+        out = save_rule(p, {"rule_id": "r", "metric": "trace_count", "op": ">", "threshold": 0})
         assert [r["rule_id"] for r in out] == ["r"]
 
 
@@ -405,8 +493,7 @@ def test_no_progress_requires_error_evidence(synthetic_trace: Trace) -> None:
     without evidence contradict the evidence-first rule."""
     ok_repeats = _trace([_tool(i) for i in range(4)])
     out = detect_loops(ok_repeats)
-    assert all(f["kind"] != "no_progress_signal"
-               for f in out["findings"])
+    assert all(f["kind"] != "no_progress_signal" for f in out["findings"])
     # with errors present the finding carries its evidence
     err_repeats = _trace([_tool(i, error=True) for i in range(4)])
     kinds = {f["kind"] for f in detect_loops(err_repeats)["findings"]}
@@ -418,9 +505,15 @@ def test_mcp_stats_project_filter(tmp_path: Path) -> None:
     store = SQLiteTraceStore(tmp_path / "m.db")
     a = _trace([_tool(0)])
     b = _trace([_tool(1)])
-    b = Trace(trace_id="dd" * 16, root_span_id=b.spans[0].span_id,
-              started_at=_T0, ended_at=_T0, spans=b.spans,
-              project_id="other", status=Status(code=StatusCode.OK))
+    b = Trace(
+        trace_id="dd" * 16,
+        root_span_id=b.spans[0].span_id,
+        started_at=_T0,
+        ended_at=_T0,
+        spans=b.spans,
+        project_id="other",
+        status=Status(code=StatusCode.OK),
+    )
     for s in b.spans:
         object.__setattr__(s, "trace_id", "dd" * 16)
     store.upsert_trace(a)
@@ -446,18 +539,19 @@ def test_ingest_batch_all_or_nothing_on_bad_record(tmp_path: Path) -> None:
     from forge_lens.ingest.pipeline import IngestPipeline
 
     store = SQLiteTraceStore(tmp_path / "b.db")
-    pipe = IngestPipeline(store, LensConfig(
-        data_dir=tmp_path, db_path=tmp_path / "b.db"))
+    pipe = IngestPipeline(store, LensConfig(data_dir=tmp_path, db_path=tmp_path / "b.db"))
     good = _trace([_tool(0)])
     bad = _trace([_tool(1)])
     for s in bad.spans:
         object.__setattr__(s, "name", "x\ud800")
     from forge_lens.core.errors import ValidationError as _VE
+
     with pytest.raises(_VE):
         pipe.ingest([good, bad])
     assert store.stats()["traces"] == 0  # nothing persisted
     # int64 range on a later trace → same guarantee
     from datetime import timedelta as _td
+
     bad2 = _trace([_tool(2)])
     object.__setattr__(bad2, "started_at", _T0 + _td(days=1_000_000))
     with pytest.raises(_VE):
@@ -467,34 +561,47 @@ def test_ingest_batch_all_or_nothing_on_bad_record(tmp_path: Path) -> None:
 
 
 def test_scoped_admin_blocked_from_global_alert_rules(
-    tmp_path: Path, synthetic_trace: Trace,
+    tmp_path: Path,
+    synthetic_trace: Trace,
 ) -> None:
     """alert-rules.json is global — a scoped admin writing it is
     cross-tenant config influence."""
     from forge_lens.security.keys import generate_key
 
     store = SQLiteTraceStore(tmp_path / "ar.db")
-    cfg = LensConfig(data_dir=tmp_path, db_path=tmp_path / "ar.db",
-                     auth_mode="keys")
+    cfg = LensConfig(data_dir=tmp_path, db_path=tmp_path / "ar.db", auth_mode="keys")
     app = create_app(store=store, config=cfg)
     _, root, h = generate_key()
     store.create_api_key("root", name="root", key_hash=h, role="admin")
     try:
         with TestClient(app) as c:
-            r = c.post("/v1/admin/keys",
-                       headers={"X-Forge-Lens-Key": root},
-                       json={"name": "sa", "role": "admin",
-                             "projects": ["p1"]})
+            r = c.post(
+                "/v1/admin/keys",
+                headers={"X-Forge-Lens-Key": root},
+                json={"name": "sa", "role": "admin", "projects": ["p1"]},
+            )
             sa = {"X-Forge-Lens-Key": r.json()["secret"]}
-            assert c.post("/v1/alerts/rules", headers=sa, json={
-                "rule": {"rule_id": "x", "metric": "trace_count",
-                         "op": ">", "threshold": 0}}).status_code == 403
-            assert c.delete("/v1/alerts/rules/x",
-                            headers=sa).status_code == 403
-            assert c.post("/v1/alerts/rules", json={
-                "rule": {"rule_id": "x", "metric": "trace_count",
-                         "op": ">", "threshold": 0}},
-                headers={"X-Forge-Lens-Key": root}).status_code == 200
+            assert (
+                c.post(
+                    "/v1/alerts/rules",
+                    headers=sa,
+                    json={
+                        "rule": {"rule_id": "x", "metric": "trace_count", "op": ">", "threshold": 0}
+                    },
+                ).status_code
+                == 403
+            )
+            assert c.delete("/v1/alerts/rules/x", headers=sa).status_code == 403
+            assert (
+                c.post(
+                    "/v1/alerts/rules",
+                    json={
+                        "rule": {"rule_id": "x", "metric": "trace_count", "op": ">", "threshold": 0}
+                    },
+                    headers={"X-Forge-Lens-Key": root},
+                ).status_code
+                == 200
+            )
     finally:
         store.close()
 
@@ -502,8 +609,7 @@ def test_scoped_admin_blocked_from_global_alert_rules(
 def test_auth_mode_key_requires_secret(tmp_path: Path) -> None:
     """auth_mode='key' with no api_key must fail at startup, not serve
     a permanently-401 API."""
-    cfg = LensConfig(data_dir=tmp_path, db_path=tmp_path / "k.db",
-                     auth_mode="key", api_key=None)
+    cfg = LensConfig(data_dir=tmp_path, db_path=tmp_path / "k.db", auth_mode="key", api_key=None)
     with pytest.raises(ValueError, match="api_key"):
         create_app(config=cfg)
 
@@ -558,7 +664,9 @@ def test_readonly_store_uri_encoded(tmp_path: Path) -> None:
         ro2.close()
     # no phantom files created beside any of them
     assert {p.name for p in tmp_path.iterdir()} == {
-        "a%2fb", "dir with space", "unïcode-çãó",
+        "a%2fb",
+        "dir with space",
+        "unïcode-çãó",
     }
 
 
@@ -593,12 +701,17 @@ def test_import_claude_surrogate_name_clean_error(tmp_path: Path) -> None:
     from forge_lens.cli.main import app
 
     f = tmp_path / "s.jsonl"
-    f.write_text(_json.dumps({
-        "sessionId": "s1", "type": "tool_use",
-        "tool_name": "bad\ud800name",
-        "timestamp": "2026-01-01T10:00:00Z"}))
-    r = CliRunner().invoke(app, ["import-claude", str(f),
-                                 "--db", str(tmp_path / "d.db")])
+    f.write_text(
+        _json.dumps(
+            {
+                "sessionId": "s1",
+                "type": "tool_use",
+                "tool_name": "bad\ud800name",
+                "timestamp": "2026-01-01T10:00:00Z",
+            }
+        )
+    )
+    r = CliRunner().invoke(app, ["import-claude", str(f), "--db", str(tmp_path / "d.db")])
     assert r.exit_code == 2
     assert "unencodable" in (r.output + (r.stderr or "")).lower() or True
     store = SQLiteTraceStore(tmp_path / "d.db")
@@ -633,28 +746,55 @@ def test_parse_session_real_claude_code_format(tmp_path: Path) -> None:
     from forge_lens.adapters.claude_code import parse_session
 
     f = tmp_path / "sess.jsonl"
-    f.write_text("\n".join([
-        _json.dumps({"type": "assistant", "sessionId": "sess-9",
-                     "timestamp": "2026-01-01T10:00:00Z",
-                     "message": {
-                         "model": "claude-opus-4",
-                         "usage": {"input_tokens": 1200,
-                                   "output_tokens": 300,
-                                   "cache_read_input_tokens": 50},
-                         "content": [
-                             {"type": "text", "text": "checking"},
-                             {"type": "tool_use", "id": "tu_1",
-                              "name": "Read", "input": {"f": "a.py"}},
-                             {"type": "tool_use", "id": "tu_2",
-                              "name": "Bash", "input": {"cmd": "ls"}}]}}),
-        _json.dumps({"type": "user", "sessionId": "sess-9",
-                     "timestamp": "2026-01-01T10:00:02Z",
-                     "message": {"content": [
-                         {"type": "tool_result", "tool_use_id": "tu_1",
-                          "is_error": False},
-                         {"type": "tool_result", "tool_use_id": "tu_2",
-                          "is_error": True}]}}),
-    ]))
+    f.write_text(
+        "\n".join(
+            [
+                _json.dumps(
+                    {
+                        "type": "assistant",
+                        "sessionId": "sess-9",
+                        "timestamp": "2026-01-01T10:00:00Z",
+                        "message": {
+                            "model": "claude-opus-4",
+                            "usage": {
+                                "input_tokens": 1200,
+                                "output_tokens": 300,
+                                "cache_read_input_tokens": 50,
+                            },
+                            "content": [
+                                {"type": "text", "text": "checking"},
+                                {
+                                    "type": "tool_use",
+                                    "id": "tu_1",
+                                    "name": "Read",
+                                    "input": {"f": "a.py"},
+                                },
+                                {
+                                    "type": "tool_use",
+                                    "id": "tu_2",
+                                    "name": "Bash",
+                                    "input": {"cmd": "ls"},
+                                },
+                            ],
+                        },
+                    }
+                ),
+                _json.dumps(
+                    {
+                        "type": "user",
+                        "sessionId": "sess-9",
+                        "timestamp": "2026-01-01T10:00:02Z",
+                        "message": {
+                            "content": [
+                                {"type": "tool_result", "tool_use_id": "tu_1", "is_error": False},
+                                {"type": "tool_result", "tool_use_id": "tu_2", "is_error": True},
+                            ]
+                        },
+                    }
+                ),
+            ]
+        )
+    )
     t = parse_session(f)
     assert t is not None
     assert t.session_id == "sess-9"
@@ -676,11 +816,11 @@ def test_parse_session_real_claude_code_format(tmp_path: Path) -> None:
 def test_admin_prune_all_projects_opt_in(client) -> None:
     """all_projects:true is the explicit global prune — unscoped admin
     only; omitting project_id prunes just the default project."""
-    r = client.post("/v1/admin/prune",
-                    json={"before": "2030-01-01T00:00:00Z",
-                          "all_projects": "yes"})
+    r = client.post(
+        "/v1/admin/prune", json={"before": "2030-01-01T00:00:00Z", "all_projects": "yes"}
+    )
     assert r.status_code == 422
-    r = client.post("/v1/admin/prune",
-                    json={"before": "2030-01-01T00:00:00Z",
-                          "all_projects": True})
+    r = client.post(
+        "/v1/admin/prune", json={"before": "2030-01-01T00:00:00Z", "all_projects": True}
+    )
     assert r.status_code == 200

@@ -143,192 +143,407 @@ def build_traces() -> list[Trace]:
 
     # -- session alpha: three research-agent runs ----------------------
     t = tid("alpha-research-1")
-    root = _span("research-agent", t, kind=SpanKind.AGENT, parent=None,
-                 start_ms=0, end_ms=1200,
-                 attributes={"gen_ai.agent.name": "research-agent"})
-    traces.append(_trace("alpha-research-1", [
-        root,
-        _span("llm claude-demo-3", t, kind=SpanKind.LLM,
-              parent=root.span_id, start_ms=50, end_ms=450,
-              attributes={
-                  "llm.model_name": "claude-demo-3",
-                  "llm.provider": "anthropic",
-                  "forge_lens.token_usage": _usage("claude-sonnet-4", 120, 40),
-              }),
-        _span("tool web_search", t, kind=SpanKind.TOOL,
-              parent=root.span_id, start_ms=500, end_ms=650,
-              attributes={"tool.name": "web_search"}),
-        _span("tool read_file", t, kind=SpanKind.TOOL,
-              parent=root.span_id, start_ms=700, end_ms=780,
-              attributes={"tool.name": "read_file"}),
-    ], session_id=SESSION_ALPHA, status=StatusCode.OK))
+    root = _span(
+        "research-agent",
+        t,
+        kind=SpanKind.AGENT,
+        parent=None,
+        start_ms=0,
+        end_ms=1200,
+        attributes={"gen_ai.agent.name": "research-agent"},
+    )
+    traces.append(
+        _trace(
+            "alpha-research-1",
+            [
+                root,
+                _span(
+                    "llm claude-demo-3",
+                    t,
+                    kind=SpanKind.LLM,
+                    parent=root.span_id,
+                    start_ms=50,
+                    end_ms=450,
+                    attributes={
+                        "llm.model_name": "claude-demo-3",
+                        "llm.provider": "anthropic",
+                        "forge_lens.token_usage": _usage("claude-sonnet-4", 120, 40),
+                    },
+                ),
+                _span(
+                    "tool web_search",
+                    t,
+                    kind=SpanKind.TOOL,
+                    parent=root.span_id,
+                    start_ms=500,
+                    end_ms=650,
+                    attributes={"tool.name": "web_search"},
+                ),
+                _span(
+                    "tool read_file",
+                    t,
+                    kind=SpanKind.TOOL,
+                    parent=root.span_id,
+                    start_ms=700,
+                    end_ms=780,
+                    attributes={"tool.name": "read_file"},
+                ),
+            ],
+            session_id=SESSION_ALPHA,
+            status=StatusCode.OK,
+        )
+    )
 
     t = tid("alpha-research-2")
-    root = _span("research-agent", t, kind=SpanKind.AGENT, parent=None,
-                 start_ms=60_000, end_ms=60_900,
-                 attributes={"gen_ai.agent.name": "research-agent"})
-    traces.append(_trace("alpha-research-2", [
-        root,
-        _span("llm claude-demo-3", t, kind=SpanKind.LLM,
-              parent=root.span_id, start_ms=60_050, end_ms=60_400,
-              attributes={
-                  "llm.model_name": "claude-demo-3",
-                  "llm.provider": "anthropic",
-                  "forge_lens.token_usage": _usage("claude-sonnet-4", 300, 90),
-              }),
-        _span("tool web_search", t, kind=SpanKind.TOOL,
-              parent=root.span_id, start_ms=60_450, end_ms=60_800,
-              attributes={"tool.name": "web_search"}),
-    ], session_id=SESSION_ALPHA, status=StatusCode.OK))
+    root = _span(
+        "research-agent",
+        t,
+        kind=SpanKind.AGENT,
+        parent=None,
+        start_ms=60_000,
+        end_ms=60_900,
+        attributes={"gen_ai.agent.name": "research-agent"},
+    )
+    traces.append(
+        _trace(
+            "alpha-research-2",
+            [
+                root,
+                _span(
+                    "llm claude-demo-3",
+                    t,
+                    kind=SpanKind.LLM,
+                    parent=root.span_id,
+                    start_ms=60_050,
+                    end_ms=60_400,
+                    attributes={
+                        "llm.model_name": "claude-demo-3",
+                        "llm.provider": "anthropic",
+                        "forge_lens.token_usage": _usage("claude-sonnet-4", 300, 90),
+                    },
+                ),
+                _span(
+                    "tool web_search",
+                    t,
+                    kind=SpanKind.TOOL,
+                    parent=root.span_id,
+                    start_ms=60_450,
+                    end_ms=60_800,
+                    attributes={"tool.name": "web_search"},
+                ),
+            ],
+            session_id=SESSION_ALPHA,
+            status=StatusCode.OK,
+        )
+    )
 
     # richer tree — exercises the waterfall depth + the `q` span-name
     # filter ("rag-pipeline")
     t = tid("alpha-research-3")
-    root = _span("research-agent", t, kind=SpanKind.AGENT, parent=None,
-                 start_ms=120_000, end_ms=121_800,
-                 attributes={"gen_ai.agent.name": "research-agent"})
-    chain = _span("rag-pipeline", t, kind=SpanKind.CHAIN,
-                  parent=root.span_id, start_ms=120_100, end_ms=121_600)
-    traces.append(_trace("alpha-research-3", [
-        root,
-        chain,
-        _span("retriever docs", t, kind=SpanKind.RETRIEVER,
-              parent=chain.span_id, start_ms=120_200, end_ms=120_700,
-              attributes={"retriever.top_k": 5}),
-        _span("llm claude-demo-3", t, kind=SpanKind.LLM,
-              parent=chain.span_id, start_ms=120_800, end_ms=121_500,
-              attributes={
-                  "llm.model_name": "claude-demo-3",
-                  "llm.provider": "anthropic",
-                  "forge_lens.token_usage": _usage("claude-sonnet-4", 850, 210),
-              }),
-    ], session_id=SESSION_ALPHA, status=StatusCode.OK))
+    root = _span(
+        "research-agent",
+        t,
+        kind=SpanKind.AGENT,
+        parent=None,
+        start_ms=120_000,
+        end_ms=121_800,
+        attributes={"gen_ai.agent.name": "research-agent"},
+    )
+    chain = _span(
+        "rag-pipeline",
+        t,
+        kind=SpanKind.CHAIN,
+        parent=root.span_id,
+        start_ms=120_100,
+        end_ms=121_600,
+    )
+    traces.append(
+        _trace(
+            "alpha-research-3",
+            [
+                root,
+                chain,
+                _span(
+                    "retriever docs",
+                    t,
+                    kind=SpanKind.RETRIEVER,
+                    parent=chain.span_id,
+                    start_ms=120_200,
+                    end_ms=120_700,
+                    attributes={"retriever.top_k": 5},
+                ),
+                _span(
+                    "llm claude-demo-3",
+                    t,
+                    kind=SpanKind.LLM,
+                    parent=chain.span_id,
+                    start_ms=120_800,
+                    end_ms=121_500,
+                    attributes={
+                        "llm.model_name": "claude-demo-3",
+                        "llm.provider": "anthropic",
+                        "forge_lens.token_usage": _usage("claude-sonnet-4", 850, 210),
+                    },
+                ),
+            ],
+            session_id=SESSION_ALPHA,
+            status=StatusCode.OK,
+        )
+    )
 
     # -- session beta: one ok run + the seeded failure ------------------
     t = tid("beta-task-1")
-    root = _span("task-agent", t, kind=SpanKind.AGENT, parent=None,
-                 start_ms=180_000, end_ms=181_000,
-                 attributes={"gen_ai.agent.name": "task-agent"})
-    traces.append(_trace("beta-task-1", [
-        root,
-        _span("tool http_fetch", t, kind=SpanKind.TOOL,
-              parent=root.span_id, start_ms=180_100, end_ms=180_500,
-              attributes={"tool.name": "http_fetch"}),
-        _span("llm claude-demo-3", t, kind=SpanKind.LLM,
-              parent=root.span_id, start_ms=180_600, end_ms=180_950,
-              attributes={
-                  "llm.model_name": "claude-demo-3",
-                  "llm.provider": "anthropic",
-                  "forge_lens.token_usage": _usage("claude-sonnet-4", 200, 60),
-              }),
-    ], session_id=SESSION_BETA, status=StatusCode.OK))
+    root = _span(
+        "task-agent",
+        t,
+        kind=SpanKind.AGENT,
+        parent=None,
+        start_ms=180_000,
+        end_ms=181_000,
+        attributes={"gen_ai.agent.name": "task-agent"},
+    )
+    traces.append(
+        _trace(
+            "beta-task-1",
+            [
+                root,
+                _span(
+                    "tool http_fetch",
+                    t,
+                    kind=SpanKind.TOOL,
+                    parent=root.span_id,
+                    start_ms=180_100,
+                    end_ms=180_500,
+                    attributes={"tool.name": "http_fetch"},
+                ),
+                _span(
+                    "llm claude-demo-3",
+                    t,
+                    kind=SpanKind.LLM,
+                    parent=root.span_id,
+                    start_ms=180_600,
+                    end_ms=180_950,
+                    attributes={
+                        "llm.model_name": "claude-demo-3",
+                        "llm.provider": "anthropic",
+                        "forge_lens.token_usage": _usage("claude-sonnet-4", 200, 60),
+                    },
+                ),
+            ],
+            session_id=SESSION_BETA,
+            status=StatusCode.OK,
+        )
+    )
 
     # THE failure trace — ops "recent failures" + error-filter target.
     # The error span carries an exception event, like the SDK records.
     t = tid("beta-fail")
-    root = _span("task-agent", t, kind=SpanKind.AGENT, parent=None,
-                 start_ms=240_000, end_ms=241_200,
-                 status=StatusCode.ERROR,
-                 attributes={"gen_ai.agent.name": "task-agent"})
-    bad_tool = _span(
-        "tool http_fetch", t, kind=SpanKind.TOOL,
-        parent=root.span_id, start_ms=240_100, end_ms=240_900,
-        status=StatusCode.ERROR, message="TimeoutError: connect timed out",
-        attributes={"tool.name": "http_fetch"},
-        events=[SpanEvent(
-            name="exception",
-            time=_at(240_900),
-            attributes={
-                "exception.type": "TimeoutError",
-                "exception.message": "connect timed out",
-            },
-        )],
+    root = _span(
+        "task-agent",
+        t,
+        kind=SpanKind.AGENT,
+        parent=None,
+        start_ms=240_000,
+        end_ms=241_200,
+        status=StatusCode.ERROR,
+        attributes={"gen_ai.agent.name": "task-agent"},
     )
-    traces.append(_trace("beta-fail", [
-        root,
-        bad_tool,
-        _span("llm claude-demo-3", t, kind=SpanKind.LLM,
-              parent=root.span_id, start_ms=241_000, end_ms=241_150,
-              attributes={
-                  "llm.model_name": "claude-demo-3",
-                  "llm.provider": "anthropic",
-                  "forge_lens.token_usage": _usage("claude-sonnet-4", 60, 20),
-              }),
-    ], session_id=SESSION_BETA, status=StatusCode.ERROR))
+    bad_tool = _span(
+        "tool http_fetch",
+        t,
+        kind=SpanKind.TOOL,
+        parent=root.span_id,
+        start_ms=240_100,
+        end_ms=240_900,
+        status=StatusCode.ERROR,
+        message="TimeoutError: connect timed out",
+        attributes={"tool.name": "http_fetch"},
+        events=[
+            SpanEvent(
+                name="exception",
+                time=_at(240_900),
+                attributes={
+                    "exception.type": "TimeoutError",
+                    "exception.message": "connect timed out",
+                },
+            )
+        ],
+    )
+    traces.append(
+        _trace(
+            "beta-fail",
+            [
+                root,
+                bad_tool,
+                _span(
+                    "llm claude-demo-3",
+                    t,
+                    kind=SpanKind.LLM,
+                    parent=root.span_id,
+                    start_ms=241_000,
+                    end_ms=241_150,
+                    attributes={
+                        "llm.model_name": "claude-demo-3",
+                        "llm.provider": "anthropic",
+                        "forge_lens.token_usage": _usage("claude-sonnet-4", 60, 20),
+                    },
+                ),
+            ],
+            session_id=SESSION_BETA,
+            status=StatusCode.ERROR,
+        )
+    )
 
     # -- standalone traces (no session) --------------------------------
     # slow trace — only one ≥3000ms, for the min_duration filter
     t = tid("standalone-slow")
-    root = _span("batch-agent", t, kind=SpanKind.AGENT, parent=None,
-                 start_ms=300_000, end_ms=305_000,
-                 attributes={"gen_ai.agent.name": "batch-agent"})
-    traces.append(_trace("standalone-slow", [
-        root,
-        _span("llm claude-demo-3", t, kind=SpanKind.LLM,
-              parent=root.span_id, start_ms=300_200, end_ms=304_800,
-              attributes={
-                  "llm.model_name": "claude-demo-3",
-                  "llm.provider": "anthropic",
-                  "forge_lens.token_usage": _usage("claude-sonnet-4", 2400, 800),
-              }),
-        _span("tool vector_db_query", t, kind=SpanKind.TOOL,
-              parent=root.span_id, start_ms=301_000, end_ms=302_500,
-              attributes={"tool.name": "vector_db_query"}),
-    ], session_id=None, status=StatusCode.OK))
+    root = _span(
+        "batch-agent",
+        t,
+        kind=SpanKind.AGENT,
+        parent=None,
+        start_ms=300_000,
+        end_ms=305_000,
+        attributes={"gen_ai.agent.name": "batch-agent"},
+    )
+    traces.append(
+        _trace(
+            "standalone-slow",
+            [
+                root,
+                _span(
+                    "llm claude-demo-3",
+                    t,
+                    kind=SpanKind.LLM,
+                    parent=root.span_id,
+                    start_ms=300_200,
+                    end_ms=304_800,
+                    attributes={
+                        "llm.model_name": "claude-demo-3",
+                        "llm.provider": "anthropic",
+                        "forge_lens.token_usage": _usage("claude-sonnet-4", 2400, 800),
+                    },
+                ),
+                _span(
+                    "tool vector_db_query",
+                    t,
+                    kind=SpanKind.TOOL,
+                    parent=root.span_id,
+                    start_ms=301_000,
+                    end_ms=302_500,
+                    attributes={"tool.name": "vector_db_query"},
+                ),
+            ],
+            session_id=None,
+            status=StatusCode.OK,
+        )
+    )
 
     # unset-status trace — ended but never marked ok/error
     t = tid("standalone-unset")
-    root = _span("observer", t, kind=SpanKind.INTERNAL, parent=None,
-                 start_ms=360_000, end_ms=360_400,
-                 status=StatusCode.UNSET)
-    traces.append(_trace("standalone-unset", [root],
-                         session_id=None, status=StatusCode.UNSET))
+    root = _span(
+        "observer",
+        t,
+        kind=SpanKind.INTERNAL,
+        parent=None,
+        start_ms=360_000,
+        end_ms=360_400,
+        status=StatusCode.UNSET,
+    )
+    traces.append(_trace("standalone-unset", [root], session_id=None, status=StatusCode.UNSET))
 
     # span events → replay 'event' entries (enables the "next event" jump)
     t = tid("standalone-events")
-    root = _span("chatty-agent", t, kind=SpanKind.AGENT, parent=None,
-                 start_ms=420_000, end_ms=421_000,
-                 attributes={"gen_ai.agent.name": "chatty-agent"})
-    traces.append(_trace("standalone-events", [
-        root,
-        _span("llm claude-demo-3", t, kind=SpanKind.LLM,
-              parent=root.span_id, start_ms=420_100, end_ms=420_900,
-              attributes={
-                  "llm.model_name": "claude-demo-3",
-                  "llm.provider": "anthropic",
-                  "forge_lens.token_usage": _usage("claude-sonnet-4", 150, 55),
-              },
-              events=[
-                  SpanEvent(name="retry", time=_at(420_300),
-                            attributes={"attempt": 1}),
-                  SpanEvent(name="cache_hit", time=_at(420_500)),
-              ]),
-    ], session_id=None, status=StatusCode.OK))
+    root = _span(
+        "chatty-agent",
+        t,
+        kind=SpanKind.AGENT,
+        parent=None,
+        start_ms=420_000,
+        end_ms=421_000,
+        attributes={"gen_ai.agent.name": "chatty-agent"},
+    )
+    traces.append(
+        _trace(
+            "standalone-events",
+            [
+                root,
+                _span(
+                    "llm claude-demo-3",
+                    t,
+                    kind=SpanKind.LLM,
+                    parent=root.span_id,
+                    start_ms=420_100,
+                    end_ms=420_900,
+                    attributes={
+                        "llm.model_name": "claude-demo-3",
+                        "llm.provider": "anthropic",
+                        "forge_lens.token_usage": _usage("claude-sonnet-4", 150, 55),
+                    },
+                    events=[
+                        SpanEvent(name="retry", time=_at(420_300), attributes={"attempt": 1}),
+                        SpanEvent(name="cache_hit", time=_at(420_500)),
+                    ],
+                ),
+            ],
+            session_id=None,
+            status=StatusCode.OK,
+        )
+    )
 
     # multi-tool trace — `tool=calculator` filters down to this one only
     t = tid("standalone-tools-multi")
-    root = _span("toolbox-agent", t, kind=SpanKind.AGENT, parent=None,
-                 start_ms=480_000, end_ms=481_500,
-                 attributes={"gen_ai.agent.name": "toolbox-agent"})
-    traces.append(_trace("standalone-tools-multi", [
-        root,
-        _span("tool web_search", t, kind=SpanKind.TOOL,
-              parent=root.span_id, start_ms=480_100, end_ms=480_400,
-              attributes={"tool.name": "web_search"}),
-        _span("tool calculator", t, kind=SpanKind.TOOL,
-              parent=root.span_id, start_ms=480_500, end_ms=480_700,
-              attributes={"tool.name": "calculator"}),
-        _span("tool code_exec", t, kind=SpanKind.TOOL,
-              parent=root.span_id, start_ms=480_800, end_ms=481_400,
-              attributes={"tool.name": "code_exec"}),
-    ], session_id=None, status=StatusCode.OK))
+    root = _span(
+        "toolbox-agent",
+        t,
+        kind=SpanKind.AGENT,
+        parent=None,
+        start_ms=480_000,
+        end_ms=481_500,
+        attributes={"gen_ai.agent.name": "toolbox-agent"},
+    )
+    traces.append(
+        _trace(
+            "standalone-tools-multi",
+            [
+                root,
+                _span(
+                    "tool web_search",
+                    t,
+                    kind=SpanKind.TOOL,
+                    parent=root.span_id,
+                    start_ms=480_100,
+                    end_ms=480_400,
+                    attributes={"tool.name": "web_search"},
+                ),
+                _span(
+                    "tool calculator",
+                    t,
+                    kind=SpanKind.TOOL,
+                    parent=root.span_id,
+                    start_ms=480_500,
+                    end_ms=480_700,
+                    attributes={"tool.name": "calculator"},
+                ),
+                _span(
+                    "tool code_exec",
+                    t,
+                    kind=SpanKind.TOOL,
+                    parent=root.span_id,
+                    start_ms=480_800,
+                    end_ms=481_400,
+                    attributes={"tool.name": "code_exec"},
+                ),
+            ],
+            session_id=None,
+            status=StatusCode.OK,
+        )
+    )
 
     # minimal single-span trace — small waterfall contrast
     t = tid("standalone-mini")
-    root = _span("ping", t, kind=SpanKind.INTERNAL, parent=None,
-                 start_ms=540_000, end_ms=540_050)
-    traces.append(_trace("standalone-mini", [root],
-                         session_id=None, status=StatusCode.OK))
+    root = _span("ping", t, kind=SpanKind.INTERNAL, parent=None, start_ms=540_000, end_ms=540_050)
+    traces.append(_trace("standalone-mini", [root], session_id=None, status=StatusCode.OK))
 
     # wide fan-out — 1 root + 619 workers = 620 nodes, over the graph's
     # MAX_NODES=500 draw cap; exercises the "search reveals a node the
@@ -336,17 +551,21 @@ def build_traces() -> list[Trace]:
     # short (2.6 s) and early (12:00:30) so the list-page duration and
     # since-cutoff specs don't match it.
     t = tid("standalone-wide")
-    root = _span("wide root", t, kind=SpanKind.AGENT, parent=None,
-                 start_ms=30_000, end_ms=32_600)
+    root = _span("wide root", t, kind=SpanKind.AGENT, parent=None, start_ms=30_000, end_ms=32_600)
     spans = [root]
     for i in range(619):
-        spans.append(_span(
-            f"worker span {i:03d}", t, kind=SpanKind.TOOL,
-            parent=root.span_id,
-            start_ms=30_050 + i * 3, end_ms=30_052 + i * 3,
-            attributes={"tool.name": "batch_worker"}))
-    traces.append(_trace("standalone-wide", spans,
-                         session_id=None, status=StatusCode.OK))
+        spans.append(
+            _span(
+                f"worker span {i:03d}",
+                t,
+                kind=SpanKind.TOOL,
+                parent=root.span_id,
+                start_ms=30_050 + i * 3,
+                end_ms=30_052 + i * 3,
+                attributes={"tool.name": "batch_worker"},
+            )
+        )
+    traces.append(_trace("standalone-wide", spans, session_id=None, status=StatusCode.OK))
 
     return traces
 
@@ -354,8 +573,10 @@ def build_traces() -> list[Trace]:
 def seed(db_path: Path, manifest_path: Path | None) -> dict[str, Any]:
     if db_path.exists():
         db_path.unlink()
-    for wal in (db_path.with_suffix(db_path.suffix + "-wal"),
-                db_path.with_suffix(db_path.suffix + "-shm")):
+    for wal in (
+        db_path.with_suffix(db_path.suffix + "-wal"),
+        db_path.with_suffix(db_path.suffix + "-shm"),
+    ):
         if wal.exists():
             wal.unlink()
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -429,11 +650,14 @@ def seed(db_path: Path, manifest_path: Path | None) -> dict[str, Any]:
             "alpha": {"id": SESSION_ALPHA, "traces": 3},
             "beta": {"id": SESSION_BETA, "traces": 2},
         },
-        "traces": {t.trace_id: {
-            "session_id": t.session_id,
-            "status": t.status.code.value,
-            "spans": len(t.spans),
-        } for t in traces},
+        "traces": {
+            t.trace_id: {
+                "session_id": t.session_id,
+                "status": t.status.code.value,
+                "spans": len(t.spans),
+            }
+            for t in traces
+        },
         "named": {
             "ok_trace": tid("alpha-research-1"),
             "rich_trace": tid("alpha-research-3"),
@@ -444,11 +668,14 @@ def seed(db_path: Path, manifest_path: Path | None) -> dict[str, Any]:
             "multi_tool_trace": tid("standalone-tools-multi"),
             "wide_trace": tid("standalone-wide"),
         },
-        "tools": sorted({
-            str(s.attributes["tool.name"])
-            for t in traces for s in t.spans
-            if "tool.name" in s.attributes
-        }),
+        "tools": sorted(
+            {
+                str(s.attributes["tool.name"])
+                for t in traces
+                for s in t.spans
+                if "tool.name" in s.attributes
+            }
+        ),
         "dataset": {"id": DATASET_ID, "version": DATASET_VERSION, "cases": 2},
         "experiment": {"id": EXPERIMENT_ID},
         "accepted_spans": result.accepted_spans,
@@ -467,10 +694,8 @@ def seed(db_path: Path, manifest_path: Path | None) -> dict[str, Any]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--db", type=Path, required=True,
-                    help="SQLite db path to (re)create")
-    ap.add_argument("--manifest", type=Path, default=None,
-                    help="write the seed manifest JSON here")
+    ap.add_argument("--db", type=Path, required=True, help="SQLite db path to (re)create")
+    ap.add_argument("--manifest", type=Path, default=None, help="write the seed manifest JSON here")
     args = ap.parse_args()
 
     manifest = seed(args.db, args.manifest)

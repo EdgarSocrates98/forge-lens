@@ -184,13 +184,9 @@ def _parse_span(
         attributes["_otlp.malformed_fields"] = malformed_fields
         if errors is None:
             raise ValidationError(
-                f"span {span_id!r}: non-list field(s): "
-                + ", ".join(malformed_fields)
+                f"span {span_id!r}: non-list field(s): " + ", ".join(malformed_fields)
             )
-        errors.append(
-            f"span {span_id!r}: non-list field(s): "
-            + ", ".join(malformed_fields)
-        )
+        errors.append(f"span {span_id!r}: non-list field(s): " + ", ".join(malformed_fields))
 
     # An event without timeUnixNano cannot be stored (SpanEvent.time is
     # required). The drop is never silent: the count travels with the
@@ -212,8 +208,7 @@ def _parse_span(
         attributes["_otlp.events_dropped"] = dropped_events
         if errors is not None:
             errors.append(
-                f"span {span_id!r}: dropped {dropped_events} event(s) "
-                "without timeUnixNano"
+                f"span {span_id!r}: dropped {dropped_events} event(s) without timeUnixNano"
             )
     links: list[SpanLink] = []
     dropped_links = 0
@@ -275,9 +270,7 @@ def normalize_otlp_request(
     amplification of the input.
     """
     if not isinstance(payload, dict):
-        raise ValidationError(
-            f"OTLP payload must be a JSON object, got {type(payload).__name__}"
-        )
+        raise ValidationError(f"OTLP payload must be a JSON object, got {type(payload).__name__}")
     resource_spans = payload.get("resourceSpans") or payload.get("resource_spans") or []
     if not isinstance(resource_spans, list):
         raise ValidationError("resourceSpans must be a list")
@@ -300,9 +293,7 @@ def normalize_otlp_request(
         if resource is not None and not isinstance(resource, dict):
             _evidence(f"resourceSpans[{rs_idx}].resource is not an object")
             resource = None
-        resource_attrs = _attrs(
-            resource.get("attributes") if isinstance(resource, dict) else None
-        )
+        resource_attrs = _attrs(resource.get("attributes") if isinstance(resource, dict) else None)
         scope_spans = rs.get("scopeSpans") or rs.get("instrumentationLibrarySpans") or []
         if not isinstance(scope_spans, list):
             _evidence(f"resourceSpans[{rs_idx}].scopeSpans is not a list")
@@ -329,9 +320,7 @@ def normalize_otlp_request(
                 except (ValidationError, PydanticValidationError) as exc:
                     if sink is None:
                         raise
-                    sink.append(
-                        f"span {raw_span.get('spanId', '?')!r} quarantined: {exc}"
-                    )
+                    sink.append(f"span {raw_span.get('spanId', '?')!r} quarantined: {exc}")
                     continue
                 key = (rs_idx, span.trace_id)
                 trace = grouped.get(key)

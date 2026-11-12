@@ -146,11 +146,7 @@ def detect_waste(trace: Trace, registry: PricingRegistry) -> list[WasteFinding]:
         )
 
     # -- coverage gaps: llm spans without usage; unpriced models
-    no_usage = [
-        s.span_id
-        for s in spans
-        if s.kind is SpanKind.LLM and extract_usage(s) is None
-    ]
+    no_usage = [s.span_id for s in spans if s.kind is SpanKind.LLM and extract_usage(s) is None]
     if no_usage:
         findings.append(
             WasteFinding(
@@ -164,9 +160,7 @@ def detect_waste(trace: Trace, registry: PricingRegistry) -> list[WasteFinding]:
         {
             u.model
             for s in spans
-            if (u := extract_usage(s)) is not None
-            and u.model
-            and registry.lookup(u.model) is None
+            if (u := extract_usage(s)) is not None and u.model and registry.lookup(u.model) is None
         }
     )
     if unpriced:

@@ -80,8 +80,11 @@ def _registry() -> dict[str, ToolFn]:
                 running += u.input_tokens or 0
                 totals.append(running)
         growth = (totals[-1] - totals[0]) if len(totals) > 1 else 0
-        return {"llm_spans": len(totals), "cumulative_input_tokens": running,
-                "input_token_growth": growth}
+        return {
+            "llm_spans": len(totals),
+            "cumulative_input_tokens": running,
+            "input_token_growth": growth,
+        }
 
     def _failure_investigator(trace: Trace, ctx: dict[str, Any]) -> dict[str, Any]:
         from forge_lens.investigate import build_hypotheses, suggest_evaluators
@@ -90,9 +93,7 @@ def _registry() -> dict[str, ToolFn]:
         cap = max(0, int(ctx.get("max_hypotheses", 5)))
         hyps = build_hypotheses(trace, report=report)
         out = report.model_dump(mode="json")
-        out["hypotheses"] = [
-            h.model_dump(mode="json") for h in hyps[:cap]
-        ]
+        out["hypotheses"] = [h.model_dump(mode="json") for h in hyps[:cap]]
         out["hypothesis_count"] = len(hyps)
         out["hypotheses_truncated"] = len(hyps) > cap
         out["eval_suggestions"] = suggest_evaluators([report])["suggestions"]
@@ -102,9 +103,7 @@ def _registry() -> dict[str, ToolFn]:
         return critical_path(build_trace_graph(trace))
 
     def _evidence_validator(trace: Trace, ctx: dict[str, Any]) -> dict[str, Any]:
-        missing = [
-            s.span_id for s in trace.spans if not s.name or s.start_time is None
-        ]
+        missing = [s.span_id for s in trace.spans if not s.name or s.start_time is None]
         return {"invalid_evidence_spans": missing}
 
     def _eval_analyst(trace: Trace, ctx: dict[str, Any]) -> dict[str, Any]:
@@ -162,8 +161,9 @@ def run_specialist(
     fn = _registry().get(specialist)
     if fn is None:
         run.stop_reason = "unknown_specialist"
-        run.findings.append({"error": f"unknown specialist {specialist!r}",
-                             "available": list(SPECIALISTS)})
+        run.findings.append(
+            {"error": f"unknown specialist {specialist!r}", "available": list(SPECIALISTS)}
+        )
         return run
     start = clock()
     for _ in range(budget.max_iterations):

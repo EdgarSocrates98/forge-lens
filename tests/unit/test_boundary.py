@@ -121,9 +121,7 @@ def _clock_scan(rel: str, tree: ast.AST) -> tuple[list[str], set[str]]:
             if isinstance(func, ast.Name):
                 target = bound.get(func.id)
                 if target in _FORBIDDEN_BARE:
-                    out.append(
-                        f"{rel}:{node.lineno}: call {func.id}() -> {target}"
-                    )
+                    out.append(f"{rel}:{node.lineno}: call {func.id}() -> {target}")
                 continue
             if not isinstance(func, ast.Attribute):
                 continue
@@ -142,9 +140,7 @@ def _clock_scan(rel: str, tree: ast.AST) -> tuple[list[str], set[str]]:
                 and not node.keywords
             ):
                 out.append(f"{rel}:{node.lineno}: call {root.id}.{func.attr}()")
-        elif isinstance(node, ast.Attribute) and isinstance(
-            node.value, ast.Name
-        ):
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
             base = (bound.get(node.value.id) or "").split(".")[0]
             if base in _CLOCK_MODULES and node.attr in _MEASURED_CALLS:
                 measured_users.add(rel)
@@ -177,9 +173,7 @@ def test_pure_tree_has_no_network_imports() -> None:
                 root = (node.module or "").split(".")[0]
                 if root in _FORBIDDEN_IMPORT_ROOTS:
                     offenders.append(f"{rel}: from {node.module} import ...")
-    assert offenders == [], "network imports in the pure tree:\n" + "\n".join(
-        offenders
-    )
+    assert offenders == [], "network imports in the pure tree:\n" + "\n".join(offenders)
 
 
 def test_pure_tree_has_no_wall_clock_calls() -> None:
@@ -191,8 +185,7 @@ def test_pure_tree_has_no_wall_clock_calls() -> None:
         violations, _ = _clock_scan(rel, tree)
         offenders.extend(violations)
     assert offenders == [], (
-        "civil-time reads in the pure tree (inject a clock instead):\n"
-        + "\n".join(offenders)
+        "civil-time reads in the pure tree (inject a clock instead):\n" + "\n".join(offenders)
     )
 
 

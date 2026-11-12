@@ -106,6 +106,7 @@ def build_note_ref(
         "unresolved": [],
     }
 
+
 MAX_TITLE = 160
 _SLUG_RE = re.compile(r"[^a-z0-9/_-]+")
 _FRONTMATTER_KEYS = (
@@ -143,7 +144,9 @@ def render_frontmatter(fields: Mapping[str, Any]) -> str:
     for key in sorted(fields):
         if key not in ordered:
             ordered[key] = fields[key]
-    return "---\n" + yaml.safe_dump(ordered, sort_keys=False, allow_unicode=True).rstrip() + "\n---\n"
+    return (
+        "---\n" + yaml.safe_dump(ordered, sort_keys=False, allow_unicode=True).rstrip() + "\n---\n"
+    )
 
 
 def render_note(

@@ -44,11 +44,7 @@ def _trace(
     attributes: dict[str, Any] | None = None,
 ) -> Trace:
     """One-span trace; ``duration_ms=None`` leaves it un-ended."""
-    ended = (
-        started + timedelta(milliseconds=duration_ms)
-        if duration_ms is not None
-        else None
-    )
+    ended = started + timedelta(milliseconds=duration_ms) if duration_ms is not None else None
     span = Span(
         trace_id=trace_id,
         span_id="1" * 16,
@@ -183,13 +179,13 @@ def test_filter_since_until_started_range(store: SQLiteTraceStore) -> None:
         "a" * 32,
         "d" * 32,
     }
-    assert _ids(
-        store.list_traces(since_ns=T0_NS + _MIN, until_ns=T0_NS + 5 * _MIN)
-    ) == {"b" * 32, "c" * 32, "d" * 32}
+    assert _ids(store.list_traces(since_ns=T0_NS + _MIN, until_ns=T0_NS + 5 * _MIN)) == {
+        "b" * 32,
+        "c" * 32,
+        "d" * 32,
+    }
     # a boundary instant is inclusive on both sides
-    assert _ids(
-        store.list_traces(since_ns=T0_NS, until_ns=T0_NS)
-    ) == {"a" * 32}
+    assert _ids(store.list_traces(since_ns=T0_NS, until_ns=T0_NS)) == {"a" * 32}
 
 
 def test_filter_duration(store: SQLiteTraceStore) -> None:
@@ -199,11 +195,9 @@ def test_filter_duration(store: SQLiteTraceStore) -> None:
         "b" * 32,
         "e" * 32,
     }
-    assert _ids(
-        store.list_traces(
-            min_duration_ns=400_000_000, max_duration_ns=800_000_000
-        )
-    ) == {"d" * 32}
+    assert _ids(store.list_traces(min_duration_ns=400_000_000, max_duration_ns=800_000_000)) == {
+        "d" * 32
+    }
 
 
 def test_duration_filter_excludes_unended_traces(
@@ -257,25 +251,14 @@ def test_like_metacharacters_are_literal_not_wildcards(
 
 
 def test_filters_combine_with_and(store: SQLiteTraceStore) -> None:
+    assert _ids(store.list_traces(session_id="sess-1", status="ok")) == {"b" * 32}
     assert _ids(
-        store.list_traces(session_id="sess-1", status="ok")
-    ) == {"b" * 32}
-    assert _ids(
-        store.list_traces(
-            status="ok", project_id="default", max_duration_ns=400_000_000
-        )
+        store.list_traces(status="ok", project_id="default", max_duration_ns=400_000_000)
     ) == {"b" * 32, "e" * 32}
-    assert _ids(
-        store.list_traces(q="calc", tool="calculator")
-    ) == {"e" * 32}
+    assert _ids(store.list_traces(q="calc", tool="calculator")) == {"e" * 32}
     # contradictory predicates → empty, never a union
-    assert (
-        store.list_traces(session_id="sess-1", status="unset") == []
-    )
-    assert (
-        store.list_traces(session_id="sess-1", status="error", q="calc")
-        == []
-    )
+    assert store.list_traces(session_id="sess-1", status="unset") == []
+    assert store.list_traces(session_id="sess-1", status="error", q="calc") == []
 
 
 def test_project_id_semantics_unchanged(store: SQLiteTraceStore) -> None:
@@ -287,9 +270,7 @@ def test_project_id_semantics_unchanged(store: SQLiteTraceStore) -> None:
         "b" * 32,
         "e" * 32,
     }
-    assert _ids(
-        store.list_traces(project_id="p2", min_duration_ns=0)
-    ) == {"d" * 32}
+    assert _ids(store.list_traces(project_id="p2", min_duration_ns=0)) == {"d" * 32}
 
 
 def test_limit_offset_semantics_unchanged(store: SQLiteTraceStore) -> None:
@@ -324,15 +305,11 @@ def test_list_sessions_shape_and_rollup(store: SQLiteTraceStore) -> None:
     assert s1["spans"] == 2
     assert s1["first_started_at"] == T0.isoformat()
     # latest activity = b's end (T0+5min+50ms)
-    assert s1["last_activity_at"] == (
-        T0 + timedelta(minutes=5, milliseconds=50)
-    ).isoformat()
+    assert s1["last_activity_at"] == (T0 + timedelta(minutes=5, milliseconds=50)).isoformat()
     s2 = by_id["sess-2"]
     assert s2["traces"] == 2
     assert s2["first_started_at"] == (T0 + timedelta(minutes=2)).isoformat()
-    assert s2["last_activity_at"] == (
-        T0 + timedelta(minutes=8, milliseconds=300)
-    ).isoformat()
+    assert s2["last_activity_at"] == (T0 + timedelta(minutes=8, milliseconds=300)).isoformat()
     # sess-3's only trace never ended — its start IS the last activity,
     # and it still sorts first (newest activity wins)
     s3 = by_id["sess-3"]
@@ -463,13 +440,9 @@ def test_api_sessions_response(client: TestClient) -> None:
         }
         assert isinstance(s["traces"], int)
         assert isinstance(s["spans"], int)
-    assert items[-1]["last_activity_at"] == (
-        T0 + timedelta(minutes=5, milliseconds=50)
-    ).isoformat()
+    assert items[-1]["last_activity_at"] == (T0 + timedelta(minutes=5, milliseconds=50)).isoformat()
     # limit caps like every other list route
-    assert client.get("/v1/sessions", params={"limit": 9999}).json()[
-        "limit"
-    ] == 500
+    assert client.get("/v1/sessions", params={"limit": 9999}).json()["limit"] == 500
     page = client.get("/v1/sessions", params={"limit": 2}).json()["items"]
     assert [s["session_id"] for s in page] == ["sess-3", "sess-2"]
 
@@ -483,9 +456,7 @@ def test_sessions_scoped_key_tenancy(tmp_path: Path) -> None:
     s = SQLiteTraceStore(tmp_path / "k.db")
     s.upsert_trace(_trace("a" * 32, session_id="sess-p1", project_id="p1"))
     s.upsert_trace(_trace("e" * 32, session_id="sess-p2", project_id="p2"))
-    cfg = LensConfig(
-        data_dir=tmp_path, db_path=tmp_path / "k.db", auth_mode="keys"
-    )
+    cfg = LensConfig(data_dir=tmp_path, db_path=tmp_path / "k.db", auth_mode="keys")
     app = create_app(store=s, config=cfg)
     kid, secret, h = generate_key()
     s.create_api_key(kid, name="root", key_hash=h, role="admin")
@@ -495,8 +466,7 @@ def test_sessions_scoped_key_tenancy(tmp_path: Path) -> None:
             r = c.post(
                 "/v1/admin/keys",
                 headers=admin,
-                json={"name": "p1-reader", "role": "reader",
-                      "projects": ["p1"]},
+                json={"name": "p1-reader", "role": "reader", "projects": ["p1"]},
             )
             p1 = {"X-Forge-Lens-Key": r.json()["secret"]}
             # unauthenticated reads are closed in keys mode
@@ -506,17 +476,11 @@ def test_sessions_scoped_key_tenancy(tmp_path: Path) -> None:
             assert r.status_code == 200, r.text
             assert [i["session_id"] for i in r.json()["items"]] == ["sess-p1"]
             # p2 is outside scope — denied, not silently filtered
-            assert (
-                c.get("/v1/sessions", params={"project_id": "p2"},
-                      headers=p1).status_code
-                == 403
-            )
+            assert c.get("/v1/sessions", params={"project_id": "p2"}, headers=p1).status_code == 403
             # omitted pid resolves 'default' — also outside p1 scope
             assert c.get("/v1/sessions", headers=p1).status_code == 403
             # the unscoped admin can still name any project
-            r = c.get(
-                "/v1/sessions", params={"project_id": "p2"}, headers=admin
-            )
+            r = c.get("/v1/sessions", params={"project_id": "p2"}, headers=admin)
             assert [i["session_id"] for i in r.json()["items"]] == ["sess-p2"]
     finally:
         s.close()
@@ -536,18 +500,26 @@ def test_cli_traces_list_filter_options(tmp_path: Path) -> None:
     store.close()
 
     runner = CliRunner()
-    r = runner.invoke(
-        app, ["traces", "list", "--db", str(db), "--status", "error"]
-    )
+    r = runner.invoke(app, ["traces", "list", "--db", str(db), "--status", "error"])
     assert r.exit_code == 0, r.output
     assert "a" * 32 in r.output
     assert "b" * 32 not in r.output
 
     r = runner.invoke(
         app,
-        ["traces", "list", "--db", str(db), "--tool", "calc%",
-         "--since", "2026-01-01T00:00:00Z",
-         "--max-duration-ms", "100", "--json"],
+        [
+            "traces",
+            "list",
+            "--db",
+            str(db),
+            "--tool",
+            "calc%",
+            "--since",
+            "2026-01-01T00:00:00Z",
+            "--max-duration-ms",
+            "100",
+            "--json",
+        ],
     )
     assert r.exit_code == 0, r.output
     import json
@@ -556,13 +528,9 @@ def test_cli_traces_list_filter_options(tmp_path: Path) -> None:
     assert [i["trace_id"] for i in items] == ["b" * 32]
 
     # malformed --since is a usage error (exit 2), never a store query
-    r = runner.invoke(
-        app, ["traces", "list", "--db", str(db), "--since", "bogus"]
-    )
+    r = runner.invoke(app, ["traces", "list", "--db", str(db), "--since", "bogus"])
     assert r.exit_code == 2
-    r = runner.invoke(
-        app, ["traces", "list", "--db", str(db), "--min-duration-ms", "-5"]
-    )
+    r = runner.invoke(app, ["traces", "list", "--db", str(db), "--min-duration-ms", "-5"])
     assert r.exit_code == 2
 
 
@@ -577,8 +545,7 @@ def test_cli_traces_list_session_filter(tmp_path: Path) -> None:
     store.close()
 
     r = CliRunner().invoke(
-        app, ["traces", "list", "--db", str(db), "--session", "sess-1",
-              "--json"]
+        app, ["traces", "list", "--db", str(db), "--session", "sess-1", "--json"]
     )
     import json
 
@@ -627,7 +594,11 @@ def test_tools_endpoint_shape(client) -> None:
     assert set(body) == {"items", "limit", "offset"}
     for row in body["items"]:
         assert set(row) == {
-            "tool", "calls", "traces", "errors", "avg_duration_ms",
+            "tool",
+            "calls",
+            "traces",
+            "errors",
+            "avg_duration_ms",
         }
 
 
@@ -639,9 +610,7 @@ def test_tools_cli_renders_rollup(tmp_path: Path) -> None:
     s = SQLiteTraceStore(tmp_path / "cli.db")
     _seed(s)
     s.close()
-    r = CliRunner().invoke(
-        app, ["tools", "--db", str(tmp_path / "cli.db"), "--project", "default"]
-    )
+    r = CliRunner().invoke(app, ["tools", "--db", str(tmp_path / "cli.db"), "--project", "default"])
     assert r.exit_code == 0
     assert "web_search" in r.output
     assert "calls=4" not in r.output  # seeded counts are 1/1/1 + 2 unnamed
@@ -656,9 +625,7 @@ def test_sessions_cli_renders_rollup(tmp_path: Path) -> None:
     s = SQLiteTraceStore(tmp_path / "cli.db")
     _seed(s)
     s.close()
-    r = CliRunner().invoke(
-        app, ["sessions", "--db", str(tmp_path / "cli.db")]
-    )
+    r = CliRunner().invoke(app, ["sessions", "--db", str(tmp_path / "cli.db")])
     assert r.exit_code == 0
     assert "sess-1" in r.output
     assert "traces=2" in r.output
@@ -688,17 +655,13 @@ def _dimension_trace() -> Trace:
         started_at=T0,
         ended_at=T0 + timedelta(milliseconds=700),
         status=Status(code=StatusCode.OK),
-        source=TraceSource(
-            system="forge-lens-sdk", host="runner-01"),
-        resource_attributes={"service.name": "checkout-agent",
-                             "host.name": "runner-01"},
+        source=TraceSource(system="forge-lens-sdk", host="runner-01"),
+        resource_attributes={"service.name": "checkout-agent", "host.name": "runner-01"},
         spans=[span],
     )
 
 
-def test_dimension_filters_store_api_cli(
-    store: SQLiteTraceStore, tmp_path: Path
-) -> None:
+def test_dimension_filters_store_api_cli(store: SQLiteTraceStore, tmp_path: Path) -> None:
     """model/agent/host/min-tokens dimensions AND on top of existing
     filters — §02.6. Traces without the evidence never match."""
     store.upsert_trace(_dimension_trace())
@@ -710,26 +673,18 @@ def test_dimension_filters_store_api_cli(
     assert "9" * 32 in ids(all_rows)
 
     # model: span attr substring
-    assert ids(store.list_traces(project_id="default", model="gpt-test")) == {
-        "9" * 32}
+    assert ids(store.list_traces(project_id="default", model="gpt-test")) == {"9" * 32}
     assert not store.list_traces(project_id="default", model="claude")
     # agent: gen_ai.agent.name OR producer identity
-    assert ids(store.list_traces(project_id="default", agent="researcher")) == {
-        "9" * 32}
-    assert ids(
-        store.list_traces(project_id="default", agent="checkout-agent")
-    ) == {"9" * 32}
-    assert ids(store.list_traces(
-        project_id="default", agent="forge-lens-sdk")) == {"9" * 32}
+    assert ids(store.list_traces(project_id="default", agent="researcher")) == {"9" * 32}
+    assert ids(store.list_traces(project_id="default", agent="checkout-agent")) == {"9" * 32}
+    assert ids(store.list_traces(project_id="default", agent="forge-lens-sdk")) == {"9" * 32}
     # host: source.host / host.name resource attr
-    assert ids(store.list_traces(project_id="default", host="runner-01")) == {
-        "9" * 32}
+    assert ids(store.list_traces(project_id="default", host="runner-01")) == {"9" * 32}
     assert not store.list_traces(project_id="default", host="other-host")
     # min_total_tokens: summed usage ≥ bound; no-usage traces never match
-    assert ids(store.list_traces(
-        project_id="default", min_total_tokens=1000)) == {"9" * 32}
-    assert not store.list_traces(
-        project_id="default", min_total_tokens=2000)
+    assert ids(store.list_traces(project_id="default", min_total_tokens=1000)) == {"9" * 32}
+    assert not store.list_traces(project_id="default", min_total_tokens=2000)
 
     # API parity — same params over the wire (client fixture binds a
     # different store; build one on `store` so the seeded trace exists)
@@ -750,21 +705,22 @@ def test_dimension_filters_store_api_cli(
     from typer.testing import CliRunner
 
     from forge_lens.cli.main import app
+
     s = SQLiteTraceStore(tmp_path / "dim.db")
     s.upsert_trace(_dimension_trace())
     s.close()
-    r = CliRunner().invoke(app, [
-        "traces", "list", "--db", str(tmp_path / "dim.db"),
-        "--model", "gpt-test", "--json"])
+    r = CliRunner().invoke(
+        app, ["traces", "list", "--db", str(tmp_path / "dim.db"), "--model", "gpt-test", "--json"]
+    )
     assert r.exit_code == 0
     assert "9" * 32 in r.output
-    r = CliRunner().invoke(app, [
-        "traces", "list", "--db", str(tmp_path / "dim.db"),
-        "--host", "runner-01"])
+    r = CliRunner().invoke(
+        app, ["traces", "list", "--db", str(tmp_path / "dim.db"), "--host", "runner-01"]
+    )
     assert "9" * 32 in r.output
-    r = CliRunner().invoke(app, [
-        "traces", "list", "--db", str(tmp_path / "dim.db"),
-        "--min-tokens", "9999"])
+    r = CliRunner().invoke(
+        app, ["traces", "list", "--db", str(tmp_path / "dim.db"), "--min-tokens", "9999"]
+    )
     assert "9" * 32 not in r.output
 
 
@@ -839,9 +795,7 @@ def test_min_total_tokens_requires_usage_evidence(
     assert _ids(store.list_traces(min_total_tokens=0)) == {"9" * 32}
 
     # an explicit zero observation IS evidence — it matches bound 0
-    zero = _trace(
-        "7" * 32, attributes={"gen_ai.usage.total_tokens": 0}
-    )
+    zero = _trace("7" * 32, attributes={"gen_ai.usage.total_tokens": 0})
     store.upsert_trace(zero)
     ids0 = _ids(store.list_traces(min_total_tokens=0))
     assert {"9" * 32, "7" * 32} <= ids0

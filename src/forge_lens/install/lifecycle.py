@@ -45,16 +45,24 @@ def write_receipt(data_dir: Path, receipt: dict[str, Any]) -> Path:
 
 
 def install(
-    data_dir: Path, *, profile: str, source: str,
-    files: list[str], ts_ns: int, dry_run: bool = False,
+    data_dir: Path,
+    *,
+    profile: str,
+    source: str,
+    files: list[str],
+    ts_ns: int,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     if profile not in PROFILES:
         return {"ok": False, "error": f"profile must be one of {PROFILES}"}
     if source not in _SOURCES:
         return {"ok": False, "error": f"source must be one of {_SOURCES}"}
     receipt = {
-        "action": "install", "profile": profile, "source": source,
-        "files": sorted(files), "ts_ns": ts_ns,
+        "action": "install",
+        "profile": profile,
+        "source": source,
+        "files": sorted(files),
+        "ts_ns": ts_ns,
         "python": sys.version.split()[0],
         "dry_run": dry_run,
     }
@@ -113,8 +121,7 @@ def uninstall(data_dir: Path, *, ts_ns: int) -> dict[str, Any]:
                 except OSError:
                     failed.append(f)  # removal denied — record, keep going
     try:
-        write_receipt(data_dir, {"action": "uninstall", "ts_ns": ts_ns,
-                                 "removed": sorted(removed)})
+        write_receipt(data_dir, {"action": "uninstall", "ts_ns": ts_ns, "removed": sorted(removed)})
     except OSError as exc:
         # unwritable data_dir → the audit trail can't record the removal;
         # report what happened instead of dying on a traceback

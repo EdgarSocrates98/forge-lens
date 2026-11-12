@@ -88,8 +88,7 @@ def _model_of(span: Span) -> str | None:
 def _declared_retries(span: Span) -> int:
     """Producer-declared retry counter — first truthy attribute wins
     (same convention as ``trace_efficiency``); unparseable → 0."""
-    raw = span.attributes.get(_RETRY_ATTRS[0]) or \
-        span.attributes.get(_RETRY_ATTRS[1]) or 0
+    raw = span.attributes.get(_RETRY_ATTRS[0]) or span.attributes.get(_RETRY_ATTRS[1]) or 0
     try:
         return max(0, int(raw))
     except (TypeError, ValueError):
@@ -211,36 +210,37 @@ def correlate_trace(trace: Trace) -> dict[str, Any]:
     for (kind_val, name), group in sorted(err_by_key.items()):
         first_err_pos = min(pos[id(s)] for s in group)
         prior = [
-            s for s in spans[:first_err_pos]
+            s
+            for s in spans[:first_err_pos]
             if s.kind.value == kind_val and _semantic_name(s) == name
         ]
         if not prior:
             continue
         signals = [
-            {"type": "prior_invocations",
-             "span_ids": [s.span_id for s in prior],
-             "value": len(prior)},
-            {"type": "error_spans",
-             "span_ids": [s.span_id for s in group],
-             "value": len(group)},
-        ]
-        correlations.append(_correlation(
-            "retries_preceded_error",
-            signals,
             {
-                "preceding_invocations": len(prior),
-                "error_invocations": len(group),
-                "declared_retry_attrs": sum(
-                    _declared_retries(s) for s in prior
-                ),
+                "type": "prior_invocations",
+                "span_ids": [s.span_id for s in prior],
+                "value": len(prior),
             },
-            "same-name invocations preceding an error are candidate "
-            "retries — temporal precedence is not proof of retry "
-            "intent or causation",
-            f"{len(prior)} {name!r} invocation(s) observed before "
-            f"{len(group)} error span(s) of the same name",
-            order,
-        ))
+            {"type": "error_spans", "span_ids": [s.span_id for s in group], "value": len(group)},
+        ]
+        correlations.append(
+            _correlation(
+                "retries_preceded_error",
+                signals,
+                {
+                    "preceding_invocations": len(prior),
+                    "error_invocations": len(group),
+                    "declared_retry_attrs": sum(_declared_retries(s) for s in prior),
+                },
+                "same-name invocations preceding an error are candidate "
+                "retries — temporal precedence is not proof of retry "
+                "intent or causation",
+                f"{len(prior)} {name!r} invocation(s) observed before "
+                f"{len(group)} error span(s) of the same name",
+                order,
+            )
+        )
 
     # -- tool_failure_cluster: ≥2 errored invocations of one tool
     tool_by_name: dict[str, list[Span]] = {}
@@ -252,27 +252,32 @@ def correlate_trace(trace: Trace) -> dict[str, Any]:
         if len(failed) < 2:
             continue
         signals = [
-            {"type": "failed_invocations",
-             "span_ids": [s.span_id for s in failed],
-             "value": len(failed)},
-            {"type": "all_invocations",
-             "span_ids": [s.span_id for s in group],
-             "value": len(group)},
-        ]
-        correlations.append(_correlation(
-            "tool_failure_cluster",
-            signals,
             {
-                "failed_invocations": len(failed),
-                "invocations": len(group),
-                "failure_share": round(len(failed) / len(group), 6),
+                "type": "failed_invocations",
+                "span_ids": [s.span_id for s in failed],
+                "value": len(failed),
             },
-            "co-located failures in one execution — the cluster is "
-            "descriptive; a shared cause is unproven",
-            f"tool {name!r} failed {len(failed)} of {len(group)} "
-            "invocations in this trace",
-            order,
-        ))
+            {
+                "type": "all_invocations",
+                "span_ids": [s.span_id for s in group],
+                "value": len(group),
+            },
+        ]
+        correlations.append(
+            _correlation(
+                "tool_failure_cluster",
+                signals,
+                {
+                    "failed_invocations": len(failed),
+                    "invocations": len(group),
+                    "failure_share": round(len(failed) / len(group), 6),
+                },
+                "co-located failures in one execution — the cluster is "
+                "descriptive; a shared cause is unproven",
+                f"tool {name!r} failed {len(failed)} of {len(group)} invocations in this trace",
+                order,
+            )
+        )
 
     # -- model_switch: ≥2 distinct model labels across LLM calls
     by_model: dict[str, list[str]] = {}
@@ -289,26 +294,29 @@ def correlate_trace(trace: Trace) -> dict[str, Any]:
             for m, ids in sorted(by_model.items())
         ]
         if unattributed:
-            signals.append({
-                "type": "model_calls",
-                "value": None,
-                "span_ids": unattributed,
-            })
-        correlations.append(_correlation(
-            "model_switch",
-            signals,
-            {
-                "distinct_models": len(by_model),
-                "llm_calls": len(llms),
-                "calls_without_model": len(unattributed),
-            },
-            "model labels are provider-reported strings — a switch is "
-            "an observed label change, not proof of a different "
-            "endpoint or of harm",
-            f"{len(by_model)} distinct model labels across "
-            f"{len(llms)} LLM calls",
-            order,
-        ))
+            signals.append(
+                {
+                    "type": "model_calls",
+                    "value": None,
+                    "span_ids": unattributed,
+                }
+            )
+        correlations.append(
+            _correlation(
+                "model_switch",
+                signals,
+                {
+                    "distinct_models": len(by_model),
+                    "llm_calls": len(llms),
+                    "calls_without_model": len(unattributed),
+                },
+                "model labels are provider-reported strings — a switch is "
+                "an observed label change, not proof of a different "
+                "endpoint or of harm",
+                f"{len(by_model)} distinct model labels across {len(llms)} LLM calls",
+                order,
+            )
+        )
 
     # -- context growth edges
     edge = _context_growth_edge(spans)
@@ -321,95 +329,102 @@ def correlate_trace(trace: Trace) -> dict[str, Any]:
         u_after = extract_usage(after)
         growth_strength: dict[str, Any] = {
             "input_token_growth": delta,
-            "from_input_tokens": (
-                u_before.input_tokens if u_before is not None else None
-            ),
-            "to_input_tokens": (
-                u_after.input_tokens if u_after is not None else None
-            ),
+            "from_input_tokens": (u_before.input_tokens if u_before is not None else None),
+            "to_input_tokens": (u_after.input_tokens if u_after is not None else None),
         }
         if later_errors:
-            correlations.append(_correlation(
-                "context_growth_preceded_error",
-                [
-                    {"type": "llm_calls",
-                     "span_ids": [before.span_id, after.span_id]},
-                    {"type": "error_spans",
-                     "span_ids": [s.span_id for s in later_errors],
-                     "value": len(later_errors)},
-                ],
-                {**growth_strength, "error_spans_after": len(later_errors)},
-                "context growth is observed between consecutive calls "
-                "— the error started later in wall-clock order, which "
-                "does not make the growth its cause",
-                f"input context grew +{delta} tokens between "
-                f"{before.span_id} and {after.span_id}; "
-                f"{len(later_errors)} error span(s) started after",
-                order,
-            ))
+            correlations.append(
+                _correlation(
+                    "context_growth_preceded_error",
+                    [
+                        {"type": "llm_calls", "span_ids": [before.span_id, after.span_id]},
+                        {
+                            "type": "error_spans",
+                            "span_ids": [s.span_id for s in later_errors],
+                            "value": len(later_errors),
+                        },
+                    ],
+                    {**growth_strength, "error_spans_after": len(later_errors)},
+                    "context growth is observed between consecutive calls "
+                    "— the error started later in wall-clock order, which "
+                    "does not make the growth its cause",
+                    f"input context grew +{delta} tokens between "
+                    f"{before.span_id} and {after.span_id}; "
+                    f"{len(later_errors)} error span(s) started after",
+                    order,
+                )
+            )
         later_evals = [(s, sc) for s, sc in scored if pos[id(s)] > after_pos]
         if later_evals:
             scores = [sc for _, sc in later_evals]
-            correlations.append(_correlation(
-                "context_growth_preceded_eval",
-                [
-                    {"type": "llm_calls",
-                     "span_ids": [before.span_id, after.span_id]},
-                    {"type": "eval_scores",
-                     "span_ids": [s.span_id for s, _ in later_evals],
-                     "value": min(scores)},
-                ],
-                {
-                    **growth_strength,
-                    "eval_scores_after": len(scores),
-                    "min_score": min(scores),
-                    "max_score": max(scores),
-                },
-                "the score values are reported as observed — whether "
-                "they are 'degraded' is a judgement this module does "
-                "not make; precedence is not causation",
-                f"input context grew +{delta} tokens before "
-                f"{len(scores)} evaluator score(s) "
-                f"(min {min(scores)})",
-                order,
-            ))
+            correlations.append(
+                _correlation(
+                    "context_growth_preceded_eval",
+                    [
+                        {"type": "llm_calls", "span_ids": [before.span_id, after.span_id]},
+                        {
+                            "type": "eval_scores",
+                            "span_ids": [s.span_id for s, _ in later_evals],
+                            "value": min(scores),
+                        },
+                    ],
+                    {
+                        **growth_strength,
+                        "eval_scores_after": len(scores),
+                        "min_score": min(scores),
+                        "max_score": max(scores),
+                    },
+                    "the score values are reported as observed — whether "
+                    "they are 'degraded' is a judgement this module does "
+                    "not make; precedence is not causation",
+                    f"input context grew +{delta} tokens before "
+                    f"{len(scores)} evaluator score(s) "
+                    f"(min {min(scores)})",
+                    order,
+                )
+            )
 
     # -- errors_preceded_eval_score: error spans before a scored eval
     if errors and scored:
         first_eval_pos = min(pos[id(s)] for s, _ in scored)
         earlier_errors = [s for s in errors if pos[id(s)] < first_eval_pos]
-        evals_after = [(s, sc) for s, sc in scored
-                       if any(pos[id(e)] < pos[id(s)] for e in earlier_errors)]
+        evals_after = [
+            (s, sc) for s, sc in scored if any(pos[id(e)] < pos[id(s)] for e in earlier_errors)
+        ]
         if earlier_errors and evals_after:
             scores = [sc for _, sc in evals_after]
-            correlations.append(_correlation(
-                "errors_preceded_eval_score",
-                [
-                    {"type": "error_spans",
-                     "span_ids": [s.span_id for s in earlier_errors],
-                     "value": len(earlier_errors)},
-                    {"type": "eval_scores",
-                     "span_ids": [s.span_id for s, _ in evals_after],
-                     "value": min(scores)},
-                ],
-                {
-                    "error_spans_before": len(earlier_errors),
-                    "eval_scores_after": len(scores),
-                    "min_score": min(scores),
-                    "max_score": max(scores),
-                },
-                "errors started before the evaluator span — the eval "
-                "score may reflect the failure, measuring the same "
-                "event rather than being caused by it",
-                f"{len(earlier_errors)} error span(s) preceded "
-                f"{len(scores)} evaluator score(s) "
-                f"(min {min(scores)})",
-                order,
-            ))
+            correlations.append(
+                _correlation(
+                    "errors_preceded_eval_score",
+                    [
+                        {
+                            "type": "error_spans",
+                            "span_ids": [s.span_id for s in earlier_errors],
+                            "value": len(earlier_errors),
+                        },
+                        {
+                            "type": "eval_scores",
+                            "span_ids": [s.span_id for s, _ in evals_after],
+                            "value": min(scores),
+                        },
+                    ],
+                    {
+                        "error_spans_before": len(earlier_errors),
+                        "eval_scores_after": len(scores),
+                        "min_score": min(scores),
+                        "max_score": max(scores),
+                    },
+                    "errors started before the evaluator span — the eval "
+                    "score may reflect the failure, measuring the same "
+                    "event rather than being caused by it",
+                    f"{len(earlier_errors)} error span(s) preceded "
+                    f"{len(scores)} evaluator score(s) "
+                    f"(min {min(scores)})",
+                    order,
+                )
+            )
 
-    correlations.sort(
-        key=lambda c: (c["kind"], c["evidence_span_ids"] or [""])
-    )
+    correlations.sort(key=lambda c: (c["kind"], c["evidence_span_ids"] or [""]))
     return {
         "trace_id": trace.trace_id,
         "correlations": correlations,
@@ -418,15 +433,9 @@ def correlate_trace(trace: Trace) -> dict[str, Any]:
             "tool_spans": len(tools),
             "tool_error_spans": sum(1 for s in tools if _is_error(s)),
             "llm_spans": len(llms),
-            "llm_with_usage": sum(
-                1 for s in llms if extract_usage(s) is not None
-            ),
-            "llm_with_model": sum(
-                1 for s in llms if _model_of(s) is not None
-            ),
-            "evaluator_spans": sum(
-                1 for s in spans if s.kind is SpanKind.EVALUATOR
-            ),
+            "llm_with_usage": sum(1 for s in llms if extract_usage(s) is not None),
+            "llm_with_model": sum(1 for s in llms if _model_of(s) is not None),
+            "evaluator_spans": sum(1 for s in spans if s.kind is SpanKind.EVALUATOR),
             "eval_scores_observed": len(scored),
             "error_spans": len(errors),
             "models": sorted(by_model),
@@ -434,7 +443,7 @@ def correlate_trace(trace: Trace) -> dict[str, Any]:
         },
         "classification": TEMPORAL,
         "note": "intra-trace associations pair signals by temporal "
-                "precedence only — correlation is not causation",
+        "precedence only — correlation is not causation",
     }
 
 
@@ -483,9 +492,7 @@ def _trace_features(trace: Trace) -> dict[str, Any]:
         "declared_retry_attrs": declared,
         "retry_signals": repeated + declared,
         "eval_scores": scores,
-        "eval_score_mean": (
-            round(sum(scores) / len(scores), 6) if scores else None
-        ),
+        "eval_score_mean": (round(sum(scores) / len(scores), 6) if scores else None),
         "session_traces_in_window": None,  # filled by correlate_fleet
     }
 
@@ -516,9 +523,7 @@ def _presence_table(
         rate_f = in_failed / len(failed) if failed else None
         rate_o = in_ok / len(ok) if ok else None
         diff = (
-            round((rate_f - rate_o) * 100, 2)
-            if rate_f is not None and rate_o is not None
-            else None
+            round((rate_f - rate_o) * 100, 2) if rate_f is not None and rate_o is not None else None
         )
         n_block: dict[str, int] = {
             "failed_with": in_failed,
@@ -529,46 +534,48 @@ def _presence_table(
             "other_total": len(other),
         }
         if errored_field is not None:
-            n_block["failed_with_error"] = sum(
-                1 for f in failed if k in f[errored_field]
-            )
-            n_block["ok_with_error"] = sum(
-                1 for f in ok if k in f[errored_field]
-            )
+            n_block["failed_with_error"] = sum(1 for f in failed if k in f[errored_field])
+            n_block["ok_with_error"] = sum(1 for f in ok if k in f[errored_field])
         sufficient = cohort_ok
-        rows.append({
-            key_name: k,
-            "n": n_block,
-            "rate_failed": round(rate_f, 6) if rate_f is not None else None,
-            "rate_ok": round(rate_o, 6) if rate_o is not None else None,
-            "rate_difference_pp": diff,
-            "sufficient": sufficient,
-            "classification": (
-                CO_OCCURRENCE if sufficient else INSUFFICIENT
-            ),
-            **({} if sufficient else {
-                "reason": (
-                    f"cohorts too small — need ≥{_MIN_COHORT} failed "
-                    f"and ≥{_MIN_COHORT} ok traces in the window"
-                )
-            }),
-        })
-    rows.sort(key=lambda r: (
-        r["rate_difference_pp"] is None,
-        -(r["rate_difference_pp"] or 0.0),
-        r[key_name],
-    ))
+        rows.append(
+            {
+                key_name: k,
+                "n": n_block,
+                "rate_failed": round(rate_f, 6) if rate_f is not None else None,
+                "rate_ok": round(rate_o, 6) if rate_o is not None else None,
+                "rate_difference_pp": diff,
+                "sufficient": sufficient,
+                "classification": (CO_OCCURRENCE if sufficient else INSUFFICIENT),
+                **(
+                    {}
+                    if sufficient
+                    else {
+                        "reason": (
+                            f"cohorts too small — need ≥{_MIN_COHORT} failed "
+                            f"and ≥{_MIN_COHORT} ok traces in the window"
+                        )
+                    }
+                ),
+            }
+        )
+    rows.sort(
+        key=lambda r: (
+            r["rate_difference_pp"] is None,
+            -(r["rate_difference_pp"] or 0.0),
+            r[key_name],
+        )
+    )
     return {
         "basis": f"trace carries ≥1 span labelled by {field}",
         "cohorts": {
-            "failed": len(failed), "ok": len(ok), "other": len(other),
+            "failed": len(failed),
+            "ok": len(ok),
+            "other": len(other),
         },
         "rows": rows,
-        "classification": (
-            CO_OCCURRENCE if cohort_ok else INSUFFICIENT
-        ),
+        "classification": (CO_OCCURRENCE if cohort_ok else INSUFFICIENT),
         "note": "presence rates per outcome class — descriptive "
-                "co-occurrence, not a tested difference",
+        "co-occurrence, not a tested difference",
     }
 
 
@@ -590,10 +597,7 @@ def _session_length_table(
 
     rows: list[dict[str, Any]] = []
     for label in ("1", "2-4", "5+"):
-        members = [
-            f for f in scoped
-            if _bucket(f["session_traces_in_window"] or 0) == label
-        ]
+        members = [f for f in scoped if _bucket(f["session_traces_in_window"] or 0) == label]
         failed_n = sum(1 for f in members if f["outcome"] == "error")
         n = len(members)
         rate = failed_n / n if n else None
@@ -603,40 +607,33 @@ def _session_length_table(
             else None
         )
         sufficient = n >= _MIN_COHORT
-        rows.append({
-            "bucket": label,
-            "traces": n,
-            "failed": failed_n,
-            "failure_rate": round(rate, 6) if rate is not None else None,
-            "rate_delta_vs_window_pp": delta,
-            "sufficient": sufficient,
-            "classification": CO_OCCURRENCE if sufficient else INSUFFICIENT,
-            **({} if sufficient else {
-                "reason": f"fewer than {_MIN_COHORT} traces in bucket"
-            }),
-        })
+        rows.append(
+            {
+                "bucket": label,
+                "traces": n,
+                "failed": failed_n,
+                "failure_rate": round(rate, 6) if rate is not None else None,
+                "rate_delta_vs_window_pp": delta,
+                "sufficient": sufficient,
+                "classification": CO_OCCURRENCE if sufficient else INSUFFICIENT,
+                **({} if sufficient else {"reason": f"fewer than {_MIN_COHORT} traces in bucket"}),
+            }
+        )
     return {
         "basis": "session size = traces sharing session_id inside the "
-                 "bounded window (not the fleet-wide session total)",
-        "window_failure_rate": (
-            round(window_rate, 6) if window_rate is not None else None
-        ),
+        "bounded window (not the fleet-wide session total)",
+        "window_failure_rate": (round(window_rate, 6) if window_rate is not None else None),
         "traces_without_session": n_total - len(scoped),
         "rows": rows,
         "note": "session-length is a within-window count — a long "
-                "session clipped by the bound reads shorter",
+        "session clipped by the bound reads shorter",
     }
 
 
 def _retry_eval_table(features: list[dict[str, Any]]) -> dict[str, Any]:
     """Observed eval-score means bucketed by retry-signal count."""
-    all_means = [
-        f["eval_score_mean"] for f in features
-        if f["eval_score_mean"] is not None
-    ]
-    window_mean = (
-        sum(all_means) / len(all_means) if all_means else None
-    )
+    all_means = [f["eval_score_mean"] for f in features if f["eval_score_mean"] is not None]
+    window_mean = sum(all_means) / len(all_means) if all_means else None
 
     def _bucket(n: int) -> str:
         if n <= 0:
@@ -648,44 +645,39 @@ def _retry_eval_table(features: list[dict[str, Any]]) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for label in ("0", "1-2", "3+"):
         members = [f for f in features if _bucket(f["retry_signals"]) == label]
-        means = [
-            f["eval_score_mean"] for f in members
-            if f["eval_score_mean"] is not None
-        ]
+        means = [f["eval_score_mean"] for f in members if f["eval_score_mean"] is not None]
         mean = sum(means) / len(means) if means else None
         delta = (
-            round(mean - window_mean, 6)
-            if mean is not None and window_mean is not None
-            else None
+            round(mean - window_mean, 6) if mean is not None and window_mean is not None else None
         )
         sufficient = len(means) >= _MIN_SCORED
-        rows.append({
-            "bucket": label,
-            "traces": len(members),
-            "scored_traces": len(means),
-            "mean_score": round(mean, 6) if mean is not None else None,
-            "score_delta_vs_window": delta,
-            "sufficient": sufficient,
-            "classification": CO_OCCURRENCE if sufficient else INSUFFICIENT,
-            **({} if sufficient else {
-                "reason": (
-                    f"fewer than {_MIN_SCORED} scored traces in bucket"
-                )
-            }),
-        })
+        rows.append(
+            {
+                "bucket": label,
+                "traces": len(members),
+                "scored_traces": len(means),
+                "mean_score": round(mean, 6) if mean is not None else None,
+                "score_delta_vs_window": delta,
+                "sufficient": sufficient,
+                "classification": CO_OCCURRENCE if sufficient else INSUFFICIENT,
+                **(
+                    {}
+                    if sufficient
+                    else {"reason": (f"fewer than {_MIN_SCORED} scored traces in bucket")}
+                ),
+            }
+        )
     return {
         "basis": "retry_signals = repeated same-name invocations + "
-                 "declared retry counters; scores = numeric attributes "
-                 "observed on EVALUATOR-kind spans",
-        "window_mean_score": (
-            round(window_mean, 6) if window_mean is not None else None
-        ),
+        "declared retry counters; scores = numeric attributes "
+        "observed on EVALUATOR-kind spans",
+        "window_mean_score": (round(window_mean, 6) if window_mean is not None else None),
         "traces_scored": len(all_means),
         "traces_total": len(features),
         "rows": rows,
         "note": "repeated invocations are a retry proxy, not declared "
-                "retries — and score co-occurrence is not evidence "
-                "that retries moved the score",
+        "retries — and score co-occurrence is not evidence "
+        "that retries moved the score",
     }
 
 
@@ -711,9 +703,7 @@ def correlate_fleet(
     by_pid: dict[str | None, list[str]] = {}
     for r in rows:
         rp = r.get("project_id")
-        by_pid.setdefault(
-            rp if isinstance(rp, str) else None, []
-        ).append(str(r["trace_id"]))
+        by_pid.setdefault(rp if isinstance(rp, str) else None, []).append(str(r["trace_id"]))
     resolved: dict[tuple[str | None, str], Trace | None] = {}
     for rp, tids in by_pid.items():
         for tid, t in store.get_traces(rp, tids).items():
@@ -721,9 +711,7 @@ def correlate_fleet(
     traces: list[Trace] = []
     for r in rows:
         rp = r.get("project_id")
-        t = resolved.get(
-            (rp if isinstance(rp, str) else None, str(r["trace_id"]))
-        )
+        t = resolved.get((rp if isinstance(rp, str) else None, str(r["trace_id"])))
         if t is not None:
             traces.append(t)
 
@@ -737,10 +725,7 @@ def correlate_fleet(
 
     failed = [f for f in features if f["outcome"] == "error"]
     ok = [f for f in features if f["outcome"] == "ok"]
-    other = [
-        f for f in features
-        if f["outcome"] not in ("error", "ok")
-    ]
+    other = [f for f in features if f["outcome"] not in ("error", "ok")]
     features.sort(key=lambda f: f["trace_id"])
 
     return {
@@ -757,20 +742,21 @@ def correlate_fleet(
         },
         "tables": {
             "tool_error": _presence_table(
-                features, failed, ok, other, "tools", "tool",
+                features,
+                failed,
+                ok,
+                other,
+                "tools",
+                "tool",
                 errored_field="tools_errored",
             ),
-            "model_error": _presence_table(
-                features, failed, ok, other, "models", "model"
-            ),
-            "session_length_error": _session_length_table(
-                features, len(features), len(failed)
-            ),
+            "model_error": _presence_table(features, failed, ok, other, "models", "model"),
+            "session_length_error": _session_length_table(features, len(features), len(failed)),
             "retry_eval": _retry_eval_table(features),
         },
         "trace_signals": features,
         "classification": "descriptive_co_occurrence",
         "note": "co-occurrence over a bounded window — descriptive "
-                "rates only, no causal claim and no significance "
-                "test; use /v1/eval/compare for tested comparisons",
+        "rates only, no causal claim and no significance "
+        "test; use /v1/eval/compare for tested comparisons",
     }

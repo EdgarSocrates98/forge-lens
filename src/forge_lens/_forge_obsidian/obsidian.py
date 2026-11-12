@@ -86,7 +86,9 @@ class VaultReader(Protocol):
 
 @runtime_checkable
 class VaultWriter(Protocol):
-    def write(self, path: str, content: str, *, baseline_hash: str | None = None) -> dict[str, Any]: ...
+    def write(
+        self, path: str, content: str, *, baseline_hash: str | None = None
+    ) -> dict[str, Any]: ...
 
 
 @runtime_checkable
@@ -115,11 +117,15 @@ class KnowledgeProjector(Protocol):
 
 
 class SyncPlanner(Protocol):
-    def plan(self, path: str, content: str, *, baseline_hash: str | None = None) -> dict[str, Any]: ...
+    def plan(
+        self, path: str, content: str, *, baseline_hash: str | None = None
+    ) -> dict[str, Any]: ...
 
 
 class ConflictDetector(Protocol):
-    def detect(self, baseline_hash: str | None, current_hash: str | None, candidate_hash: str) -> str: ...
+    def detect(
+        self, baseline_hash: str | None, current_hash: str | None, candidate_hash: str
+    ) -> str: ...
 
 
 class ImportReceiptWriter(Protocol):
@@ -132,7 +138,9 @@ class ExportReceiptWriter(Protocol):
 
 def _classification(value: str) -> str:
     if value not in _CLASSIFICATIONS:
-        raise ObsidianVaultError("OBSIDIAN-CLASSIFICATION-INVALID", "unsupported document classification")
+        raise ObsidianVaultError(
+            "OBSIDIAN-CLASSIFICATION-INVALID", "unsupported document classification"
+        )
     return value
 
 
@@ -140,14 +148,20 @@ def _bounded_document(document: str | bytes | Mapping[str, Any], *, kind: str) -
     """Decode one bounded Obsidian interchange document without executing content."""
     if isinstance(document, bytes):
         if len(document) > MAX_INTEROP_BYTES:
-            raise ObsidianVaultError("OBSIDIAN-SIZE-LIMIT", f"{kind} document exceeds the safe size limit")
+            raise ObsidianVaultError(
+                "OBSIDIAN-SIZE-LIMIT", f"{kind} document exceeds the safe size limit"
+            )
         try:
             text = document.decode("utf-8")
         except UnicodeDecodeError as exc:
-            raise ObsidianVaultError("OBSIDIAN-UTF8-INVALID", f"{kind} document is not valid UTF-8") from exc
+            raise ObsidianVaultError(
+                "OBSIDIAN-UTF8-INVALID", f"{kind} document is not valid UTF-8"
+            ) from exc
     elif isinstance(document, str):
         if len(document.encode("utf-8")) > MAX_INTEROP_BYTES:
-            raise ObsidianVaultError("OBSIDIAN-SIZE-LIMIT", f"{kind} document exceeds the safe size limit")
+            raise ObsidianVaultError(
+                "OBSIDIAN-SIZE-LIMIT", f"{kind} document exceeds the safe size limit"
+            )
         text = document
     elif isinstance(document, Mapping):
         return dict(document)
@@ -159,7 +173,9 @@ def _bounded_document(document: str | bytes | Mapping[str, Any], *, kind: str) -
     try:
         value = yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        raise ObsidianVaultError(f"OBSIDIAN-{kind.upper()}-INVALID", f"{kind} document is malformed") from exc
+        raise ObsidianVaultError(
+            f"OBSIDIAN-{kind.upper()}-INVALID", f"{kind} document is malformed"
+        ) from exc
     if not isinstance(value, Mapping):
         raise ObsidianVaultError(
             f"OBSIDIAN-{kind.upper()}-INVALID", f"{kind} document must contain an object"
@@ -184,7 +200,9 @@ def validate_canvas_document(document: str | bytes | Mapping[str, Any]) -> dict[
     node_ids: set[str] = set()
     for node in nodes:
         if not isinstance(node, Mapping):
-            raise ObsidianVaultError("OBSIDIAN-CANVAS-INVALID", "every canvas node must be an object")
+            raise ObsidianVaultError(
+                "OBSIDIAN-CANVAS-INVALID", "every canvas node must be an object"
+            )
         node_id = node.get("id")
         node_type = node.get("type")
         if not isinstance(node_id, str) or not node_id.strip() or node_id in node_ids:
@@ -223,7 +241,9 @@ def validate_canvas_document(document: str | bytes | Mapping[str, Any]) -> dict[
     edge_ids: set[str] = set()
     for edge in edges:
         if not isinstance(edge, Mapping):
-            raise ObsidianVaultError("OBSIDIAN-CANVAS-INVALID", "every canvas edge must be an object")
+            raise ObsidianVaultError(
+                "OBSIDIAN-CANVAS-INVALID", "every canvas edge must be an object"
+            )
         edge_id = edge.get("id")
         from_node = edge.get("fromNode")
         to_node = edge.get("toNode")
@@ -232,7 +252,9 @@ def validate_canvas_document(document: str | bytes | Mapping[str, Any]) -> dict[
                 "OBSIDIAN-CANVAS-INVALID", "canvas edge ids must be unique and non-empty"
             )
         if from_node not in node_ids or to_node not in node_ids:
-            raise ObsidianVaultError("OBSIDIAN-CANVAS-INVALID", "canvas edge endpoint does not exist")
+            raise ObsidianVaultError(
+                "OBSIDIAN-CANVAS-INVALID", "canvas edge endpoint does not exist"
+            )
         for field in ("fromSide", "toSide"):
             if field in edge and edge[field] not in _CANVAS_SIDES:
                 raise ObsidianVaultError(
@@ -275,7 +297,9 @@ def validate_base_document(document: str | bytes | Mapping[str, Any]) -> dict[st
     def validate_filter(item: Any, *, location: str = "filters") -> None:
         if isinstance(item, str):
             if not item.strip():
-                raise ObsidianVaultError("OBSIDIAN-BASE-INVALID", f"base {location} cannot be empty")
+                raise ObsidianVaultError(
+                    "OBSIDIAN-BASE-INVALID", f"base {location} cannot be empty"
+                )
             return
         if not isinstance(item, Mapping) or len(item) != 1:
             raise ObsidianVaultError(
@@ -316,10 +340,14 @@ def validate_base_document(document: str | bytes | Mapping[str, Any]) -> dict[st
             )
     if "views" in value:
         if not isinstance(value["views"], list):
-            raise ObsidianVaultError("OBSIDIAN-BASE-INVALID", "base field 'views' has an invalid shape")
+            raise ObsidianVaultError(
+                "OBSIDIAN-BASE-INVALID", "base field 'views' has an invalid shape"
+            )
         for index, view in enumerate(value["views"]):
             if not isinstance(view, Mapping):
-                raise ObsidianVaultError("OBSIDIAN-BASE-INVALID", "every base view must be an object")
+                raise ObsidianVaultError(
+                    "OBSIDIAN-BASE-INVALID", "every base view must be an object"
+                )
             if not isinstance(view.get("type"), str) or not view["type"].strip():
                 raise ObsidianVaultError(
                     "OBSIDIAN-BASE-INVALID", f"base view {index} requires a non-empty string type"
@@ -336,7 +364,8 @@ def validate_base_document(document: str | bytes | Mapping[str, Any]) -> dict[st
                 or view["limit"] < 0
             ):
                 raise ObsidianVaultError(
-                    "OBSIDIAN-BASE-INVALID", f"base view {index} limit must be a non-negative integer"
+                    "OBSIDIAN-BASE-INVALID",
+                    f"base view {index} limit must be a non-negative integer",
                 )
             if "order" in view and (
                 not isinstance(view["order"], list)
@@ -347,13 +376,16 @@ def validate_base_document(document: str | bytes | Mapping[str, Any]) -> dict[st
                 )
             if "groupBy" in view:
                 group_by = view["groupBy"]
-                if not isinstance(group_by, Mapping) or not isinstance(group_by.get("property"), str):
+                if not isinstance(group_by, Mapping) or not isinstance(
+                    group_by.get("property"), str
+                ):
                     raise ObsidianVaultError(
                         "OBSIDIAN-BASE-INVALID", f"base view {index} groupBy must name a property"
                     )
                 if group_by.get("direction") not in {"ASC", "DESC"}:
                     raise ObsidianVaultError(
-                        "OBSIDIAN-BASE-INVALID", f"base view {index} groupBy direction must be ASC or DESC"
+                        "OBSIDIAN-BASE-INVALID",
+                        f"base view {index} groupBy direction must be ASC or DESC",
                     )
             if "groupOrder" in view and not isinstance(view["groupOrder"], list):
                 raise ObsidianVaultError(
@@ -391,7 +423,9 @@ def serialize_base_document(document: Mapping[str, Any]) -> str:
             default_flow_style=False,
         )
     except yaml.YAMLError as exc:
-        raise ObsidianVaultError("OBSIDIAN-BASE-INVALID", "base document could not be serialized") from exc
+        raise ObsidianVaultError(
+            "OBSIDIAN-BASE-INVALID", "base document could not be serialized"
+        ) from exc
 
 
 def _resolved(path: Path) -> Path:
@@ -461,9 +495,7 @@ def _safe(
         except FileNotFoundError as exc:
             if for_write:
                 continue  # missing parents are created by the atomic writer
-            raise ObsidianVaultError(
-                "OBSIDIAN-NOT-FOUND", "vault document was not found"
-            ) from exc
+            raise ObsidianVaultError("OBSIDIAN-NOT-FOUND", "vault document was not found") from exc
         except OSError as exc:
             raise ObsidianVaultError(
                 "OBSIDIAN-SYMLINK-REFUSED", "vault path contains an unreadable directory"
@@ -479,10 +511,14 @@ def _safe(
     except FileNotFoundError:
         file_info = None
     except OSError as exc:
-        raise ObsidianVaultError("OBSIDIAN-READ-FAILED", "vault document could not be inspected") from exc
+        raise ObsidianVaultError(
+            "OBSIDIAN-READ-FAILED", "vault document could not be inspected"
+        ) from exc
     if file_info is not None:
         if _reparse_stat(file_info):
-            raise ObsidianVaultError("OBSIDIAN-SYMLINK-REFUSED", "vault path is a symlink or reparse point")
+            raise ObsidianVaultError(
+                "OBSIDIAN-SYMLINK-REFUSED", "vault path is a symlink or reparse point"
+            )
         if file_info.st_nlink > 1:
             raise ObsidianVaultError("OBSIDIAN-HARDLINK-REFUSED", "vault document is a hardlink")
         if not stat.S_ISREG(file_info.st_mode):
@@ -490,7 +526,9 @@ def _safe(
     elif not for_write:
         raise ObsidianVaultError("OBSIDIAN-NOT-FOUND", "vault document was not found")
     if for_write and not candidate.parent.is_dir():
-        raise ObsidianVaultError("OBSIDIAN-PARENT-MISSING", "vault destination directory was not found")
+        raise ObsidianVaultError(
+            "OBSIDIAN-PARENT-MISSING", "vault destination directory was not found"
+        )
     return candidate
 
 
@@ -557,6 +595,7 @@ def parse_markdown_document(content: str) -> dict[str, Any]:
         for language in re.findall(r"^```([^\r\n]*)", body, flags=re.MULTILINE)
         if language.strip()
     ]
+
     def _string_list(value: Any) -> list[str]:
         values = value if isinstance(value, list) else [value]
         return sorted({str(item).strip() for item in values if str(item).strip()})
@@ -575,8 +614,21 @@ def parse_markdown_document(content: str) -> dict[str, Any]:
         }
     )
     attachment_extensions = {
-        ".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".m4a", ".mp3", ".mp4",
-        ".ogg", ".pdf", ".png", ".svg", ".wav", ".webm", ".webp",
+        ".avif",
+        ".bmp",
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".m4a",
+        ".mp3",
+        ".mp4",
+        ".ogg",
+        ".pdf",
+        ".png",
+        ".svg",
+        ".wav",
+        ".webm",
+        ".webp",
     }
     attachments = sorted(
         {
@@ -639,15 +691,21 @@ def _import_vault_document_from_root(
     checked_directories: set[Path] | None = None,
 ) -> dict[str, Any]:
     if not root.is_dir():
-        raise ObsidianVaultError("OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory")
+        raise ObsidianVaultError(
+            "OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory"
+        )
     path = _safe(root, raw_path, checked_directories=checked_directories)
     try:
         raw_content = path.read_bytes()
     except OSError as exc:
-        raise ObsidianVaultError("OBSIDIAN-READ-FAILED", "vault document could not be read") from exc
+        raise ObsidianVaultError(
+            "OBSIDIAN-READ-FAILED", "vault document could not be read"
+        ) from exc
     size = len(raw_content)
     if size > MAX_VAULT_BYTES:
-        raise ObsidianVaultError("OBSIDIAN-SIZE-LIMIT", "vault document exceeds the safe size limit")
+        raise ObsidianVaultError(
+            "OBSIDIAN-SIZE-LIMIT", "vault document exceeds the safe size limit"
+        )
     try:
         content = raw_content.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -679,13 +737,19 @@ def _import_vault_document_from_root(
     }
 
 
-def import_vault_documents(vault: Path | str, raw_paths: list[str] | tuple[str, ...]) -> list[dict[str, Any]]:
+def import_vault_documents(
+    vault: Path | str, raw_paths: list[str] | tuple[str, ...]
+) -> list[dict[str, Any]]:
     """Import a bounded selection with one vault authorization/canonicalization pass."""
     if len(raw_paths) > 10_000:
-        raise ObsidianVaultError("OBSIDIAN-BATCH-LIMIT", "batch import is limited to 10000 documents")
+        raise ObsidianVaultError(
+            "OBSIDIAN-BATCH-LIMIT", "batch import is limited to 10000 documents"
+        )
     root = validate_vault_authorization(vault)
     if not root.is_dir():
-        raise ObsidianVaultError("OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory")
+        raise ObsidianVaultError(
+            "OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory"
+        )
     checked_directories: set[Path] = set()
 
     def _read(raw_path: str) -> dict[str, Any]:
@@ -717,14 +781,22 @@ def scan_vault_documents(
         raise ObsidianVaultError("OBSIDIAN-SCAN-LIMIT", "scan limit must be between 1 and 10000")
     root = validate_vault_authorization(vault)
     if not root.is_dir():
-        raise ObsidianVaultError("OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory")
+        raise ObsidianVaultError(
+            "OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory"
+        )
     normalized = prefix.replace("\\", "/").strip("/")
     invalid_prefix = any(part in {"", ".", ".."} for part in normalized.split("/"))
     if normalized and ("\x00" in normalized or invalid_prefix):
         raise ObsidianVaultError("OBSIDIAN-PATH-REFUSED", "scan prefix must stay inside the vault")
     start = root.joinpath(*normalized.split("/")) if normalized else root
-    if not _inside(start, root) or (_reparse(start) if start.exists() else False) or not start.is_dir():
-        raise ObsidianVaultError("OBSIDIAN-PATH-REFUSED", "scan prefix is not a safe vault directory")
+    if (
+        not _inside(start, root)
+        or (_reparse(start) if start.exists() else False)
+        or not start.is_dir()
+    ):
+        raise ObsidianVaultError(
+            "OBSIDIAN-PATH-REFUSED", "scan prefix is not a safe vault directory"
+        )
 
     blocked_dirs = {".git", ".obsidian", ".forge", ".cache", "__pycache__"}
     items: list[dict[str, Any]] = []
@@ -735,7 +807,9 @@ def scan_vault_documents(
         try:
             entries = sorted(os.scandir(directory), key=lambda item: item.name.casefold())
         except OSError as exc:
-            raise ObsidianVaultError("OBSIDIAN-SCAN-FAILED", "vault directory could not be scanned") from exc
+            raise ObsidianVaultError(
+                "OBSIDIAN-SCAN-FAILED", "vault directory could not be scanned"
+            ) from exc
         for entry in entries:
             if entry.name.lower() in blocked_dirs and entry.is_dir(follow_symlinks=False):
                 continue
@@ -759,10 +833,16 @@ def scan_vault_documents(
             items.append(
                 {
                     "path": relative,
-                    "title": Path(relative).stem.replace("-", " ").replace("_", " ").strip().title(),
+                    "title": Path(relative)
+                    .stem.replace("-", " ")
+                    .replace("_", " ")
+                    .strip()
+                    .title(),
                     "size": info.st_size,
                     "modified_at": (
-                        datetime.fromtimestamp(info.st_mtime, timezone.utc).isoformat().replace("+00:00", "Z")
+                        datetime.fromtimestamp(info.st_mtime, timezone.utc)
+                        .isoformat()
+                        .replace("+00:00", "Z")
                     ),
                 }
             )
@@ -784,7 +864,9 @@ def _internal_dir(root: Path, name: str) -> Path:
     """Return a safe adapter-owned directory below the vault's .forge area."""
     forge_dir = root / ".forge"
     if forge_dir.exists() and (_reparse(forge_dir) or not forge_dir.is_dir()):
-        raise ObsidianVaultError("OBSIDIAN-PATH-REFUSED", "vault adapter directory is not a safe directory")
+        raise ObsidianVaultError(
+            "OBSIDIAN-PATH-REFUSED", "vault adapter directory is not a safe directory"
+        )
     try:
         forge_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -792,10 +874,14 @@ def _internal_dir(root: Path, name: str) -> Path:
             "OBSIDIAN-PATH-REFUSED", "vault adapter directory could not be created"
         ) from exc
     if _reparse(forge_dir) or not forge_dir.is_dir():
-        raise ObsidianVaultError("OBSIDIAN-PATH-REFUSED", "vault adapter directory is not a safe directory")
+        raise ObsidianVaultError(
+            "OBSIDIAN-PATH-REFUSED", "vault adapter directory is not a safe directory"
+        )
     directory = forge_dir / name
     if directory.exists() and (_reparse(directory) or not directory.is_dir()):
-        raise ObsidianVaultError("OBSIDIAN-PATH-REFUSED", "vault adapter directory is not a safe directory")
+        raise ObsidianVaultError(
+            "OBSIDIAN-PATH-REFUSED", "vault adapter directory is not a safe directory"
+        )
     try:
         directory.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -803,7 +889,9 @@ def _internal_dir(root: Path, name: str) -> Path:
             "OBSIDIAN-PATH-REFUSED", "vault adapter directory could not be created"
         ) from exc
     if _reparse(directory) or not directory.is_dir():
-        raise ObsidianVaultError("OBSIDIAN-PATH-REFUSED", "vault adapter directory is not a safe directory")
+        raise ObsidianVaultError(
+            "OBSIDIAN-PATH-REFUSED", "vault adapter directory is not a safe directory"
+        )
     return directory
 
 
@@ -812,7 +900,9 @@ def _vault_write_lock(vault: Path | str, raw_path: str) -> Iterator[None]:
     """Serialize sync mutations for one canonical vault/document across processes."""
     root = validate_vault_authorization(vault)
     if not root.is_dir():
-        raise ObsidianVaultError("OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory")
+        raise ObsidianVaultError(
+            "OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory"
+        )
     path = _safe(root, raw_path, for_write=True)
     lock_dir = _internal_dir(root, "obsidian-locks")
     lock_name = hashlib.sha256(path.relative_to(root).as_posix().encode("utf-8")).hexdigest()
@@ -825,7 +915,9 @@ def _vault_write_lock(vault: Path | str, raw_path: str) -> Iterator[None]:
     try:
         descriptor = os.open(lock_path, open_flags, 0o600)
     except OSError as exc:
-        raise ObsidianVaultError("OBSIDIAN-LOCK-FAILED", "vault document lock could not be opened") from exc
+        raise ObsidianVaultError(
+            "OBSIDIAN-LOCK-FAILED", "vault document lock could not be opened"
+        ) from exc
     lock_file = os.fdopen(descriptor, "a+b")
     acquired = False
     try:
@@ -850,7 +942,9 @@ def _vault_write_lock(vault: Path | str, raw_path: str) -> Iterator[None]:
         acquired = True
         yield
     except OSError as exc:
-        raise ObsidianVaultError("OBSIDIAN-LOCK-FAILED", "vault document lock could not be acquired") from exc
+        raise ObsidianVaultError(
+            "OBSIDIAN-LOCK-FAILED", "vault document lock could not be acquired"
+        ) from exc
     finally:
         if acquired:
             try:
@@ -880,7 +974,9 @@ def _persist_sync_receipt(root: Path, receipt: dict[str, Any]) -> dict[str, Any]
     receipt["receipt_path"] = receipt_path.relative_to(root).as_posix()
     _atomic_write(
         receipt_path,
-        json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+        json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        ),
     )
     return receipt
 
@@ -902,9 +998,13 @@ def _export_vault_document_unlocked(
     """
     root = validate_vault_authorization(vault)
     if not root.is_dir():
-        raise ObsidianVaultError("OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory")
+        raise ObsidianVaultError(
+            "OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory"
+        )
     if len(content.encode("utf-8")) > MAX_VAULT_BYTES:
-        raise ObsidianVaultError("OBSIDIAN-SIZE-LIMIT", "vault document exceeds the safe size limit")
+        raise ObsidianVaultError(
+            "OBSIDIAN-SIZE-LIMIT", "vault document exceeds the safe size limit"
+        )
     classification = _classification(classification)
     path = _safe(root, raw_path, for_write=True)
     candidate_bytes = content.encode("utf-8")
@@ -962,7 +1062,9 @@ def _export_vault_document_unlocked(
     # the common parent-swap window without pretending a portable pathlib
     # check is an OS-level capability handle.
     if _safe(root, raw_path, for_write=True) != path:
-        raise ObsidianVaultError("OBSIDIAN-PATH-REFUSED", "vault destination changed during validation")
+        raise ObsidianVaultError(
+            "OBSIDIAN-PATH-REFUSED", "vault destination changed during validation"
+        )
     _atomic_write(path, candidate_bytes)
     if hashlib.sha256(path.read_bytes()).hexdigest() != candidate_hash:
         raise ObsidianVaultError("OBSIDIAN-INTEGRITY", "post-write hash verification failed")
@@ -989,7 +1091,11 @@ def _export_vault_document_unlocked(
         "warnings": [],
         "unresolved": [],
         "exported_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "provenance": {"adapter": "stdlib-obsidian-markdown", "vault": root.name, "cli_required": False},
+        "provenance": {
+            "adapter": "stdlib-obsidian-markdown",
+            "vault": root.name,
+            "cli_required": False,
+        },
     }
     return _persist_sync_receipt(root, receipt)
 
@@ -1027,9 +1133,13 @@ def _skip_vault_sync_unlocked(
     """Record an intentional no-op without mutating the note body."""
     root = validate_vault_authorization(vault)
     if not root.is_dir():
-        raise ObsidianVaultError("OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory")
+        raise ObsidianVaultError(
+            "OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory"
+        )
     if len(content.encode("utf-8")) > MAX_VAULT_BYTES:
-        raise ObsidianVaultError("OBSIDIAN-SIZE-LIMIT", "vault document exceeds the safe size limit")
+        raise ObsidianVaultError(
+            "OBSIDIAN-SIZE-LIMIT", "vault document exceeds the safe size limit"
+        )
     classification = _classification(classification)
     path = _safe(root, raw_path, for_write=True)
     previous_hash = hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
@@ -1102,7 +1212,9 @@ def _rollback_vault_document_unlocked(
     """
     root = validate_vault_authorization(vault)
     if not root.is_dir():
-        raise ObsidianVaultError("OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory")
+        raise ObsidianVaultError(
+            "OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory"
+        )
     receipt_file = _resolved(root / receipt_path)
     if not _inside(receipt_file, root) or receipt_file.parts[-3:] != (
         ".forge",
@@ -1123,10 +1235,15 @@ def _rollback_vault_document_unlocked(
         receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ObsidianVaultError("OBSIDIAN-RECEIPT-INVALID", "receipt is not valid JSON") from exc
-    if not isinstance(receipt, dict) or receipt.get("receipt_schema") != "theforge/ObsidianSyncReceipt/v1":
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("receipt_schema") != "theforge/ObsidianSyncReceipt/v1"
+    ):
         raise ObsidianVaultError("OBSIDIAN-RECEIPT-INVALID", "receipt schema is unsupported")
     if str(receipt.get("path")) != raw_path.replace("\\", "/"):
-        raise ObsidianVaultError("OBSIDIAN-ROLLBACK-PATH", "rollback path does not match the receipt")
+        raise ObsidianVaultError(
+            "OBSIDIAN-ROLLBACK-PATH", "rollback path does not match the receipt"
+        )
     backup_path = str(receipt.get("backup_path") or "")
     backup_file = _resolved(root / backup_path)
     if (
@@ -1134,12 +1251,20 @@ def _rollback_vault_document_unlocked(
         or not _inside(backup_file, root)
         or not backup_path.startswith(".forge/obsidian-backups/")
     ):
-        raise ObsidianVaultError("OBSIDIAN-BACKUP-REFUSED", "receipt does not reference a vault backup")
-    if _reparse(backup_file) or not backup_file.is_file() or backup_file.stat().st_size > MAX_VAULT_BYTES:
+        raise ObsidianVaultError(
+            "OBSIDIAN-BACKUP-REFUSED", "receipt does not reference a vault backup"
+        )
+    if (
+        _reparse(backup_file)
+        or not backup_file.is_file()
+        or backup_file.stat().st_size > MAX_VAULT_BYTES
+    ):
         raise ObsidianVaultError("OBSIDIAN-BACKUP-REFUSED", "backup is not a safe regular file")
     path = _safe(root, raw_path, for_write=True)
     if not path.exists():
-        raise ObsidianVaultError("OBSIDIAN-ROLLBACK-CONFLICT", "destination was removed after export")
+        raise ObsidianVaultError(
+            "OBSIDIAN-ROLLBACK-CONFLICT", "destination was removed after export"
+        )
     current_bytes = path.read_bytes()
     current_hash = hashlib.sha256(current_bytes).hexdigest()
     if current_hash != str(receipt.get("content_hash")):
@@ -1150,12 +1275,16 @@ def _rollback_vault_document_unlocked(
     restored_bytes = backup_file.read_bytes()
     restored_hash = hashlib.sha256(restored_bytes).hexdigest()
     if restored_hash != str(receipt.get("previous_hash")):
-        raise ObsidianVaultError("OBSIDIAN-BACKUP-INTEGRITY", "backup hash does not match the receipt")
+        raise ObsidianVaultError(
+            "OBSIDIAN-BACKUP-INTEGRITY", "backup hash does not match the receipt"
+        )
     _atomic_write(path, restored_bytes)
     if hashlib.sha256(path.read_bytes()).hexdigest() != restored_hash:
         raise ObsidianVaultError("OBSIDIAN-INTEGRITY", "post-rollback hash verification failed")
     timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    rollback_id = hashlib.sha256(f"{current_hash}:{restored_hash}:{timestamp}".encode()).hexdigest()[:24]
+    rollback_id = hashlib.sha256(
+        f"{current_hash}:{restored_hash}:{timestamp}".encode()
+    ).hexdigest()[:24]
     return _persist_sync_receipt(
         root,
         {
@@ -1218,9 +1347,13 @@ def plan_vault_sync(
     """Create a dry-run sync plan; it never mutates the vault."""
     root = validate_vault_authorization(vault)
     if not root.is_dir():
-        raise ObsidianVaultError("OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory")
+        raise ObsidianVaultError(
+            "OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory"
+        )
     if len(content.encode("utf-8")) > MAX_VAULT_BYTES:
-        raise ObsidianVaultError("OBSIDIAN-SIZE-LIMIT", "vault document exceeds the safe size limit")
+        raise ObsidianVaultError(
+            "OBSIDIAN-SIZE-LIMIT", "vault document exceeds the safe size limit"
+        )
     classification = _classification(classification)
     path = _safe(root, raw_path, for_write=True)
     candidate_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
@@ -1245,7 +1378,9 @@ def plan_vault_sync(
         "previous_hash": current_hash,
         "baseline_hash": baseline_hash,
         "outcome": state,
-        "warnings": ["confirmation required for mutation"] if state in {"created", "updated"} else [],
+        "warnings": ["confirmation required for mutation"]
+        if state in {"created", "updated"}
+        else [],
         "unresolved": ["manual conflict resolution required"] if state == "conflict" else [],
         "planned_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
@@ -1254,10 +1389,14 @@ def plan_vault_sync(
 def list_obsidian_receipts(vault: Path | str, *, limit: int = 50) -> list[dict[str, Any]]:
     """Return bounded, body-free export history from the vault's Forge ledger."""
     if not 1 <= limit <= 100:
-        raise ObsidianVaultError("OBSIDIAN-HISTORY-LIMIT", "history limit must be between 1 and 100")
+        raise ObsidianVaultError(
+            "OBSIDIAN-HISTORY-LIMIT", "history limit must be between 1 and 100"
+        )
     root = validate_vault_authorization(vault)
     if not root.is_dir():
-        raise ObsidianVaultError("OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory")
+        raise ObsidianVaultError(
+            "OBSIDIAN-VAULT-MISSING", "configured Obsidian vault is not a directory"
+        )
     forge_dir = root / ".forge"
     if not forge_dir.exists():
         return []
@@ -1282,7 +1421,10 @@ def list_obsidian_receipts(vault: Path | str, *, limit: int = 50) -> list[dict[s
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             continue
-        if not isinstance(value, dict) or value.get("receipt_schema") != "theforge/ObsidianSyncReceipt/v1":
+        if (
+            not isinstance(value, dict)
+            or value.get("receipt_schema") != "theforge/ObsidianSyncReceipt/v1"
+        ):
             continue
         entries.append((path.stat().st_mtime, {k: v for k, v in value.items() if k != "content"}))
     entries.sort(key=lambda item: (-item[0], str(item[1].get("path", ""))))
@@ -1304,7 +1446,9 @@ def _atomic_write(path: Path, content: bytes) -> None:
         try:
             os.replace(temporary, path)
         except OSError as exc:
-            raise ObsidianVaultError("OBSIDIAN-WRITE-FAILED", "atomic vault replace failed") from exc
+            raise ObsidianVaultError(
+                "OBSIDIAN-WRITE-FAILED", "atomic vault replace failed"
+            ) from exc
     except ObsidianVaultError:
         raise
     except OSError as exc:
@@ -1315,5 +1459,3 @@ def _atomic_write(path: Path, content: bytes) -> None:
                 os.unlink(temporary)
             except FileNotFoundError:
                 pass
-
-

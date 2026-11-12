@@ -36,9 +36,7 @@ MCP_MD = REPO / "docs" / "reference" / "mcp.md"
 SDK_PY_MD = REPO / "docs" / "reference" / "sdk-python.md"
 SDK_TS_MD = REPO / "docs" / "reference" / "sdk-typescript.md"
 
-pytestmark = pytest.mark.skipif(
-    not API_MD.exists(), reason="docs/reference/api.md ausente"
-)
+pytestmark = pytest.mark.skipif(not API_MD.exists(), reason="docs/reference/api.md ausente")
 
 
 def _route_literals() -> list[tuple[str, str]]:
@@ -50,12 +48,7 @@ def _route_literals() -> list[tuple[str, str]]:
         r'@app\.(get|post|put|delete|patch)\(\s*f?["\']([^"\']+)["\']',
         src,
     ):
-        path = (
-            m.group(2)
-            .replace("{API_VERSION}", "v1")
-            .replace("{{", "{")
-            .replace("}}", "}")
-        )
+        path = m.group(2).replace("{API_VERSION}", "v1").replace("{{", "{").replace("}}", "}")
         out.append((m.group(1).upper(), path))
     return out
 
@@ -87,9 +80,7 @@ def test_openapi_paths_match_route_literals() -> None:
     from forge_lens.core.config import LensConfig
 
     app = create_app(
-        config=LensConfig(
-            data_dir=Path("/nonexistent"), db_path=Path("/nonexistent/x.db")
-        )
+        config=LensConfig(data_dir=Path("/nonexistent"), db_path=Path("/nonexistent/x.db"))
     )
     spec_paths = {
         f"{verb.upper()} {path}"
@@ -97,9 +88,7 @@ def test_openapi_paths_match_route_literals() -> None:
         for verb in ops
         if verb in ("get", "post", "put", "delete", "patch")
     }
-    literal_paths = {
-        f"{v} {p}" for v, p in _route_literals() if p != "/favicon.ico"
-    }
+    literal_paths = {f"{v} {p}" for v, p in _route_literals() if p != "/favicon.ico"}
     assert spec_paths == literal_paths
 
 
@@ -109,16 +98,13 @@ def test_openapi_paths_are_documented() -> None:
     from forge_lens.core.config import LensConfig
 
     app = create_app(
-        config=LensConfig(
-            data_dir=Path("/nonexistent"), db_path=Path("/nonexistent/x.db")
-        )
+        config=LensConfig(data_dir=Path("/nonexistent"), db_path=Path("/nonexistent/x.db"))
     )
     missing = [
         f"{verb.upper()} {path}"
         for path, ops in app.openapi()["paths"].items()
         for verb in ops
-        if verb in ("get", "post", "put", "delete", "patch")
-        and not _documented(verb.upper(), path)
+        if verb in ("get", "post", "put", "delete", "patch") and not _documented(verb.upper(), path)
     ]
     assert not missing, f"openapi paths missing from api.md: {missing}"
 
@@ -128,14 +114,12 @@ def test_writer_tier_doc_covers_check_auth_routes() -> None:
     api.md writer bullet — the auth table is the contract operators read."""
     src = APP_PY.read_text(encoding="utf-8")
     text = API_MD.read_text(encoding="utf-8")
-    writer_bullet = re.search(
-        r"\*\*writer\*\*.*?(?=\n- \*\*reader\*\*)", text, re.DOTALL
-    )
+    writer_bullet = re.search(r"\*\*writer\*\*.*?(?=\n- \*\*reader\*\*)", text, re.DOTALL)
     assert writer_bullet is not None
     bullet = writer_bullet.group(0)
     # find each decorated block that binds check_auth
     for m in re.finditer(
-        r'@app\.(post|put|delete)\((.*?)\)\s*\n\s*async def (\w+)',
+        r"@app\.(post|put|delete)\((.*?)\)\s*\n\s*async def (\w+)",
         src,
         re.DOTALL,
     ):

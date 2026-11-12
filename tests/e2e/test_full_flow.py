@@ -55,9 +55,9 @@ def test_sdk_to_api_to_store(tmp_path) -> None:
 
         from forge_lens.contracts.v1.trace import TraceIngest
 
-        envelope = TraceIngest(
-            project_id="e2e", source=tracer.source, traces=traces
-        ).model_dump(mode="json")
+        envelope = TraceIngest(project_id="e2e", source=tracer.source, traces=traces).model_dump(
+            mode="json"
+        )
         r = client.post("/v1/traces", json=envelope)
         assert r.status_code == 200, r.text
         assert r.json()["accepted_spans"] == 4
@@ -125,9 +125,7 @@ def test_http_exporter_over_real_socket(tmp_path) -> None:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
 
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
-    )
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     try:
@@ -168,8 +166,10 @@ def test_exporter_body_shape() -> None:
     class FakeResp:
         def __enter__(self):
             return self
+
         def __exit__(self, *a):
             return False
+
         def read(self):
             return b'{"accepted_spans": 1, "traces": ["t"]}'
 

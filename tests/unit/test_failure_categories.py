@@ -83,8 +83,7 @@ def _exc_event(*exc_types: str, offset_ms: int = 10) -> list[SpanEvent]:
 
 
 def test_classify_auth_error_status_and_type() -> None:
-    s = _span("a1", "llm call", kind=SpanKind.LLM,
-              attrs={"http.status_code": 401})
+    s = _span("a1", "llm call", kind=SpanKind.LLM, attrs={"http.status_code": 401})
     r = classify_failure(_trace([s]))
     assert r.failed
     assert r.category == "auth_error"
@@ -96,35 +95,33 @@ def test_classify_auth_error_status_and_type() -> None:
 
 
 def test_classify_missing_permissions() -> None:
-    s = _span("a1", "tool s3", kind=SpanKind.TOOL,
-              attrs={"http.status_code": 403})
+    s = _span("a1", "tool s3", kind=SpanKind.TOOL, attrs={"http.status_code": 403})
     assert classify_failure(_trace([s])).category == "missing_permissions"
-    s2 = _span("a1", "tool", kind=SpanKind.TOOL,
-               events=_exc_event("PermissionError"))
+    s2 = _span("a1", "tool", kind=SpanKind.TOOL, events=_exc_event("PermissionError"))
     assert classify_failure(_trace([s2])).category == "missing_permissions"
 
 
 def test_classify_invalid_arguments() -> None:
-    s = _span("a1", "tool fetch", kind=SpanKind.TOOL,
-              attrs={"http.status_code": 400})
+    s = _span("a1", "tool fetch", kind=SpanKind.TOOL, attrs={"http.status_code": 400})
     r = classify_failure(_trace([s]))
     assert r.category == "invalid_arguments"
-    s2 = _span("a1", "tool", kind=SpanKind.TOOL,
-               events=_exc_event("ValidationError"))
+    s2 = _span("a1", "tool", kind=SpanKind.TOOL, events=_exc_event("ValidationError"))
     assert classify_failure(_trace([s2])).category == "invalid_arguments"
-    s3 = _span("a1", "tool", kind=SpanKind.TOOL,
-               attrs={"http.response.status_code": 422})
+    s3 = _span("a1", "tool", kind=SpanKind.TOOL, attrs={"http.response.status_code": 422})
     assert classify_failure(_trace([s3])).category == "invalid_arguments"
 
 
 def test_classify_schema_mismatch_beats_invalid_args() -> None:
     """Schema/parse wording is the more specific read than a bare 400."""
-    s = _span("a1", "llm json", kind=SpanKind.LLM,
-              attrs={"http.status_code": 400},
-              events=_exc_event("SchemaValidationError"))
+    s = _span(
+        "a1",
+        "llm json",
+        kind=SpanKind.LLM,
+        attrs={"http.status_code": 400},
+        events=_exc_event("SchemaValidationError"),
+    )
     assert classify_failure(_trace([s])).category == "schema_mismatch"
-    s2 = _span("a1", "llm", kind=SpanKind.LLM,
-               msg="failed to parse structured output")
+    s2 = _span("a1", "llm", kind=SpanKind.LLM, msg="failed to parse structured output")
     assert classify_failure(_trace([s2])).category == "schema_mismatch"
 
 
@@ -132,25 +129,24 @@ def test_classify_retry_exhaustion() -> None:
     s = _span("a1", "llm", kind=SpanKind.LLM, attrs={"retry.count": 5})
     r = classify_failure(_trace([s]))
     assert r.category == "retry_exhaustion"
-    s2 = _span("a1", "llm", kind=SpanKind.LLM,
-               attrs={"attempt": 3, "max_attempts": 3})
+    s2 = _span("a1", "llm", kind=SpanKind.LLM, attrs={"attempt": 3, "max_attempts": 3})
     assert classify_failure(_trace([s2])).category == "retry_exhaustion"
-    s3 = _span("a1", "llm", kind=SpanKind.LLM,
-               events=[SpanEvent(name="retry", time=T0)
-                       for _ in range(RETRY_EXHAUSTION_THRESHOLD)])
+    s3 = _span(
+        "a1",
+        "llm",
+        kind=SpanKind.LLM,
+        events=[SpanEvent(name="retry", time=T0) for _ in range(RETRY_EXHAUSTION_THRESHOLD)],
+    )
     assert classify_failure(_trace([s3])).category == "retry_exhaustion"
-    s4 = _span("a1", "llm", kind=SpanKind.LLM,
-               msg="max retries exceeded, giving up")
+    s4 = _span("a1", "llm", kind=SpanKind.LLM, msg="max retries exceeded, giving up")
     assert classify_failure(_trace([s4])).category == "retry_exhaustion"
 
 
 def test_classify_agent_cancelled_err_and_nonerr() -> None:
-    s = _span("a1", "agent", kind=SpanKind.AGENT,
-              events=_exc_event("asyncio.CancelledError"))
+    s = _span("a1", "agent", kind=SpanKind.AGENT, events=_exc_event("asyncio.CancelledError"))
     assert classify_failure(_trace([s])).category == "agent_cancelled"
     # a cancelled span that never errored still fails the run
-    s2 = _span("a1", "agent", kind=SpanKind.AGENT, error=False,
-               attrs={"agent.cancelled": True})
+    s2 = _span("a1", "agent", kind=SpanKind.AGENT, error=False, attrs={"agent.cancelled": True})
     r2 = classify_failure(_trace([s2]))
     assert r2.failed
     assert r2.category == "agent_cancelled"
@@ -158,27 +154,33 @@ def test_classify_agent_cancelled_err_and_nonerr() -> None:
 
 def test_classify_budget_exceeded_beats_rate_limit() -> None:
     """429 naming quota is account exhaustion, not a transient throttle."""
-    s = _span("a1", "llm", kind=SpanKind.LLM,
-              attrs={"http.status_code": 429},
-              msg="insufficient_quota: quota exceeded")
+    s = _span(
+        "a1",
+        "llm",
+        kind=SpanKind.LLM,
+        attrs={"http.status_code": 429},
+        msg="insufficient_quota: quota exceeded",
+    )
     assert classify_failure(_trace([s])).category == "budget_exceeded"
-    s2 = _span("a1", "llm", kind=SpanKind.LLM,
-               attrs={"budget.exceeded": True})
+    s2 = _span("a1", "llm", kind=SpanKind.LLM, attrs={"budget.exceeded": True})
     assert classify_failure(_trace([s2])).category == "budget_exceeded"
 
 
 def test_ordering_auth_beats_timeout_and_kind() -> None:
     """401 with deadline wording must land on auth, not timeout/kind."""
-    s = _span("a1", "tool api", kind=SpanKind.TOOL,
-              attrs={"http.status_code": 401},
-              msg="deadline passed; unauthorized")
+    s = _span(
+        "a1",
+        "tool api",
+        kind=SpanKind.TOOL,
+        attrs={"http.status_code": 401},
+        msg="deadline passed; unauthorized",
+    )
     r = classify_failure(_trace([s]))
     assert r.category == "auth_error"
 
 
 def test_ordering_signal_beats_tool_kind() -> None:
-    s = _span("a1", "tool api", kind=SpanKind.TOOL,
-              attrs={"http.status_code": 422})
+    s = _span("a1", "tool api", kind=SpanKind.TOOL, attrs={"http.status_code": 422})
     assert classify_failure(_trace([s])).category == "invalid_arguments"
 
 
@@ -188,8 +190,13 @@ def test_ordering_signal_beats_tool_kind() -> None:
 def test_business_cancel_text_not_a_failure() -> None:
     """'order was cancelled' on a healthy span is business data, not a
     cancelled run — weak text signals only count on errored spans."""
-    ok = _span("a1", "tool orders", kind=SpanKind.TOOL, error=False,
-               msg="order #42 was cancelled by customer")
+    ok = _span(
+        "a1",
+        "tool orders",
+        kind=SpanKind.TOOL,
+        error=False,
+        msg="order #42 was cancelled by customer",
+    )
     r = classify_failure(_trace([ok]))
     assert r.failed is False
     assert r.category == "unknown"
@@ -197,15 +204,13 @@ def test_business_cancel_text_not_a_failure() -> None:
 
 def test_existing_categories_unchanged() -> None:
     """Regression guards: prior taxonomy keeps its verdicts."""
-    rl = _span("a1", "gen", kind=SpanKind.LLM,
-               attrs={"http.status_code": 429}, msg="HTTP 429")
+    rl = _span("a1", "gen", kind=SpanKind.LLM, attrs={"http.status_code": 429}, msg="HTTP 429")
     assert classify_failure(_trace([rl])).category == "rate_limit"
     t = _span("a1", "call", kind=SpanKind.TOOL, msg="ETIMEDOUT")
     assert classify_failure(_trace([t])).category == "timeout"
     bare = _span("b1", "tool", kind=SpanKind.TOOL, msg="500 boom")
     assert classify_failure(_trace([bare])).category == "tool_error"
-    ctx = _span("c1", "gen", kind=SpanKind.LLM,
-                msg="context length exceeded")
+    ctx = _span("c1", "gen", kind=SpanKind.LLM, msg="context length exceeded")
     assert classify_failure(_trace([ctx])).category == "llm_error"
 
 
@@ -221,9 +226,13 @@ def test_unrecognized_error_stays_unknown() -> None:
 
 
 def test_hypothesis_carries_all_fields() -> None:
-    s = _span("a1", "llm", kind=SpanKind.LLM,
-              attrs={"http.status_code": 401},
-              events=_exc_event("AuthenticationError"))
+    s = _span(
+        "a1",
+        "llm",
+        kind=SpanKind.LLM,
+        attrs={"http.status_code": 401},
+        events=_exc_event("AuthenticationError"),
+    )
     hyps = build_hypotheses(_trace([s]))
     assert len(hyps) == 1
     h = hyps[0]
@@ -250,9 +259,13 @@ def test_hypothesis_proposed_on_single_weak_signal() -> None:
 def test_hypothesis_competing_signals_and_refutation() -> None:
     """A weak keyword drowned by a strong signal on the same span is
     refuted — with the competing evidence named."""
-    s = _span("a1", "llm", kind=SpanKind.LLM,
-              attrs={"http.status_code": 401},
-              msg="unauthorized (timed out earlier)")
+    s = _span(
+        "a1",
+        "llm",
+        kind=SpanKind.LLM,
+        attrs={"http.status_code": 401},
+        msg="unauthorized (timed out earlier)",
+    )
     hyps = build_hypotheses(_trace([s]))
     auth = next(x for x in hyps if x.label == "auth_error")
     timeout = next(x for x in hyps if x.label == "timeout")
@@ -277,8 +290,7 @@ def test_no_hypotheses_when_healthy() -> None:
 
 
 def test_hypothesis_deterministic_ids_and_cap() -> None:
-    s = _span("a1", "llm", kind=SpanKind.LLM,
-              attrs={"http.status_code": 401, "retry.count": 5})
+    s = _span("a1", "llm", kind=SpanKind.LLM, attrs={"http.status_code": 401, "retry.count": 5})
     a = build_hypotheses(_trace([s]))
     b = build_hypotheses(_trace([s]))
     assert [h.hypothesis_id for h in a] == [h.hypothesis_id for h in b]
@@ -293,10 +305,10 @@ def test_failure_investigator_wraps_hypotheses_capped() -> None:
 
     from forge_lens.ops.agents import run_specialist
 
-    s = _span("a1", "llm", kind=SpanKind.LLM,
-              attrs={"http.status_code": 401})
+    s = _span("a1", "llm", kind=SpanKind.LLM, attrs={"http.status_code": 401})
     run = run_specialist(
-        "failure_investigator", _trace([s]),
+        "failure_investigator",
+        _trace([s]),
         context={"max_hypotheses": 0},
     )
     f = run.findings[0]
@@ -332,42 +344,41 @@ def test_suggest_evaluators_recurring_invalid_args() -> None:
     out = suggest_evaluators(reports)
     kinds = {(s["kind"], s["name"]) for s in out["suggestions"]}
     assert ("evaluator_spec", "allowed_tools") in kinds
-    guard = next(s for s in out["suggestions"]
-                 if s["name"] == "allowed_tools")
+    guard = next(s for s in out["suggestions"] if s["name"] == "allowed_tools")
     assert guard["params"]["allowed"] == ["web_search"]
     ev = guard["evidence"]
     assert ev["recurring"] is True
     assert ev["count"] == 2
-    assert all(s["classification"] == "candidate"
-               for s in out["suggestions"])
+    assert all(s["classification"] == "candidate" for s in out["suggestions"])
 
 
 def test_suggest_evaluators_timeout_and_budget() -> None:
     out = suggest_evaluators([_report(("timeout", "a" * 32))])
-    lat = next(s for s in out["suggestions"]
-               if s["name"] == "latency_budget")
+    lat = next(s for s in out["suggestions"] if s["name"] == "latency_budget")
     assert "max_duration_ms" in lat["params_required"]
     out2 = suggest_evaluators([_report(("budget_exceeded", "a" * 32))])
     assert any(s["name"] == "token_budget" for s in out2["suggestions"])
 
 
 def test_suggest_evaluators_skips_unknown_and_healthy() -> None:
-    out = suggest_evaluators([
-        _report(("unknown", "a" * 32)),
-        FailureReport(trace_id="b" * 32, failed=False),
-    ])
+    out = suggest_evaluators(
+        [
+            _report(("unknown", "a" * 32)),
+            FailureReport(trace_id="b" * 32, failed=False),
+        ]
+    )
     assert out["suggestions"] == []
 
 
 def test_suggest_evaluators_merges_across_categories() -> None:
     """Two categories suggesting the same spec merge their evidence."""
-    out = suggest_evaluators([
-        _report(("auth_error", "a" * 32)),
-        _report(("missing_permissions", "b" * 32)),
-    ])
+    out = suggest_evaluators(
+        [
+            _report(("auth_error", "a" * 32)),
+            _report(("missing_permissions", "b" * 32)),
+        ]
+    )
     ef = [s for s in out["suggestions"] if s["name"] == "error_free"]
     assert len(ef) == 1
-    assert sorted(ef[0]["evidence"]["categories"]) == [
-        "auth_error", "missing_permissions"
-    ]
+    assert sorted(ef[0]["evidence"]["categories"]) == ["auth_error", "missing_permissions"]
     assert ef[0]["evidence"]["recurring"] is True

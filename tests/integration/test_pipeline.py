@@ -114,9 +114,7 @@ def test_event_cap_flags_truncated(tmp_store: SQLiteTraceStore, synthetic_trace:
     from forge_lens.contracts.v1.trace import SpanEvent
 
     big = synthetic_trace.model_copy(deep=True)
-    big.spans[0].events = [
-        SpanEvent(name=f"e{i}", time=datetime.now(UTC)) for i in range(10)
-    ]
+    big.spans[0].events = [SpanEvent(name=f"e{i}", time=datetime.now(UTC)) for i in range(10)]
     _pipeline(tmp_store, max_events_per_span=3).ingest([big])
     stored = tmp_store.get_trace(big.trace_id)
     assert len(stored.spans[0].events) == 3
@@ -179,19 +177,14 @@ def test_max_traces_per_request_bounded(
     p = _pipeline(tmp_store, max_traces_per_request=3)
     empty = synthetic_trace.model_copy(deep=True)
     empty.spans = []
-    batch = [
-        empty.model_copy(update={"trace_id": f"{i:032x}"}, deep=True)
-        for i in range(4)
-    ]
+    batch = [empty.model_copy(update={"trace_id": f"{i:032x}"}, deep=True) for i in range(4)]
     with pytest.raises(PayloadTooLargeError):
         p.ingest(batch)
     stats = tmp_store.stats()
     assert stats["traces"] == 0
 
 
-def test_naive_times_normalized_to_utc(
-    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
-) -> None:
+def test_naive_times_normalized_to_utc(tmp_store: SQLiteTraceStore, synthetic_trace: Trace) -> None:
     """Mixed naive/aware datetimes can't crash flag_integrity — the
     pipeline coerces naive → UTC at the boundary (to_unix_nano parity)."""
     mixed = synthetic_trace.model_copy(deep=True)
@@ -276,9 +269,7 @@ def test_cross_trace_parent_gets_orphan(
     assert any("belongs to trace" in w for w in result.warnings)
 
 
-def test_partial_trace_flags_root_span(
-    tmp_store: SQLiteTraceStore, synthetic_trace: Trace
-) -> None:
+def test_partial_trace_flags_root_span(tmp_store: SQLiteTraceStore, synthetic_trace: Trace) -> None:
     partial = synthetic_trace.model_copy(deep=True)
     partial.ended_at = None
     _pipeline(tmp_store).ingest([partial])
@@ -297,38 +288,56 @@ def test_orphan_cleared_when_parent_lands_in_trace(
 
     p = _pipeline(tmp_store)
     child = Span(
-        trace_id="b" * 32, span_id="9" * 16, parent_span_id="1" * 16,
+        trace_id="b" * 32,
+        span_id="9" * 16,
+        parent_span_id="1" * 16,
         name="child",
         start_time=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
         end_time=datetime(2026, 1, 1, 12, 0, 1, tzinfo=UTC),
     )
     # the "foreign" parent first — under a different trace
     foreign_parent = Span(
-        trace_id="a" * 32, span_id="1" * 16, name="foreign-parent",
+        trace_id="a" * 32,
+        span_id="1" * 16,
+        name="foreign-parent",
         start_time=datetime(2026, 1, 1, 11, 0, tzinfo=UTC),
         end_time=datetime(2026, 1, 1, 11, 0, 1, tzinfo=UTC),
     )
-    p.ingest([
-        Trace(trace_id="a" * 32, project_id="default",
-              started_at=foreign_parent.start_time,
-              ended_at=foreign_parent.end_time, spans=[foreign_parent]),
-        Trace(trace_id="b" * 32, project_id="default",
-              started_at=child.start_time, ended_at=child.end_time,
-              spans=[child]),
-    ])
+    p.ingest(
+        [
+            Trace(
+                trace_id="a" * 32,
+                project_id="default",
+                started_at=foreign_parent.start_time,
+                ended_at=foreign_parent.end_time,
+                spans=[foreign_parent],
+            ),
+            Trace(
+                trace_id="b" * 32,
+                project_id="default",
+                started_at=child.start_time,
+                ended_at=child.end_time,
+                spans=[child],
+            ),
+        ]
+    )
     flags = tmp_store.get_trace("b" * 32).spans[0].integrity_flags
     assert IntegrityFlag.ORPHAN in flags
 
     # now the parent is delivered INTO trace b — orphan resolves
     own_parent = foreign_parent.model_copy(update={"trace_id": "b" * 32})
-    p.ingest([
-        Trace(trace_id="b" * 32, project_id="default",
-              started_at=own_parent.start_time, ended_at=child.end_time,
-              spans=[own_parent, child.model_copy()]),
-    ])
-    flags2 = {
-        s.span_id: s.integrity_flags for s in tmp_store.get_trace("b" * 32).spans
-    }["9" * 16]
+    p.ingest(
+        [
+            Trace(
+                trace_id="b" * 32,
+                project_id="default",
+                started_at=own_parent.start_time,
+                ended_at=child.end_time,
+                spans=[own_parent, child.model_copy()],
+            ),
+        ]
+    )
+    flags2 = {s.span_id: s.integrity_flags for s in tmp_store.get_trace("b" * 32).spans}["9" * 16]
     assert IntegrityFlag.ORPHAN not in flags2
     assert IntegrityFlag.MISSING_PARENT not in flags2
 
@@ -343,22 +352,36 @@ def test_parent_already_in_same_trace_no_false_orphan(
 
     p = _pipeline(tmp_store)
     parent = Span(
-        trace_id="a" * 32, span_id="1" * 16, name="parent",
+        trace_id="a" * 32,
+        span_id="1" * 16,
+        name="parent",
         start_time=datetime(2026, 1, 1, 11, 0, tzinfo=UTC),
         end_time=datetime(2026, 1, 1, 11, 0, 1, tzinfo=UTC),
     )
-    p.ingest([
-        Trace(trace_id="a" * 32, project_id="default",
-              started_at=parent.start_time, ended_at=parent.end_time,
-              spans=[parent]),
-        # trace b already contains its own copy of the parent from an
-        # earlier delivery — but only a root so far
-        Trace(trace_id="b" * 32, project_id="default",
-              started_at=parent.start_time, ended_at=parent.end_time,
-              spans=[parent.model_copy(update={"trace_id": "b" * 32})]),
-    ])
+    p.ingest(
+        [
+            Trace(
+                trace_id="a" * 32,
+                project_id="default",
+                started_at=parent.start_time,
+                ended_at=parent.end_time,
+                spans=[parent],
+            ),
+            # trace b already contains its own copy of the parent from an
+            # earlier delivery — but only a root so far
+            Trace(
+                trace_id="b" * 32,
+                project_id="default",
+                started_at=parent.start_time,
+                ended_at=parent.end_time,
+                spans=[parent.model_copy(update={"trace_id": "b" * 32})],
+            ),
+        ]
+    )
     child = Span(
-        trace_id="b" * 32, span_id="9" * 16, parent_span_id="1" * 16,
+        trace_id="b" * 32,
+        span_id="9" * 16,
+        parent_span_id="1" * 16,
         name="child",
         start_time=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
         end_time=datetime(2026, 1, 1, 12, 0, 1, tzinfo=UTC),
@@ -366,14 +389,18 @@ def test_parent_already_in_same_trace_no_false_orphan(
     # NOTE: child's parent IS in the same trace already — but the
     # incoming trace's own span set doesn't contain it, so the pipeline
     # consults the store; same-trace row must win → no ORPHAN
-    p.ingest([
-        Trace(trace_id="b" * 32, project_id="default",
-              started_at=child.start_time, ended_at=child.end_time,
-              spans=[child]),
-    ])
-    flags = {
-        s.span_id: s.integrity_flags for s in tmp_store.get_trace("b" * 32).spans
-    }["9" * 16]
+    p.ingest(
+        [
+            Trace(
+                trace_id="b" * 32,
+                project_id="default",
+                started_at=child.start_time,
+                ended_at=child.end_time,
+                spans=[child],
+            ),
+        ]
+    )
+    flags = {s.span_id: s.integrity_flags for s in tmp_store.get_trace("b" * 32).spans}["9" * 16]
     assert IntegrityFlag.ORPHAN not in flags
 
 
@@ -386,18 +413,26 @@ def test_llm_span_malformed_usage_gets_unknown_tokens(
     from forge_lens.contracts.v1.trace import Span, SpanKind, Trace
 
     bad_usage = Span(
-        trace_id="c" * 32, span_id="1" * 16, name="gen",
+        trace_id="c" * 32,
+        span_id="1" * 16,
+        name="gen",
         kind=SpanKind.LLM,
         start_time=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
         end_time=datetime(2026, 1, 1, 12, 0, 1, tzinfo=UTC),
         attributes={"forge_lens.token_usage": {"model": 42, "input_tokens": "x"}},
     )
     p = _pipeline(tmp_store)
-    p.ingest([
-        Trace(trace_id="c" * 32, project_id="default",
-              started_at=bad_usage.start_time, ended_at=bad_usage.end_time,
-              spans=[bad_usage]),
-    ])
+    p.ingest(
+        [
+            Trace(
+                trace_id="c" * 32,
+                project_id="default",
+                started_at=bad_usage.start_time,
+                ended_at=bad_usage.end_time,
+                spans=[bad_usage],
+            ),
+        ]
+    )
     stored = tmp_store.get_trace("c" * 32)
     assert IntegrityFlag.UNKNOWN_TOKENS in stored.spans[0].integrity_flags
 

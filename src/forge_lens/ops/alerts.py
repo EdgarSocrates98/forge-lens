@@ -161,9 +161,7 @@ def _r_unpriced_model_count(w: _Window) -> float | None:
     metrics. None without a registry."""
     if w.cost_reports is None:
         return None
-    return float(
-        len({m for r in w.cost_reports for m in r.unpriced_models})
-    )
+    return float(len({m for r in w.cost_reports for m in r.unpriced_models}))
 
 
 def _r_loop_traces(w: _Window) -> float:
@@ -257,9 +255,9 @@ def _build_window(
     by_pid: dict[str | None, list[str]] = {}
     for row in rows:
         rp = row.get("project_id")
-        by_pid.setdefault(
-            rp if isinstance(rp, str) else None, []
-        ).append(str(row.get("trace_id", "")))
+        by_pid.setdefault(rp if isinstance(rp, str) else None, []).append(
+            str(row.get("trace_id", ""))
+        )
     resolved: dict[tuple[str | None, str], Trace | None] = {}
     for rp, tids in by_pid.items():
         for tid, t in store.get_traces(rp, tids).items():
@@ -283,9 +281,7 @@ def _build_window(
             # deleted between list and fetch — skip; never invent it
             continue
         if trace.ended_at is not None:
-            durations.append(
-                (trace.ended_at - trace.started_at).total_seconds() * 1000.0
-            )
+            durations.append((trace.ended_at - trace.started_at).total_seconds() * 1000.0)
         for span in trace.spans:
             usage = extract_usage(span)
             if usage is not None:
@@ -340,8 +336,7 @@ def save_rule(path: Path, rule: dict[str, Any]) -> list[dict[str, Any]]:
     rules.sort(key=lambda r: r["rule_id"])
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(rules, indent=2, sort_keys=True),
-                   encoding="utf-8")
+    tmp.write_text(json.dumps(rules, indent=2, sort_keys=True), encoding="utf-8")
     tmp.replace(path)
     return rules
 
@@ -350,8 +345,7 @@ def delete_rule(path: Path, rule_id: str) -> list[dict[str, Any]]:
     rules = [r for r in load_rules(path) if r["rule_id"] != rule_id]
     if path.exists():
         tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps(rules, indent=2, sort_keys=True),
-                       encoding="utf-8")
+        tmp.write_text(json.dumps(rules, indent=2, sort_keys=True), encoding="utf-8")
         tmp.replace(path)
     return rules
 
@@ -383,12 +377,16 @@ def evaluate_rules(
             or (op == "==" and observed == threshold)
         )
         if hit:
-            fired.append({
-                "rule_id": rule.get("rule_id"),
-                "metric": metric, "op": op,
-                "threshold": threshold, "observed": observed,
-                "severity": rule.get("severity", "warning"),
-                "message": rule.get("message")
-                or f"{metric} {op} {threshold} (observed {observed:.4g})",
-            })
+            fired.append(
+                {
+                    "rule_id": rule.get("rule_id"),
+                    "metric": metric,
+                    "op": op,
+                    "threshold": threshold,
+                    "observed": observed,
+                    "severity": rule.get("severity", "warning"),
+                    "message": rule.get("message")
+                    or f"{metric} {op} {threshold} (observed {observed:.4g})",
+                }
+            )
     return {"fired": fired, "evaluated": len(rules)}

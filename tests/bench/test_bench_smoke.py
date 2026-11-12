@@ -59,9 +59,7 @@ def test_ingest_pipeline_500_traces(tmp_path: Path, bench: BenchReport) -> None:
     """Ingest 500 traces (2 000 spans) via the real pipeline, fresh DB."""
     store = SQLiteTraceStore(tmp_path / "ingest-bench.db")
     pipeline = IngestPipeline(store, LensConfig())
-    traces = [
-        make_bench_trace(i, project_id="ingest-bench") for i in range(INGEST_TRACES)
-    ]
+    traces = [make_bench_trace(i, project_id="ingest-bench") for i in range(INGEST_TRACES)]
 
     t0 = time.perf_counter()
     result = pipeline.ingest(traces)

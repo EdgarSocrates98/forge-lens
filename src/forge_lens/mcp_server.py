@@ -48,8 +48,7 @@ def _reject_constant(value: str) -> NoReturn:
     raise ValueError(f"non-JSON literal {value}")
 
 
-def _num(args: dict[str, Any], name: str,
-         *, integer: bool = False) -> int | float | None:
+def _num(args: dict[str, Any], name: str, *, integer: bool = False) -> int | float | None:
     """Optional numeric arg — bools, non-numerics and non-finite floats
     raise the authored TypeError that maps to -32602 invalid params.
 
@@ -93,6 +92,7 @@ def _num(args: dict[str, Any], name: str,
         return int(v)
     return v
 
+
 _TRACE_INPUT = {
     "type": "object",
     "required": ["trace_id"],
@@ -105,61 +105,91 @@ _TRACE_INPUT = {
 
 def _tools() -> list[dict[str, Any]]:
     return [
-        {"name": "lens.capabilities",
-         "description": "Host adapter capability matrix — honest "
-                        "coverage claims.",
-         "inputSchema": {"type": "object", "properties": {}}},
-        {"name": "lens.cost",
-         "description": "Derived cost report for one trace "
-                        "(registry-priced; includes waste findings).",
-         "inputSchema": _TRACE_INPUT},
-        {"name": "lens.detect_loops",
-         "description": "Heuristic loop/no-progress findings with "
-                        "span evidence.",
-         "inputSchema": _TRACE_INPUT},
-        {"name": "lens.failure",
-         "description": "Deterministic failure classification with "
-                        "span evidence.",
-         "inputSchema": _TRACE_INPUT},
-        {"name": "lens.get_trace",
-         "description": "Fetch one trace by id.",
-         "inputSchema": _TRACE_INPUT},
-        {"name": "lens.list_datasets",
-         "description": "List eval datasets in the store.",
-         "inputSchema": {"type": "object", "properties": {
-             "project_id": {"type": "string"}}}},
-        {"name": "lens.list_traces",
-         "description": "List recent traces (bounded, sorted).",
-         "inputSchema": {"type": "object", "properties": {
-             "limit": {"type": "integer", "default": 20},
-             "project_id": {"type": "string"}}}},
-        {"name": "lens.sessions",
-         "description": "Session roll-up — one row per session_id, "
-                        "newest activity first (matches /v1/sessions).",
-         "inputSchema": {"type": "object", "properties": {
-             "limit": {"type": "integer", "default": 100},
-             "offset": {"type": "integer", "default": 0},
-             "project_id": {"type": "string"}}}},
-        {"name": "lens.stats",
-         "description": "Store statistics snapshot.",
-         "inputSchema": {"type": "object", "properties": {
-             "project_id": {"type": "string"}}}},
-        {"name": "lens.tools",
-         "description": "Fleet-wide tool roll-up — calls/traces/errors/"
-                        "avg duration per tool.name (matches /v1/tools).",
-         "inputSchema": {"type": "object", "properties": {
-             "limit": {"type": "integer", "default": 100},
-             "offset": {"type": "integer", "default": 0},
-             "project_id": {"type": "string"}}}},
-        {"name": "lens.trace_efficiency",
-         "description": "Per-trace efficiency roll-up "
-                        "(tokens/tools/retries).",
-         "inputSchema": _TRACE_INPUT},
-        {"name": "lens.correlate",
-         "description": "Temporal co-occurrence signals within a trace "
-                        "(retries→errors, model switches, context growth). "
-                        "Descriptive associations, never causal claims.",
-         "inputSchema": _TRACE_INPUT},
+        {
+            "name": "lens.capabilities",
+            "description": "Host adapter capability matrix — honest coverage claims.",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "lens.cost",
+            "description": "Derived cost report for one trace "
+            "(registry-priced; includes waste findings).",
+            "inputSchema": _TRACE_INPUT,
+        },
+        {
+            "name": "lens.detect_loops",
+            "description": "Heuristic loop/no-progress findings with span evidence.",
+            "inputSchema": _TRACE_INPUT,
+        },
+        {
+            "name": "lens.failure",
+            "description": "Deterministic failure classification with span evidence.",
+            "inputSchema": _TRACE_INPUT,
+        },
+        {
+            "name": "lens.get_trace",
+            "description": "Fetch one trace by id.",
+            "inputSchema": _TRACE_INPUT,
+        },
+        {
+            "name": "lens.list_datasets",
+            "description": "List eval datasets in the store.",
+            "inputSchema": {"type": "object", "properties": {"project_id": {"type": "string"}}},
+        },
+        {
+            "name": "lens.list_traces",
+            "description": "List recent traces (bounded, sorted).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 20},
+                    "project_id": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "lens.sessions",
+            "description": "Session roll-up — one row per session_id, "
+            "newest activity first (matches /v1/sessions).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 100},
+                    "offset": {"type": "integer", "default": 0},
+                    "project_id": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "lens.stats",
+            "description": "Store statistics snapshot.",
+            "inputSchema": {"type": "object", "properties": {"project_id": {"type": "string"}}},
+        },
+        {
+            "name": "lens.tools",
+            "description": "Fleet-wide tool roll-up — calls/traces/errors/"
+            "avg duration per tool.name (matches /v1/tools).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 100},
+                    "offset": {"type": "integer", "default": 0},
+                    "project_id": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "lens.trace_efficiency",
+            "description": "Per-trace efficiency roll-up (tokens/tools/retries).",
+            "inputSchema": _TRACE_INPUT,
+        },
+        {
+            "name": "lens.correlate",
+            "description": "Temporal co-occurrence signals within a trace "
+            "(retries→errors, model switches, context growth). "
+            "Descriptive associations, never causal claims.",
+            "inputSchema": _TRACE_INPUT,
+        },
     ]
 
 
@@ -207,11 +237,7 @@ def serve(db_path: str) -> int:
 
     try:
         pricing_file = load_config().pricing_file
-        pricing = (
-            PricingRegistry.from_file(pricing_file)
-            if pricing_file
-            else PricingRegistry()
-        )
+        pricing = PricingRegistry.from_file(pricing_file) if pricing_file else PricingRegistry()
     except Exception as exc:
         print(f"cannot load pricing registry: {exc}", file=sys.stderr)
         return 2
@@ -225,9 +251,7 @@ def serve(db_path: str) -> int:
             pid = _pid(args)
             raw_lim = _num(args, "limit", integer=True)
             limit = 20 if raw_lim is None else int(raw_lim)
-            return {"traces": store.list_traces(
-                project_id=pid,
-                limit=min(500, max(0, limit)))}
+            return {"traces": store.list_traces(project_id=pid, limit=min(500, max(0, limit)))}
         if name == "lens.get_trace":
             tid, pid = _tid_pid(args)
             t = store.get_trace(tid, project_id=pid)
@@ -264,10 +288,7 @@ def serve(db_path: str) -> int:
             # same shape as GET /v1/traces/{id}/cost
             out = trace_cost(trace, pricing).model_dump(mode="json")
             out["pricing_source"] = pricing.source
-            out["waste"] = [
-                w.model_dump(mode="json")
-                for w in detect_waste(trace, pricing)
-            ]
+            out["waste"] = [w.model_dump(mode="json") for w in detect_waste(trace, pricing)]
             return out
         if name == "lens.failure":
             from forge_lens.investigate import classify_failure
@@ -278,6 +299,7 @@ def serve(db_path: str) -> int:
             return classify_failure(trace).model_dump(mode="json")
         if name == "lens.list_datasets":
             return {"datasets": store.list_datasets(_pid(args))}
+
         def _page_args(default_limit: int) -> tuple[int, int]:
             """Bounded limit/offset shared by the roll-up tools."""
             lim_raw = _num(args, "limit", integer=True)
@@ -292,12 +314,10 @@ def serve(db_path: str) -> int:
 
         if name == "lens.sessions":
             lim, off = _page_args(100)
-            return {"sessions": store.list_sessions(
-                _pid(args), limit=lim, offset=off)}
+            return {"sessions": store.list_sessions(_pid(args), limit=lim, offset=off)}
         if name == "lens.tools":
             lim, off = _page_args(100)
-            return {"tools": store.list_tools(
-                _pid(args), limit=lim, offset=off)}
+            return {"tools": store.list_tools(_pid(args), limit=lim, offset=off)}
         if name == "lens.capabilities":
             from forge_lens.adapters.capabilities import capability_matrix
 
@@ -305,8 +325,7 @@ def serve(db_path: str) -> int:
         return {"error": f"unknown tool {name!r}"}
 
     def _err(rid: Any, code: int, message: str) -> None:
-        out = {"jsonrpc": "2.0", "id": rid,
-               "error": {"code": code, "message": message}}
+        out = {"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": message}}
         print(json.dumps(out), flush=True)
 
     initialized = False
@@ -377,23 +396,18 @@ def serve(db_path: str) -> int:
                 _err(rid, -32600, "already initialized")
                 continue
             params = req.get("params")
-            requested = (
-                params.get("protocolVersion")
-                if isinstance(params, dict) else None
-            )
+            requested = params.get("protocolVersion") if isinstance(params, dict) else None
             result = {
                 "protocolVersion": (
                     requested
                     # A non-string version can't be supported — and an
                     # unhashable one (object/array) would TypeError the
                     # `in` probe and kill the loop.
-                    if isinstance(requested, str)
-                    and requested in _SUPPORTED_PROTOCOLS
+                    if isinstance(requested, str) and requested in _SUPPORTED_PROTOCOLS
                     else _PROTOCOL_VERSION
                 ),
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "forge-lens",
-                               "version": __version__},
+                "serverInfo": {"name": "forge-lens", "version": __version__},
             }
             # Mark ready only after the negotiation result exists — an
             # exception mid-handshake must not leave the loop half-open.
@@ -421,8 +435,7 @@ def serve(db_path: str) -> int:
                 continue
             try:
                 payload = _call(tname, args)
-                content: list[dict[str, str]] = [{
-                    "type": "text", "text": json.dumps(payload)}]
+                content: list[dict[str, str]] = [{"type": "text", "text": json.dumps(payload)}]
                 # Tool-level failure is a successful call carrying
                 # isError content — contract: any payload with a
                 # top-level "error" key is flagged isError here.
@@ -441,14 +454,12 @@ def serve(db_path: str) -> int:
                 # wire message is opaque — exception text can embed
                 # payload fragments or paths, so only the type name
                 # crosses the boundary.
-                _err(rid, -32603,
-                     f"internal tool error: {type(exc).__name__}")
+                _err(rid, -32603, f"internal tool error: {type(exc).__name__}")
                 continue
         else:
             _err(rid, -32601, f"unknown {method!r}")
             continue
-        print(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}),
-              flush=True)
+        print(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}), flush=True)
     return 0
 
 

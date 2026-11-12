@@ -26,34 +26,40 @@ def compare_cohorts(
     a = fleet_efficiency(base)
     b = fleet_efficiency(candidate)
     metrics = (
-        "success_rate", "tokens_per_trace", "tokens_per_success",
-        "tool_calls_per_trace", "tool_calls_per_success",
-        "retry_overhead", "error_rate",
+        "success_rate",
+        "tokens_per_trace",
+        "tokens_per_success",
+        "tool_calls_per_trace",
+        "tool_calls_per_success",
+        "retry_overhead",
+        "error_rate",
     )
     deltas: dict[str, Any] = {}
     for m in metrics:
         va, vb = a.get(m), b.get(m)
         if va is None or vb is None:
-            deltas[m] = {"base": va, "candidate": vb,
-                         "delta": None, "reason": "signal absent"}
+            deltas[m] = {"base": va, "candidate": vb, "delta": None, "reason": "signal absent"}
         else:
             deltas[m] = {
-                "base": va, "candidate": vb,
+                "base": va,
+                "candidate": vb,
                 "delta": vb - va,
                 "pct": ((vb - va) / abs(va) * 100) if va else None,
             }
     return {
         "label": label,
-        "base_traces": a["traces"], "candidate_traces": b["traces"],
+        "base_traces": a["traces"],
+        "candidate_traces": b["traces"],
         "deltas": deltas,
         "classification": "observed_difference",
         "note": "deltas are observed, not significance-tested — use"
-                " /v1/eval/compare for the statistical verdict",
+        " /v1/eval/compare for the statistical verdict",
     }
 
 
 def per_trace_regressions(
-    base: list[Trace], candidate: list[Trace],
+    base: list[Trace],
+    candidate: list[Trace],
 ) -> dict[str, Any]:
     """Per-trace diff of efficiency rows (sorted, evidence-first)."""
     a = sorted((trace_efficiency(t) for t in base), key=lambda r: r["trace_id"])

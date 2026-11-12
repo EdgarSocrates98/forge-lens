@@ -79,11 +79,7 @@ def _drive(
         rc = serve(str(db))
     finally:
         sys.stdin = old
-    out = [
-        json.loads(line)
-        for line in capsys.readouterr().out.splitlines()
-        if line
-    ]
+    out = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
     return rc, out
 
 
@@ -103,9 +99,7 @@ def test_initialize_handshake_and_capabilities(
     assert "tools" in result["capabilities"]
 
 
-def test_initialize_version_negotiation(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_initialize_version_negotiation(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Supported version is echoed; anything else gets the server's.
     One session per case — initialize is a once-per-connection
     handshake (repeats are -32600, see test_second_initialize_*)."""
@@ -115,9 +109,7 @@ def test_initialize_version_negotiation(
         None,  # missing params tolerated — still a valid result
     ]
     for params in cases:
-        rc, out = _drive(
-            db, [_req("initialize", 1, params=params)], capsys
-        )
+        rc, out = _drive(db, [_req("initialize", 1, params=params)], capsys)
         assert rc == 0
         assert out[0]["result"]["protocolVersion"] == "2024-11-05"
 
@@ -143,9 +135,7 @@ def test_initialize_nonstring_protocol_version_never_crashes(
         assert out[1]["result"] == {}, ver
 
 
-def test_second_initialize_rejected(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_second_initialize_rejected(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """The handshake is once-per-connection — a repeated ``initialize``
     is an invalid request (-32600), not a renegotiation, and the loop
     keeps serving afterward."""
@@ -153,8 +143,7 @@ def test_second_initialize_rejected(
         db,
         [
             _INIT,
-            _req("initialize", 9,
-                 params={"protocolVersion": "2024-11-05"}),
+            _req("initialize", 9, params={"protocolVersion": "2024-11-05"}),
             _req("ping", 10),
         ],
         capsys,
@@ -166,9 +155,7 @@ def test_second_initialize_rejected(
     assert out[2]["result"] == {}
 
 
-def test_oversize_frame_bounded_and_recovered(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_oversize_frame_bounded_and_recovered(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """A frame past _MAX_LINE_CHARS is a parse error, its remainder is
     drained (not re-parsed as bogus frames), and the loop continues."""
     rc, out = _drive(
@@ -189,18 +176,14 @@ def test_oversize_frame_bounded_and_recovered(
     assert out[2]["result"] == {}
 
 
-def test_ping_pre_and_post_init(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_ping_pre_and_post_init(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     rc, out = _drive(db, [_req("ping", 1), _INIT, _req("ping", 2)], capsys)
     assert rc == 0
     assert out[0] == {"jsonrpc": "2.0", "id": 1, "result": {}}
     assert out[2] == {"jsonrpc": "2.0", "id": 2, "result": {}}
 
 
-def test_pre_init_requests_rejected(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_pre_init_requests_rejected(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     rc, out = _drive(
         db,
         [
@@ -219,9 +202,7 @@ def test_pre_init_requests_rejected(
     assert "tools" in out[4]["result"]
 
 
-def test_notifications_never_get_responses(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_notifications_never_get_responses(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Frames without ``id`` are notifications — zero response lines,
     including a request-shaped frame missing its id."""
     rc, out = _drive(
@@ -239,9 +220,7 @@ def test_notifications_never_get_responses(
     assert out == [{"jsonrpc": "2.0", "id": 5, "result": {}}]
 
 
-def test_parse_error_is_minus_32700(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_parse_error_is_minus_32700(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Malformed JSON → -32700 with null id; the loop keeps serving.
     NaN/Infinity literals are not JSON — strict parse rejects them too,
     and hostile nesting depth can't overflow the loop."""
@@ -264,9 +243,7 @@ def test_parse_error_is_minus_32700(
     assert out[5] == {"jsonrpc": "2.0", "id": 7, "result": {}}
 
 
-def test_invalid_request_is_minus_32600(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_invalid_request_is_minus_32600(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Valid JSON that is not a Request object → -32600. A frame with an
     id but no method string is an invalid request, not an unknown one."""
     rc, out = _drive(
@@ -290,13 +267,10 @@ def test_invalid_request_is_minus_32600(
     assert out[5]["result"] == {}
 
 
-def test_unknown_method_is_minus_32601(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_unknown_method_is_minus_32601(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     rc, out = _drive(
         db,
-        [_INIT, _req("resources/list", 1), _req("prompts/get", 2),
-         _req("ping", 3)],
+        [_INIT, _req("resources/list", 1), _req("prompts/get", 2), _req("ping", 3)],
         capsys,
     )
     assert rc == 0
@@ -306,9 +280,7 @@ def test_unknown_method_is_minus_32601(
     assert out[3]["result"] == {}  # loop survived
 
 
-def test_tools_call_param_shape(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_tools_call_param_shape(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """CallToolParams contract: ``params`` object, ``name`` required
     string, ``arguments`` optional object. Every non-dict arguments
     value — truthy or falsy — is uniformly -32602."""
@@ -320,14 +292,10 @@ def test_tools_call_param_shape(
             _req("tools/call", 2, params=["lens.stats"]),
             _req("tools/call", 3, params={}),  # missing name
             _req("tools/call", 4, params={"name": 7}),
-            _req("tools/call", 5, params={"name": "lens.stats",
-                                          "arguments": "nope"}),
-            _req("tools/call", 6, params={"name": "lens.stats",
-                                          "arguments": []}),
-            _req("tools/call", 7, params={"name": "lens.stats",
-                                          "arguments": False}),
-            _req("tools/call", 8, params={"name": "lens.stats",
-                                          "arguments": None}),
+            _req("tools/call", 5, params={"name": "lens.stats", "arguments": "nope"}),
+            _req("tools/call", 6, params={"name": "lens.stats", "arguments": []}),
+            _req("tools/call", 7, params={"name": "lens.stats", "arguments": False}),
+            _req("tools/call", 8, params={"name": "lens.stats", "arguments": None}),
             _req("tools/call", 9, params={"name": "lens.stats"}),
         ],
         capsys,
@@ -352,8 +320,7 @@ def test_unknown_tool_is_iserror_not_protocol_fault(
         db,
         [
             _INIT,
-            _req("tools/call", 1, params={"name": "lens.nope",
-                                          "arguments": {}}),
+            _req("tools/call", 1, params={"name": "lens.nope", "arguments": {}}),
             _req("tools/call", 2, params={"name": None}),
             _req("ping", 3),
         ],
@@ -367,9 +334,7 @@ def test_unknown_tool_is_iserror_not_protocol_fault(
     assert out[3]["result"] == {}
 
 
-def test_eof_disconnect_exits_cleanly(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_eof_disconnect_exits_cleanly(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Empty stdin → immediate 0; mid-session EOF → 0 after replies."""
     rc, out = _drive(db, [], capsys)
     assert rc == 0
@@ -380,9 +345,7 @@ def test_eof_disconnect_exits_cleanly(
     assert len(out) == 2
 
 
-def test_final_frame_without_trailing_newline(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_final_frame_without_trailing_newline(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """A client that closes without a trailing newline still gets the
     last frame served before EOF."""
     old = sys.stdin
@@ -391,18 +354,12 @@ def test_final_frame_without_trailing_newline(
         rc = serve(str(db))
     finally:
         sys.stdin = old
-    out = [
-        json.loads(line)
-        for line in capsys.readouterr().out.splitlines()
-        if line
-    ]
+    out = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
     assert rc == 0
     assert out == [{"jsonrpc": "2.0", "id": 1, "result": {}}]
 
 
-def test_stdin_reconfigured_to_utf8(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_stdin_reconfigured_to_utf8(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Windows pipes decode text-mode stdio with the ANSI codepage
     (cp1252), not UTF-8 — conforming MCP frames with non-ASCII ids
     mojibake, and undefined codepage bytes (e.g. UTF-8 ``Ё`` = D0 81)
@@ -410,11 +367,14 @@ def test_stdin_reconfigured_to_utf8(
     server. ``serve`` reconfigures real stdio to UTF-8/replace:
     conforming frames decode and undecodable input degrades to
     -32700 instead of a crash."""
-    call = json.dumps({
-        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": {"name": "lens.detect_loops",
-                   "arguments": {"trace_id": "трейс-Ёлки"}},
-    })
+    call = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "lens.detect_loops", "arguments": {"trace_id": "трейс-Ёлки"}},
+        }
+    )
     # D0 81 ('Ё') and the raw \xff\xfe line are both fatal under
     # cp1252; under UTF-8 the first is text, the second is garbage.
     payload = (
@@ -433,26 +393,21 @@ def test_stdin_reconfigured_to_utf8(
     assert rc == 0
     assert wrapper.encoding == "utf-8"
     assert wrapper.errors == "replace"
-    out = [
-        json.loads(line)
-        for line in capsys.readouterr().out.splitlines()
-        if line
-    ]
+    out = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
     assert len(out) == 4
     assert out[0]["id"] == 0  # initialize reply
     tool_result = json.loads(out[1]["result"]["content"][0]["text"])
     assert tool_result["trace_id"] == "трейс-Ёлки"  # not mojibake
     assert out[1]["result"]["isError"] is True
     assert out[2] == {
-        "jsonrpc": "2.0", "id": None,
+        "jsonrpc": "2.0",
+        "id": None,
         "error": {"code": -32700, "message": "parse error"},
     }
     assert out[3] == {"jsonrpc": "2.0", "id": 4, "result": {}}
 
 
-def test_missing_store_fails_fast(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_missing_store_fails_fast(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """A db path that cannot be opened readonly → exit 2 + stderr,
     before any frame is served."""
     rc = serve(str(tmp_path / "does-not-exist.db"))
@@ -468,22 +423,24 @@ def test_notification_method_with_id_is_invalid_request(
     -32600, not silently swallowed."""
     rc, out = _drive(
         db,
-        [_INIT, _req("notifications/initialized", 42),
-         json.dumps({"method": "notifications/initialized"})],
+        [
+            _INIT,
+            _req("notifications/initialized", 42),
+            json.dumps({"method": "notifications/initialized"}),
+        ],
         capsys,
     )
     assert rc == 0
     # init reply + the -32600; the id-less notification got none
     assert len(out) == 2
     assert out[1] == {
-        "jsonrpc": "2.0", "id": 42,
+        "jsonrpc": "2.0",
+        "id": 42,
         "error": {"code": -32600, "message": "invalid request"},
     }
 
 
-def test_string_ids_and_zero_id_echoed(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_string_ids_and_zero_id_echoed(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """JSON-RPC ids echo verbatim — including falsy-but-valid id 0."""
     rc, out = _drive(
         db,
@@ -551,8 +508,7 @@ def test_tool_surface_has_no_write_or_path_args(
         assert tool["name"].startswith("lens.")
         assert not any(
             v in tool["name"]
-            for v in ("create", "delete", "update", "write", "exec",
-                      "import", "run", "put")
+            for v in ("create", "delete", "update", "write", "exec", "import", "run", "put")
         )
         props = tool["inputSchema"].get("properties", {})
         assert set(props) <= allowed_params, tool["name"]
@@ -578,10 +534,8 @@ def test_project_id_scoping_and_injection_strings(
             _INIT,
             _call(1, "lens.list_traces", {"project_id": "other"}),
             _call(2, "lens.list_traces", {}),
-            _call(3, "lens.get_trace",
-                  {"trace_id": tid, "project_id": "other"}),
-            _call(4, "lens.list_traces",
-                  {"project_id": "x' OR '1'='1"}),
+            _call(3, "lens.get_trace", {"trace_id": tid, "project_id": "other"}),
+            _call(4, "lens.list_traces", {"project_id": "x' OR '1'='1"}),
             _call(5, "lens.list_traces", {"project_id": "%"}),
         ],
         capsys,
@@ -595,9 +549,7 @@ def test_project_id_scoping_and_injection_strings(
     assert "result" in out[5]
 
 
-def test_argument_bounds_enforced(
-    db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_argument_bounds_enforced(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """limit clamps to [0, 500]; offset must fit int64; non-finite
     floats and bools are invalid params, never internal faults."""
     rc, out = _drive(
@@ -608,10 +560,8 @@ def test_argument_bounds_enforced(
             '{"jsonrpc": "2.0", "id": 1, "method": "tools/call",'
             ' "params": {"name": "lens.list_traces",'
             ' "arguments": {"limit": 1e999}}}',
-            _call(2, "lens.sessions",
-                  {"offset": 9223372036854775808}),  # 2**63
-            _call(3, "lens.sessions",
-                  {"offset": 9223372036854775807}),  # int64 max: valid
+            _call(2, "lens.sessions", {"offset": 9223372036854775808}),  # 2**63
+            _call(3, "lens.sessions", {"offset": 9223372036854775807}),  # int64 max: valid
             _call(4, "lens.list_traces", {"limit": 10**9}),  # clamped
             _call(5, "lens.sessions", {"offset": -5}),  # clamped to 0
             _call(6, "lens.tools", {"limit": True}),  # bool rejected

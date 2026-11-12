@@ -35,16 +35,15 @@ def analyze_graph(graph: ExecutionGraph) -> dict[str, Any]:
             if src is not None and tgt is not None and src.error:
                 propagated.append(tgt.id)
     # repeated subgraphs: identical (kind,name) node signatures
-    sig: Counter[tuple[str, str]] = Counter(
-        (nd.kind, nd.name) for nd in graph.nodes
-    )
+    sig: Counter[tuple[str, str]] = Counter((nd.kind, nd.name) for nd in graph.nodes)
     repeated = [
         {"kind": k[0], "name": k[1], "count": c}
         for k, c in sorted(sig.items(), key=lambda kv: (-kv[1], kv[0]))
         if c >= 3
     ]
     return {
-        "nodes": len(graph.nodes), "edges": len(graph.edges),
+        "nodes": len(graph.nodes),
+        "edges": len(graph.edges),
         "edge_kinds": dict(sorted(edge_kinds.items())),
         "max_out_degree": {"node": hub_out[0], "degree": hub_out[1]},
         "max_in_degree": {"node": hub_in[0], "degree": hub_in[1]},

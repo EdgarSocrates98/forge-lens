@@ -103,9 +103,7 @@ VALUE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"xox[baprs]-[A-Za-z0-9\-]{10,}"), "[REDACTED:slack-token]"),
     (re.compile(r"xapp-[A-Za-z0-9\-]{10,}"), "[REDACTED:slack-token]"),
     (
-        re.compile(
-            r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S
-        ),
+        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S),
         "[REDACTED:pem]",
     ),
     (re.compile(r"(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*"), "Bearer [REDACTED]"),
@@ -132,9 +130,7 @@ VALUE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # backtracking. `host:8080` (no `@`) and `scheme://host` are
     # untouched; a username-only `u@host` survives (not a credential).
     (
-        re.compile(
-            r"(?i)\b([a-z][a-z0-9+.\-]*://)[^\s/?#'\":@]+:[^\s/?#'\"]*@"
-        ),
+        re.compile(r"(?i)\b([a-z][a-z0-9+.\-]*://)[^\s/?#'\":@]+:[^\s/?#'\"]*@"),
         r"\1[REDACTED:userinfo]@",
     ),
     # `key=value` / `key: value` credential forms embedded in free text
@@ -193,9 +189,7 @@ def _redact_string(value: str, report: SanitizeReport) -> str:
     return out
 
 
-def _scrub_text(
-    value: str, report: SanitizeReport, *, mask_emails: bool
-) -> str:
+def _scrub_text(value: str, report: SanitizeReport, *, mask_emails: bool) -> str:
     """Value-pattern scrub for free-text contract fields.
 
     ``status.message`` routinely carries exception text with embedded
@@ -228,7 +222,7 @@ def _sanitize_value(
             report.emails_masked += n
         if len(value) > max_chars:
             report.truncated_values += 1
-            value = value[: max_chars] + TRUNCATION_MARKER
+            value = value[:max_chars] + TRUNCATION_MARKER
         return value
     if isinstance(value, dict):
         out: dict[str, Any] = {}
@@ -241,15 +235,23 @@ def _sanitize_value(
                 out[k] = "[REDACTED:key]"
             else:
                 out[k] = _sanitize_value(
-                    v, report, capture=capture, max_chars=max_chars,
-                    mask_emails=mask_emails, depth=depth + 1,
+                    v,
+                    report,
+                    capture=capture,
+                    max_chars=max_chars,
+                    mask_emails=mask_emails,
+                    depth=depth + 1,
                 )
         return out
     if isinstance(value, list):
         items = [
             _sanitize_value(
-                v, report, capture=capture, max_chars=max_chars,
-                mask_emails=mask_emails, depth=depth + 1,
+                v,
+                report,
+                capture=capture,
+                max_chars=max_chars,
+                mask_emails=mask_emails,
+                depth=depth + 1,
             )
             for v in value[:MAX_LIST_ITEMS]
         ]
@@ -285,7 +287,10 @@ def sanitize_attributes(
             out[key] = {DROPPED_MARKER: True, "_approx_bytes": approx}
             continue
         out[key] = _sanitize_value(
-            value, report, capture=capture, max_chars=max_chars,
+            value,
+            report,
+            capture=capture,
+            max_chars=max_chars,
             mask_emails=(capture == CaptureLevel.METADATA),
         )
     return out
@@ -314,9 +319,7 @@ def sanitize_trace(
         )
         span.name = _scrub_text(span.name, report, mask_emails=mask)
         if span.status.message is not None:
-            span.status.message = _scrub_text(
-                span.status.message, report, mask_emails=mask
-            )
+            span.status.message = _scrub_text(span.status.message, report, mask_emails=mask)
         for event in span.events:
             event.attributes = sanitize_attributes(
                 event.attributes, report, capture=capture, max_chars=max_chars
@@ -330,13 +333,9 @@ def sanitize_trace(
         trace.resource_attributes, report, capture=capture, max_chars=max_chars
     )
     if trace.status.message is not None:
-        trace.status.message = _scrub_text(
-            trace.status.message, report, mask_emails=mask
-        )
+        trace.status.message = _scrub_text(trace.status.message, report, mask_emails=mask)
     if trace.session_id is not None:
-        trace.session_id = _scrub_text(
-            trace.session_id, report, mask_emails=False
-        )
+        trace.session_id = _scrub_text(trace.session_id, report, mask_emails=False)
     # project_id is a join key (like session_id): credential patterns
     # apply, e-mail masking does not — masking would silently repartition
     trace.project_id = _scrub_text(trace.project_id, report, mask_emails=False)
@@ -407,9 +406,7 @@ def redact_export(
         return out
     if isinstance(obj, (list, tuple)):
         return [
-            redact_export(
-                v, rep, depth=depth + 1, mask_emails=mask_emails
-            )
+            redact_export(v, rep, depth=depth + 1, mask_emails=mask_emails)
             for v in obj[:MAX_LIST_ITEMS]
         ]
     return obj

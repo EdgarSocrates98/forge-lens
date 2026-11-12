@@ -54,9 +54,7 @@ def _trace(
     )
 
 
-def _run(
-    trace: Trace, name: str, params: Any = None
-) -> EvaluationResult:
+def _run(trace: Trace, name: str, params: Any = None) -> EvaluationResult:
     # same spec path the API exercises — params normalized to {} when absent
     return run_evaluators(trace, [{"name": name, "params": params}])[0]
 
@@ -65,12 +63,9 @@ def _tools_trace() -> Trace:
     return _trace(
         [
             _span("a1", "agent", kind=SpanKind.AGENT),
-            _span("c1", "call", kind=SpanKind.TOOL,
-                  attrs={"tool.name": "web_search"}),
-            _span("c2", "call", kind=SpanKind.TOOL,
-                  attrs={"tool.name": "web_search"}),
-            _span("c3", "call", kind=SpanKind.TOOL,
-                  attrs={"tool.name": "db_query"}),
+            _span("c1", "call", kind=SpanKind.TOOL, attrs={"tool.name": "web_search"}),
+            _span("c2", "call", kind=SpanKind.TOOL, attrs={"tool.name": "web_search"}),
+            _span("c3", "call", kind=SpanKind.TOOL, attrs={"tool.name": "db_query"}),
             _span("c4", "manual_call", kind=SpanKind.TOOL),  # no tool.name
         ]
     )
@@ -108,12 +103,17 @@ _ORDER_SCHEMA = {
 
 
 def test_schema_validation_passes_on_structured_attr() -> None:
-    t = _trace([
-        _span("a1", "llm", kind=SpanKind.LLM,
-              attrs={"out": {"name": "n1", "tags": ["x", "y"], "count": 2}}),
-    ])
-    res = _run(t, "schema_validation",
-               {"field": "out", "schema": _ORDER_SCHEMA})
+    t = _trace(
+        [
+            _span(
+                "a1",
+                "llm",
+                kind=SpanKind.LLM,
+                attrs={"out": {"name": "n1", "tags": ["x", "y"], "count": 2}},
+            ),
+        ]
+    )
+    res = _run(t, "schema_validation", {"field": "out", "schema": _ORDER_SCHEMA})
     assert res.score == 1.0
     assert res.metric == "field_schema_valid"
     assert res.details["violation_count"] == "0"
@@ -123,9 +123,7 @@ def test_schema_validation_passes_on_structured_attr() -> None:
 
 
 def test_schema_validation_parses_json_string_output() -> None:
-    t = _trace([
-        _span("a1", "llm", attrs={"output.value": '{"name": "n1", "tags": []}'})
-    ])
+    t = _trace([_span("a1", "llm", attrs={"output.value": '{"name": "n1", "tags": []}'})])
     res = _run(t, "schema_validation", {"schema": _ORDER_SCHEMA})
     assert res.score == 1.0
     assert res.details["decoded"] == "json"
@@ -136,20 +134,19 @@ def test_schema_validation_scalar_string_stays_string() -> None:
     """``"42"`` observed as a string is a string — never silently
     re-typed to a number by the JSON-parse convenience path."""
     t = _trace([_span("a1", "llm", attrs={"output.value": "42"})])
-    assert _run(t, "schema_validation",
-                {"schema": {"type": "string"}}).score == 1.0
+    assert _run(t, "schema_validation", {"schema": {"type": "string"}}).score == 1.0
     res = _run(t, "schema_validation", {"schema": {"type": "number"}})
     assert res.score == 0.0
     assert "expected number, got string" in res.details["violations"]
 
 
 def test_schema_validation_reports_violation_paths() -> None:
-    t = _trace([
-        _span("a1", "llm",
-              attrs={"out": {"tags": ["x", 3], "count": 2.5}}),
-    ])
-    res = _run(t, "schema_validation",
-               {"field": "out", "schema": _ORDER_SCHEMA})
+    t = _trace(
+        [
+            _span("a1", "llm", attrs={"out": {"tags": ["x", 3], "count": 2.5}}),
+        ]
+    )
+    res = _run(t, "schema_validation", {"field": "out", "schema": _ORDER_SCHEMA})
     assert res.score == 0.0
     v = res.details["violations"]
     assert "required key 'name' absent" in v
@@ -162,11 +159,9 @@ def test_schema_validation_json_schema_integer_semantics() -> None:
     """An integral float (2.0) is an integer under JSON Schema; a bool
     is not a number."""
     t = _trace([_span("a1", "x", attrs={"v": 2.0})])
-    assert _run(t, "schema_validation",
-                {"field": "v", "schema": {"type": "integer"}}).score == 1.0
+    assert _run(t, "schema_validation", {"field": "v", "schema": {"type": "integer"}}).score == 1.0
     tb = _trace([_span("a1", "x", attrs={"v": True})])
-    res = _run(tb, "schema_validation",
-               {"field": "v", "schema": {"type": "number"}})
+    res = _run(tb, "schema_validation", {"field": "v", "schema": {"type": "number"}})
     assert res.score == 0.0
     assert "expected number, got boolean" in res.details["violations"]
 
@@ -181,15 +176,15 @@ def test_schema_validation_unobserved_field_is_none() -> None:
 def test_schema_validation_malformed_schema_is_evaluator_error() -> None:
     t = _trace([_span("a1", "x", attrs={"out": {}})])
     bad: list[dict[str, Any]] = [
-        {},                                            # schema missing
-        {"schema": "type: object"},                    # not an object
+        {},  # schema missing
+        {"schema": "type: object"},  # not an object
         {"schema": {"type": "object", "minimum": 0}},  # unsupported keyword
-        {"schema": {"type": "funky"}},                 # unknown type name
-        {"schema": {"type": ["object", "null"]}},      # type unions out of subset
-        {"schema": {"required": "name"}},              # required must be a list
-        {"schema": {"required": [1, 2]}},              # required must be strings
-        {"schema": {"properties": "name"}},            # properties must be object
-        {"schema": {"items": "string"}},               # items must be a subschema
+        {"schema": {"type": "funky"}},  # unknown type name
+        {"schema": {"type": ["object", "null"]}},  # type unions out of subset
+        {"schema": {"required": "name"}},  # required must be a list
+        {"schema": {"required": [1, 2]}},  # required must be strings
+        {"schema": {"properties": "name"}},  # properties must be object
+        {"schema": {"items": "string"}},  # items must be a subschema
     ]
     for params in bad:
         res = _run(t, "schema_validation", params)
@@ -225,13 +220,16 @@ def test_schema_validation_empty_schema_validates_anything() -> None:
 def _evidence_trace() -> Trace:
     return _trace(
         [
-            _span("a1", "llm", kind=SpanKind.LLM,
-                  attrs={
-                      "gen_ai.usage.input_tokens": 10,
-                      "forge_lens.token_usage": {"total_tokens": 10},
-                  }),
-            _span("b1", "call", kind=SpanKind.TOOL,
-                  attrs={"tool.name": "web_search"}),
+            _span(
+                "a1",
+                "llm",
+                kind=SpanKind.LLM,
+                attrs={
+                    "gen_ai.usage.input_tokens": 10,
+                    "forge_lens.token_usage": {"total_tokens": 10},
+                },
+            ),
+            _span("b1", "call", kind=SpanKind.TOOL, attrs={"tool.name": "web_search"}),
         ],
         resource_attrs={"service.name": "svc"},
     )
@@ -298,10 +296,10 @@ def test_evidence_coverage_malformed_params_evaluator_error() -> None:
     t = _evidence_trace()
     bad: list[dict[str, Any]] = [
         {},
-        {"required_attrs": "tool.name"},            # not a list
-        {"required_attrs": []},                     # empty — nothing to check
-        {"required_attrs": ["tool.name", 42]},      # non-string key
-        {"required_attrs": ["tool.name", ""]},      # empty key
+        {"required_attrs": "tool.name"},  # not a list
+        {"required_attrs": []},  # empty — nothing to check
+        {"required_attrs": ["tool.name", 42]},  # non-string key
+        {"required_attrs": ["tool.name", ""]},  # empty key
         {"required_attrs": ["tool.name"], "min_coverage": 0},
         {"required_attrs": ["tool.name"], "min_coverage": 1.5},
         {"required_attrs": ["tool.name"], "min_coverage": "0.5"},
@@ -329,14 +327,11 @@ def test_human_review_always_null_never_scores() -> None:
 
 def test_human_review_echoes_rubric_and_counts_as_null() -> None:
     t = _trace([_span("a1", "x")])
-    res = _run(t, "human_review",
-               {"rubric": "check tone + citations"})
+    res = _run(t, "human_review", {"rubric": "check tone + citations"})
     assert res.score is None
     assert res.details["rubric"] == "check tone + citations"
     # summary: lands in nulls, never silently in means/pass rates
-    report = evaluate_traces(
-        [t], [{"name": "human_review", "params": {"rubric": "r"}}]
-    )
+    report = evaluate_traces([t], [{"name": "human_review", "params": {"rubric": "r"}}])
     slot = report.summary["human_review/pending_human_review"]
     assert slot["n"] == 0
     assert slot["nulls"] == 1
@@ -357,9 +352,9 @@ def test_human_review_non_string_rubric_is_evaluator_error() -> None:
 def test_precision_recall_tool_mode_perfect_and_partial() -> None:
     t = _tools_trace()
     perfect = _run(
-        t, "precision_recall",
-        {"tool": True,
-         "expected_items": ["web_search", "db_query", "manual_call"]},
+        t,
+        "precision_recall",
+        {"tool": True, "expected_items": ["web_search", "db_query", "manual_call"]},
     )
     assert perfect.score == 1.0
     assert perfect.details["precision"] == "1.000000"
@@ -367,7 +362,8 @@ def test_precision_recall_tool_mode_perfect_and_partial() -> None:
     assert perfect.details["tp"] == "3"
 
     partial = _run(
-        t, "precision_recall",
+        t,
+        "precision_recall",
         {"tool": True, "expected_items": ["web_search", "db_query"]},
     )
     # observed = {web_search, db_query, manual_call}: tp=2 fp=1 fn=0
@@ -380,7 +376,8 @@ def test_precision_recall_tool_mode_perfect_and_partial() -> None:
 def test_precision_recall_tool_mode_names_missing_and_extra() -> None:
     t = _tools_trace()
     res = _run(
-        t, "precision_recall",
+        t,
+        "precision_recall",
         {"tool": True, "expected_items": ["web_search", "billing_api"]},
     )
     # observed {web_search, db_query, manual_call}: tp=1 fp=2 fn=1
@@ -397,8 +394,7 @@ def test_precision_recall_no_tool_spans_is_zero_not_none() -> None:
     """Zero tool calls with non-empty expectations is measurable
     evidence — recall fails for real, not 'unobserved'."""
     t = _trace([_span("a1", "agent", kind=SpanKind.AGENT)])
-    res = _run(t, "precision_recall",
-               {"tool": True, "expected_items": ["web_search"]})
+    res = _run(t, "precision_recall", {"tool": True, "expected_items": ["web_search"]})
     assert res.score == 0.0
     assert res.details["fn"] == "1"
     assert "no observed items" in res.details["note"]
@@ -407,33 +403,28 @@ def test_precision_recall_no_tool_spans_is_zero_not_none() -> None:
 def test_precision_recall_field_mode_extraction() -> None:
     # list attribute → element set
     t = _trace([_span("a1", "x", attrs={"ents": ["a", "b", "c"]})])
-    res = _run(t, "precision_recall",
-               {"field": "ents", "expected_items": ["a", "b"]})
+    res = _run(t, "precision_recall", {"field": "ents", "expected_items": ["a", "b"]})
     assert res.score == 0.8  # tp=2 fp=1 fn=0
 
     # dict attribute → key set
     td = _trace([_span("a1", "x", attrs={"ents": {"x": 1, "y": 2}})])
-    resd = _run(td, "precision_recall",
-                {"field": "ents", "expected_items": ["x", "z"]})
+    resd = _run(td, "precision_recall", {"field": "ents", "expected_items": ["x", "z"]})
     assert resd.score == 0.5  # tp=1 fp=1 fn=1 → p=r=0.5
 
     # JSON-string field → unpacked list
     tj = _trace([_span("a1", "x", attrs={"ents": '["a", "b"]'})])
-    resj = _run(tj, "precision_recall",
-                {"field": "ents", "expected_items": ["a", "b"]})
+    resj = _run(tj, "precision_recall", {"field": "ents", "expected_items": ["a", "b"]})
     assert resj.score == 1.0
 
     # scalar → singleton item
     ts = _trace([_span("a1", "x", attrs={"ents": "a"})])
-    ress = _run(ts, "precision_recall",
-                {"field": "ents", "expected_items": ["a"]})
+    ress = _run(ts, "precision_recall", {"field": "ents", "expected_items": ["a"]})
     assert ress.score == 1.0
 
 
 def test_precision_recall_field_unobserved_is_none() -> None:
     t = _trace([_span("a1", "x")])
-    res = _run(t, "precision_recall",
-               {"field": "ents", "expected_items": ["a"]})
+    res = _run(t, "precision_recall", {"field": "ents", "expected_items": ["a"]})
     assert res.score is None
     assert res.details["reason"] == "field not observed in trace"
 
@@ -442,8 +433,7 @@ def test_precision_recall_canonical_type_strictness() -> None:
     """``1`` and ``"1"`` are different items — canonical JSON forms keep
     numeric and string expectations distinct."""
     t = _trace([_span("a1", "x", attrs={"ents": [1]})])
-    res = _run(t, "precision_recall",
-               {"field": "ents", "expected_items": ["1"]})
+    res = _run(t, "precision_recall", {"field": "ents", "expected_items": ["1"]})
     assert res.score == 0.0
     assert res.details["missing"] == "1"
 
@@ -451,15 +441,14 @@ def test_precision_recall_canonical_type_strictness() -> None:
 def test_precision_recall_malformed_params_evaluator_error() -> None:
     t = _tools_trace()
     bad: list[dict[str, Any]] = [
-        {"tool": True},                                  # expected_items missing
-        {"tool": True, "expected_items": []},            # empty
+        {"tool": True},  # expected_items missing
+        {"tool": True, "expected_items": []},  # empty
         {"tool": True, "expected_items": "web_search"},  # not a list
-        {"tool": True, "expected_items": [1, 2]},        # tool mode: strings only
-        {"expected_items": ["a"]},                       # no mode declared
-        {"tool": True, "field": "ents",
-         "expected_items": ["a"]},                       # both modes declared
-        {"tool": "yes", "expected_items": ["a"]},        # tool must be bool
-        {"field": 7, "expected_items": ["a"]},           # field must be str
+        {"tool": True, "expected_items": [1, 2]},  # tool mode: strings only
+        {"expected_items": ["a"]},  # no mode declared
+        {"tool": True, "field": "ents", "expected_items": ["a"]},  # both modes declared
+        {"tool": "yes", "expected_items": ["a"]},  # tool must be bool
+        {"field": 7, "expected_items": ["a"]},  # field must be str
     ]
     for params in bad:
         res = _run(t, "precision_recall", params)
@@ -473,10 +462,8 @@ def test_precision_recall_malformed_params_evaluator_error() -> None:
 def _grounded_trace(output: str, source: Any) -> Trace:
     return _trace(
         [
-            _span("a1", "llm", kind=SpanKind.LLM,
-                  attrs={"output.value": output}),
-            _span("b1", "call", kind=SpanKind.TOOL,
-                  attrs={"tool.output": source}),
+            _span("a1", "llm", kind=SpanKind.LLM, attrs={"output.value": output}),
+            _span("b1", "call", kind=SpanKind.TOOL, attrs={"tool.output": source}),
         ]
     )
 
@@ -488,35 +475,29 @@ def test_claims_grounded_pass_and_fail_by_overlap() -> None:
     )
     # claim tokens {the,answer,is,paris,per,web,results}
     # source tokens {web,results,paris,is,the,capital} → 5/7 covered
-    res = _run(t, "claims_grounded",
-               {"required_source_attr": "tool.output", "min_overlap": 0.5})
+    res = _run(t, "claims_grounded", {"required_source_attr": "tool.output", "min_overlap": 0.5})
     assert res.score == 1.0
     assert res.metric == "claims_source_overlap"
     assert res.details["covered_tokens"] == "5"
     assert res.details["claim_tokens"] == "7"
     assert "not a factuality check" in res.details["heuristic"]
 
-    strict = _run(t, "claims_grounded",
-                  {"required_source_attr": "tool.output",
-                   "min_overlap": 0.9})
+    strict = _run(t, "claims_grounded", {"required_source_attr": "tool.output", "min_overlap": 0.9})
     assert strict.score == 0.0
     assert strict.details["overlap"].startswith("0.714")
 
 
 def test_claims_grounded_full_overlap_default_threshold() -> None:
     t = _grounded_trace("alpha beta", "alpha beta gamma")
-    res = _run(t, "claims_grounded",
-               {"required_source_attr": "tool.output"})
+    res = _run(t, "claims_grounded", {"required_source_attr": "tool.output"})
     assert res.score == 1.0
     assert res.details["overlap"] == "1.000000"
     assert res.details["min_overlap"] == "0.5"  # documented default
 
 
 def test_claims_grounded_structured_source_tokenizes_keys_and_values() -> None:
-    t = _grounded_trace("temperature is 72f",
-                        {"temperature": "72f", "unit": "F"})
-    res = _run(t, "claims_grounded",
-               {"required_source_attr": "tool.output"})
+    t = _grounded_trace("temperature is 72f", {"temperature": "72f", "unit": "F"})
+    res = _run(t, "claims_grounded", {"required_source_attr": "tool.output"})
     # claim {temperature,is,72f} — all three appear in the canonical
     # JSON of the dict value → overlap 1.0
     assert res.score == 1.0
@@ -526,23 +507,19 @@ def test_claims_grounded_no_source_evidence_is_none_not_fail() -> None:
     """Absent source evidence can never prove a claim ungrounded —
     the honest verdict is 'not checkable'."""
     t = _trace([_span("a1", "llm", attrs={"output.value": "claims stuff"})])
-    res = _run(t, "claims_grounded",
-               {"required_source_attr": "tool.output"})
+    res = _run(t, "claims_grounded", {"required_source_attr": "tool.output"})
     assert res.score is None
     assert "no source evidence observed" in res.details["reason"]
 
 
 def test_claims_grounded_claim_unobserved_or_tokenless_is_none() -> None:
-    t = _trace([_span("b1", "call", kind=SpanKind.TOOL,
-                      attrs={"tool.output": "src"})])
-    res = _run(t, "claims_grounded",
-               {"required_source_attr": "tool.output"})
+    t = _trace([_span("b1", "call", kind=SpanKind.TOOL, attrs={"tool.output": "src"})])
+    res = _run(t, "claims_grounded", {"required_source_attr": "tool.output"})
     assert res.score is None
     assert res.details["reason"] == "field not observed as string"
 
     punct = _grounded_trace("!!! ???", "src words")
-    res2 = _run(punct, "claims_grounded",
-                {"required_source_attr": "tool.output"})
+    res2 = _run(punct, "claims_grounded", {"required_source_attr": "tool.output"})
     assert res2.score is None
     assert res2.details["reason"] == "claim carries no checkable tokens"
 
@@ -550,9 +527,9 @@ def test_claims_grounded_claim_unobserved_or_tokenless_is_none() -> None:
 def test_claims_grounded_malformed_params_evaluator_error() -> None:
     t = _grounded_trace("alpha", "alpha beta")
     bad: list[dict[str, Any]] = [
-        {},                                              # required_source_attr
-        {"required_source_attr": 42},                    # non-string
-        {"required_source_attr": ""},                    # empty
+        {},  # required_source_attr
+        {"required_source_attr": 42},  # non-string
+        {"required_source_attr": ""},  # empty
         {"required_source_attr": "tool.output", "min_overlap": 0},
         {"required_source_attr": "tool.output", "min_overlap": 1.2},
         {"required_source_attr": "tool.output", "min_overlap": "high"},

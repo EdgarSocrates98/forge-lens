@@ -383,7 +383,7 @@ def test_conflicting_update_merge_marks_conflict(
 
     conflicted = synthetic_trace.model_copy(deep=True)
     conflicted.spans = [conflicted.spans[1]]
-    conflicted.spans[0].name = "renamed.span"          # identity conflict
+    conflicted.spans[0].name = "renamed.span"  # identity conflict
     conflicted.spans[0].attributes = {"extra": "new"}  # mergeable change
     tmp_store.upsert_trace(conflicted)
 
@@ -392,7 +392,7 @@ def test_conflicting_update_merge_marks_conflict(
     span = loaded.spans[1]
     assert IntegrityFlag.CONFLICT in span.integrity_flags
     assert span.name == synthetic_trace.spans[1].name  # identity kept
-    assert span.attributes["extra"] == "new"           # merge still applied
+    assert span.attributes["extra"] == "new"  # merge still applied
 
 
 def test_db_size_includes_wal_sidecars(
@@ -404,9 +404,7 @@ def test_db_size_includes_wal_sidecars(
     wal = tmp_path / "lens.db-wal"
     assert wal.exists()  # uncheckpointed write stays in the wal
     assert wal.stat().st_size > 0
-    expected = sum(
-        f.stat().st_size for f in tmp_path.iterdir() if f.name.startswith("lens.db")
-    )
+    expected = sum(f.stat().st_size for f in tmp_path.iterdir() if f.name.startswith("lens.db"))
     assert tmp_store.stats()["db_size_bytes"] == expected
     # the wal dominates here — main file alone would undercount badly
     assert expected > (tmp_path / "lens.db").stat().st_size
@@ -483,16 +481,15 @@ def test_same_key_event_attributes_merge(
     ev_time = synthetic_trace.spans[0].start_time
     first = synthetic_trace.model_copy(deep=True)
     first.spans = [first.spans[0]]
-    first.spans[0].events = [
-        SpanEvent(name="retry", time=ev_time, attributes={"attempt": 1})
-    ]
+    first.spans[0].events = [SpanEvent(name="retry", time=ev_time, attributes={"attempt": 1})]
     tmp_store.upsert_trace(first)
 
     second = synthetic_trace.model_copy(deep=True)
     second.spans = [second.spans[0]]
     second.spans[0].events = [
         SpanEvent(
-            name="retry", time=ev_time,
+            name="retry",
+            time=ev_time,
             attributes={"attempt": 1, "backoff_ms": 250},
         )
     ]
@@ -632,8 +629,12 @@ def test_list_traces_deterministic_tiebreak_on_same_instant(
 
 def test_dataset_store(tmp_store: SQLiteTraceStore) -> None:
     tmp_store.upsert_dataset(
-        "qa", project_id="p1", name="QA set", task="answer questions",
-        metadata={"owner": "evals"}, now_ns=1_000,
+        "qa",
+        project_id="p1",
+        name="QA set",
+        task="answer questions",
+        metadata={"owner": "evals"},
+        now_ns=1_000,
     )
     ds = tmp_store.get_dataset("qa", "p1")
     assert ds is not None
@@ -642,10 +643,12 @@ def test_dataset_store(tmp_store: SQLiteTraceStore) -> None:
     assert tmp_store.get_dataset("qa", "other") is None
 
     n = tmp_store.upsert_dataset_version(
-        "qa", "v1", project_id="p1", description="first",
+        "qa",
+        "v1",
+        project_id="p1",
+        description="first",
         cases=[
-            {"case_id": "c1", "expected": {"answer": "42"},
-             "allowed_tools": ["web_search"]},
+            {"case_id": "c1", "expected": {"answer": "42"}, "allowed_tools": ["web_search"]},
             {"case_id": "c2", "input": {"q": "x"}},
         ],
         now_ns=2_000,

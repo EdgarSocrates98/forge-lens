@@ -71,11 +71,7 @@ def _row(tc: _ET.Element) -> dict:
     elif bad is not None:
         verdict = "fail"
         detail = (bad.text or bad.get("message") or "").strip()[:_DETAIL_LIMIT]
-    forbidden = (
-        len(_re.findall(r"\bforbidden\.", bad.text or ""))
-        if bad is not None
-        else 0
-    )
+    forbidden = len(_re.findall(r"\bforbidden\.", bad.text or "")) if bad is not None else 0
 
     return {
         "scenario_id": scenario_id,
@@ -151,9 +147,7 @@ def main() -> int:
             }
         )
     results.sort(key=lambda r: str(r["scenario_id"]))
-    n_scenarios = sum(
-        1 for r in results if str(r["evidence_ref"]).startswith(_SCENARIO_FILE)
-    )
+    n_scenarios = sum(1 for r in results if str(r["evidence_ref"]).startswith(_SCENARIO_FILE))
     n_failed = sum(1 for r in results if r["verdict"] == "fail")
 
     receipt = {

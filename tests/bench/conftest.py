@@ -112,9 +112,7 @@ def scale_corpus(
     t0 = time.perf_counter()
     for lo in range(0, n_traces, SCALE_BATCH_TRACES):
         hi = min(lo + SCALE_BATCH_TRACES, n_traces)
-        batch = [
-            make_bench_trace(i, project_id=project_id) for i in range(lo, hi)
-        ]
+        batch = [make_bench_trace(i, project_id=project_id) for i in range(lo, hi)]
         tb = time.perf_counter()
         result = pipeline.ingest(batch)
         batch_s.append(time.perf_counter() - tb)
@@ -189,18 +187,14 @@ def _env_info() -> dict[str, object]:
 def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
     if not _REPORT.records:
         return
-    terminalreporter.write_sep(
-        "=", "forge-lens bench smoke — measured wall time (not SLAs)"
-    )
+    terminalreporter.write_sep("=", "forge-lens bench smoke — measured wall time (not SLAs)")
     width = max(len(r.surface) for r in _REPORT.records)
     for r in _REPORT.records:
         detail = ", ".join(f"{k}={v}" for k, v in sorted(r.detail.items()))
         terminalreporter.write_line(
             f"  {r.surface:<{width}}  {r.seconds * 1000:>10.1f} ms  {detail}"
         )
-    terminalreporter.write_line(
-        "  timings are single-run, hardware-dependent smoke signals"
-    )
+    terminalreporter.write_line("  timings are single-run, hardware-dependent smoke signals")
     path = config.getoption("--bench-report")
     if path:
         payload = {

@@ -7,6 +7,7 @@ paste into docs/benchmarks/README.md with the machine specs printed.
 
 Usage: python scripts/benchmark.py --scale 1000 10000
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,7 +40,9 @@ def _gen(n_spans: int, *, spans_per_trace: int = 10) -> list[Trace]:
         tid = f"{t:032x}"
         spans = [
             Span(
-                trace_id=tid, span_id=f"{s:016x}", name=f"span-{s % 7}",
+                trace_id=tid,
+                span_id=f"{s:016x}",
+                name=f"span-{s % 7}",
                 kind=SpanKind.TOOL if s % 3 else SpanKind.LLM,
                 start_time=_T0 + timedelta(milliseconds=s),
                 end_time=_T0 + timedelta(milliseconds=s + 5),
@@ -48,11 +51,16 @@ def _gen(n_spans: int, *, spans_per_trace: int = 10) -> list[Trace]:
             )
             for s in range(spans_per_trace)
         ]
-        traces.append(Trace(
-            trace_id=tid, root_span_id=spans[0].span_id, spans=spans,
-            started_at=_T0, ended_at=_T0 + timedelta(milliseconds=100),
-            status=Status(code=StatusCode.OK),
-        ))
+        traces.append(
+            Trace(
+                trace_id=tid,
+                root_span_id=spans[0].span_id,
+                spans=spans,
+                started_at=_T0,
+                ended_at=_T0 + timedelta(milliseconds=100),
+                status=Status(code=StatusCode.OK),
+            )
+        )
     return traces
 
 
@@ -77,7 +85,8 @@ def _bench(n_spans: int, tmp: Path) -> dict:
         "traces": len(traces),
         "ingest_seconds": round(ingest_s, 3),
         "spans_per_second": round(len(traces) * len(traces[0].spans) / ingest_s)
-        if ingest_s else None,
+        if ingest_s
+        else None,
         "list_500_ms": round(query_ms, 2),
         "get_trace_ms": round(get_ms, 2),
         "db_bytes": size,
@@ -90,13 +99,18 @@ def main() -> None:
     args = ap.parse_args()
     with tempfile.TemporaryDirectory() as td:
         results = [_bench(n, Path(td)) for n in sorted(args.scale)]
-    print(json.dumps({
-        "python": sys.version.split()[0],
-        "platform": platform.platform(),
-        "sqlite": sqlite3.sqlite_version,
-        "results": results,
-        "note": "real measured run — not a capacity claim; hardware varies",
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "python": sys.version.split()[0],
+                "platform": platform.platform(),
+                "sqlite": sqlite3.sqlite_version,
+                "results": results,
+                "note": "real measured run — not a capacity claim; hardware varies",
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

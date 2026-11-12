@@ -33,9 +33,7 @@ class ModelPrice:
             ("cached_input_per_mtok", self.cached_input_per_mtok),
         ):
             if rate is not None and not math.isfinite(rate):
-                raise ValueError(
-                    f"{field_name} must be finite, got {rate!r}"
-                )
+                raise ValueError(f"{field_name} must be finite, got {rate!r}")
 
 
 # Public list prices (USD/MTok) at snapshot time. Estimates derived
@@ -89,17 +87,13 @@ class PricingRegistry:
         prices: dict[str, ModelPrice] = {}
         for model, entry in raw.items():
             if not isinstance(entry, dict):
-                raise ValueError(
-                    f"pricing file {path}: entry for {model!r} must be an object"
-                )
+                raise ValueError(f"pricing file {path}: entry for {model!r} must be an object")
             try:
                 prices[str(model)] = ModelPrice(
                     input_per_mtok=float(entry["input_per_mtok"]),
                     output_per_mtok=float(entry["output_per_mtok"]),
                     cached_input_per_mtok=(
-                        float(v)
-                        if (v := entry.get("cached_input_per_mtok")) is not None
-                        else None
+                        float(v) if (v := entry.get("cached_input_per_mtok")) is not None else None
                     ),
                 )
             except (KeyError, TypeError, ValueError) as exc:
@@ -144,9 +138,7 @@ class PricingRegistry:
         if resolved is None:
             return None, []
         key, price = resolved
-        assumptions = [
-            f"model {model!r} resolved to registry entry {key!r} ({self.source})"
-        ]
+        assumptions = [f"model {model!r} resolved to registry entry {key!r} ({self.source})"]
         if input_tokens is None or output_tokens is None:
             assumptions.append("missing token counters treated as zero")
         cached = cached_input_tokens or 0
@@ -163,8 +155,7 @@ class PricingRegistry:
         usd = (
             uncached * price.input_per_mtok
             + cached * cached_rate
-            + ((output_tokens or 0) + (reasoning_tokens or 0))
-            * price.output_per_mtok
+            + ((output_tokens or 0) + (reasoning_tokens or 0)) * price.output_per_mtok
         ) / 1_000_000.0
         return usd, assumptions
 

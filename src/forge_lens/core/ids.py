@@ -12,9 +12,7 @@ import secrets
 
 TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 SPAN_ID_RE = re.compile(r"^[0-9a-f]{16}$")
-TRACEPARENT_RE = re.compile(
-    r"^([\da-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$"
-)
+TRACEPARENT_RE = re.compile(r"^([\da-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$")
 
 
 def new_trace_id() -> str:
@@ -64,9 +62,7 @@ def parse_traceparent(header: str) -> tuple[str, str, bool] | None:
         return None
     version, trace_id, span_id, flags = match.groups()
     # W3C: version ff is forbidden; all-zero ids are invalid
-    if version == "ff" or not is_valid_trace_id(trace_id) or not is_valid_span_id(
-        span_id
-    ):
+    if version == "ff" or not is_valid_trace_id(trace_id) or not is_valid_span_id(span_id):
         return None
     # W3C: the sampled flag is bit 0x01 of the flags byte, not the last char
     # (e.g. flags=03 → 0x03 & 0x01 → sampled).

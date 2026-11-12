@@ -97,19 +97,15 @@ def test_retries_preceded_error_counts_same_name_invocations() -> None:
         _span(tid, 1, "web_search", attrs={"tool.name": "web_search"}),
         _span(tid, 2, "web_search", attrs={"tool.name": "web_search"}),
         _span(tid, 3, "web_search", attrs={"tool.name": "web_search"}),
-        _span(tid, 4, "web_search", error=True,
-              attrs={"tool.name": "web_search"}),
+        _span(tid, 4, "web_search", error=True, attrs={"tool.name": "web_search"}),
     ]
     out = correlate_trace(_trace(1, spans, status=StatusCode.ERROR))
     c = _one(out, "retries_preceded_error")
     assert c["classification"] == "temporal_association"
     assert c["strength"]["preceding_invocations"] == 3
     assert c["strength"]["error_invocations"] == 1
-    prior = next(s for s in c["signals"]
-                 if s["type"] == "prior_invocations")
-    assert prior["span_ids"] == [
-        f"{i:016x}" for i in (1, 2, 3)
-    ]
+    prior = next(s for s in c["signals"] if s["type"] == "prior_invocations")
+    assert prior["span_ids"] == [f"{i:016x}" for i in (1, 2, 3)]
     assert "not proof" in c["caveat"]
 
 
@@ -126,10 +122,8 @@ def test_no_retries_finding_without_prior_invocations() -> None:
 def test_tool_failure_cluster_needs_two_errors_same_tool() -> None:
     tid = "c" * 32
     spans = [
-        _span(tid, 1, "api.get", error=True,
-              attrs={"tool.name": "api.get"}),
-        _span(tid, 2, "api.get", error=True,
-              attrs={"tool.name": "api.get"}),
+        _span(tid, 1, "api.get", error=True, attrs={"tool.name": "api.get"}),
+        _span(tid, 2, "api.get", error=True, attrs={"tool.name": "api.get"}),
         _span(tid, 3, "api.get", attrs={"tool.name": "api.get"}),
         _span(tid, 4, "other", error=True, attrs={"tool.name": "other"}),
     ]
@@ -143,10 +137,8 @@ def test_tool_failure_cluster_needs_two_errors_same_tool() -> None:
 def test_model_switch_flags_distinct_labels() -> None:
     tid = "d" * 32
     spans = [
-        _span(tid, 1, "llm a", kind=SpanKind.LLM,
-              attrs={"llm.model_name": "model-a"}),
-        _span(tid, 2, "llm b", kind=SpanKind.LLM,
-              attrs=_usage("model-b", 50)),
+        _span(tid, 1, "llm a", kind=SpanKind.LLM, attrs={"llm.model_name": "model-a"}),
+        _span(tid, 2, "llm b", kind=SpanKind.LLM, attrs=_usage("model-b", 50)),
         _span(tid, 3, "llm c", kind=SpanKind.LLM),
     ]
     out = correlate_trace(_trace(1, spans))
@@ -160,10 +152,8 @@ def test_model_switch_flags_distinct_labels() -> None:
 def test_single_model_no_switch() -> None:
     tid = "e" * 32
     spans = [
-        _span(tid, 1, "llm 1", kind=SpanKind.LLM,
-              attrs={"llm.model_name": "same"}),
-        _span(tid, 2, "llm 2", kind=SpanKind.LLM,
-              attrs={"llm.model_name": "same"}),
+        _span(tid, 1, "llm 1", kind=SpanKind.LLM, attrs={"llm.model_name": "same"}),
+        _span(tid, 2, "llm 2", kind=SpanKind.LLM, attrs={"llm.model_name": "same"}),
     ]
     out = correlate_trace(_trace(1, spans))
     assert "model_switch" not in _kinds(out)
@@ -173,10 +163,8 @@ def test_single_model_no_switch() -> None:
 def test_context_growth_preceded_error() -> None:
     tid = "f" * 32
     spans = [
-        _span(tid, 1, "llm 1", kind=SpanKind.LLM,
-              attrs=_usage("m", 100)),
-        _span(tid, 2, "llm 2", kind=SpanKind.LLM,
-              attrs=_usage("m", 700)),
+        _span(tid, 1, "llm 1", kind=SpanKind.LLM, attrs=_usage("m", 100)),
+        _span(tid, 2, "llm 2", kind=SpanKind.LLM, attrs=_usage("m", 700)),
         _span(tid, 3, "tool", error=True),
     ]
     out = correlate_trace(_trace(1, spans, status=StatusCode.ERROR))
@@ -192,13 +180,10 @@ def test_context_growth_preceded_error() -> None:
 def test_context_growth_preceded_eval_and_errors_before_eval() -> None:
     tid = "a1" * 16
     spans = [
-        _span(tid, 1, "llm 1", kind=SpanKind.LLM,
-              attrs=_usage("m", 100)),
-        _span(tid, 2, "llm 2", kind=SpanKind.LLM,
-              attrs=_usage("m", 400)),
+        _span(tid, 1, "llm 1", kind=SpanKind.LLM, attrs=_usage("m", 100)),
+        _span(tid, 2, "llm 2", kind=SpanKind.LLM, attrs=_usage("m", 400)),
         _span(tid, 3, "tool", error=True),
-        _span(tid, 4, "judge", kind=SpanKind.EVALUATOR,
-              attrs={"eval.score": 0.4}),
+        _span(tid, 4, "judge", kind=SpanKind.EVALUATOR, attrs={"eval.score": 0.4}),
     ]
     out = correlate_trace(_trace(1, spans, status=StatusCode.ERROR))
     c = _one(out, "context_growth_preceded_eval")
@@ -212,8 +197,7 @@ def test_context_growth_preceded_eval_and_errors_before_eval() -> None:
 def test_clean_trace_returns_honest_empty() -> None:
     tid = "ab" * 16
     spans = [
-        _span(tid, 1, "llm", kind=SpanKind.LLM,
-              attrs=_usage("m", 100)),
+        _span(tid, 1, "llm", kind=SpanKind.LLM, attrs=_usage("m", 100)),
         _span(tid, 2, "tool"),
     ]
     out = correlate_trace(_trace(1, spans))
@@ -230,8 +214,7 @@ def test_correlate_trace_deterministic() -> None:
     spans = [
         _span(tid, 1, "x", attrs={"tool.name": "x"}),
         _span(tid, 2, "x", error=True, attrs={"tool.name": "x"}),
-        _span(tid, 3, "judge", kind=SpanKind.EVALUATOR,
-              attrs={"eval.score": 0.2}),
+        _span(tid, 3, "judge", kind=SpanKind.EVALUATOR, attrs={"eval.score": 0.2}),
     ]
     t = _trace(1, spans, status=StatusCode.ERROR)
     assert correlate_trace(t) == correlate_trace(t)
@@ -259,23 +242,30 @@ def _seed_fleet(
             for j, name in enumerate(failed_tools)
         ]
         spans.append(
-            _span("0" * 32, len(spans) + 1, "boom", error=True,
-                  attrs={"tool.name": "web_search"})
+            _span("0" * 32, len(spans) + 1, "boom", error=True, attrs={"tool.name": "web_search"})
         )
-        store.upsert_trace(_trace(
-            idx, spans, status=StatusCode.ERROR,
-            session="sess-f" if sessions else None,
-        ))
+        store.upsert_trace(
+            _trace(
+                idx,
+                spans,
+                status=StatusCode.ERROR,
+                session="sess-f" if sessions else None,
+            )
+        )
     for i in range(n_ok):
         idx += 1
         spans = [
             _span("0" * 32, j + 1, name, attrs={"tool.name": name})
             for j, name in enumerate(ok_tools)
         ]
-        store.upsert_trace(_trace(
-            idx, spans, status=StatusCode.OK,
-            session=f"sess-ok-{i}" if sessions else None,
-        ))
+        store.upsert_trace(
+            _trace(
+                idx,
+                spans,
+                status=StatusCode.OK,
+                session=f"sess-ok-{i}" if sessions else None,
+            )
+        )
 
 
 def test_fleet_empty_store_is_honest(tmp_store: SQLiteTraceStore) -> None:
@@ -345,8 +335,7 @@ def test_fleet_retry_eval_buckets(tmp_store: SQLiteTraceStore) -> None:
         spans = [
             _span("0" * 32, 1, "poll", attrs={"tool.name": "poll"}),
             _span("0" * 32, 2, "poll", attrs={"tool.name": "poll"}),
-            _span("0" * 32, 3, "judge", kind=SpanKind.EVALUATOR,
-                  attrs={"eval.score": 0.5}),
+            _span("0" * 32, 3, "judge", kind=SpanKind.EVALUATOR, attrs={"eval.score": 0.5}),
         ]
         tmp_store.upsert_trace(_trace(idx, spans))
     # 3 scored traces with zero retry signals → bucket "0"
@@ -354,8 +343,7 @@ def test_fleet_retry_eval_buckets(tmp_store: SQLiteTraceStore) -> None:
         idx += 1
         spans = [
             _span("0" * 32, 1, "once", attrs={"tool.name": "once"}),
-            _span("0" * 32, 2, "judge", kind=SpanKind.EVALUATOR,
-                  attrs={"eval.score": 1.0}),
+            _span("0" * 32, 2, "judge", kind=SpanKind.EVALUATOR, attrs={"eval.score": 1.0}),
         ]
         tmp_store.upsert_trace(_trace(idx, spans))
     out = correlate_fleet(tmp_store, "proj")
@@ -368,9 +356,7 @@ def test_fleet_retry_eval_buckets(tmp_store: SQLiteTraceStore) -> None:
     assert rows["1-2"]["traces"] == 3
     assert rows["1-2"]["scored_traces"] == 3
     assert rows["1-2"]["mean_score"] == 0.5
-    assert rows["1-2"]["score_delta_vs_window"] == round(
-        0.5 - 0.75, 6
-    )
+    assert rows["1-2"]["score_delta_vs_window"] == round(0.5 - 0.75, 6)
     assert rows["3+"]["traces"] == 0
     assert tbl["traces_scored"] == 6
 
@@ -396,6 +382,4 @@ def test_fleet_window_bounded_and_deterministic(
     assert out["window"]["traces"] == 3
     out_big = correlate_fleet(tmp_store, "proj", limit=9999)
     assert out_big["window"]["limit_applied"] == 500
-    assert correlate_fleet(tmp_store, "proj") == correlate_fleet(
-        tmp_store, "proj"
-    )
+    assert correlate_fleet(tmp_store, "proj") == correlate_fleet(tmp_store, "proj")

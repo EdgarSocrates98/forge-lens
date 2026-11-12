@@ -59,13 +59,13 @@ FAIL_PROVIDER_ID = "failing-forge"
 FAIL_CAPABILITY = "demo.failcrash"
 OK_PROVIDER_ID = "echo-forge"
 
-_RUN_ARTIFACTS = ("task.json", "receipt.json", "telemetry.json",
-                  "routing.json", "result.json")
+_RUN_ARTIFACTS = ("task.json", "receipt.json", "telemetry.json", "routing.json", "result.json")
 
 
 # --------------------------------------------------------------------------
 # resolução do sibling the-forge
 # --------------------------------------------------------------------------
+
 
 def find_theforge() -> list[str] | None:
     """Argv prefix para invocar o CLI real do the-forge, ou None.
@@ -90,7 +90,8 @@ def find_theforge() -> list[str] | None:
     if py.is_file():
         probe = subprocess.run(
             [str(py), "-c", "import theforge"],
-            capture_output=True, timeout=30,
+            capture_output=True,
+            timeout=30,
         )
         if probe.returncode == 0:
             return [str(py), "-m", "theforge"]
@@ -115,7 +116,11 @@ def init_workspace(theforge: list[str], ws: Path, env: dict[str, str]) -> None:
     """``theforge init`` real + provider fixture de falha no providers.toml."""
     subprocess.run(
         [*theforge, "init", "--root", str(ws)],
-        check=True, capture_output=True, text=True, env=env, timeout=120,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
     )
     providers = ws / ".forge" / "config" / "providers.toml"
     # TOML basic strings treat ``\\`` as an escape. Use a portable POSIX
@@ -124,7 +129,7 @@ def init_workspace(theforge: list[str], ws: Path, env: dict[str, str]) -> None:
     fixture_provider = FIXTURE_PROVIDER.as_posix()
     with providers.open("a", encoding="utf-8") as fh:
         fh.write(
-            '\n[[providers]]\n'
+            "\n[[providers]]\n"
             f'id = "{FAIL_PROVIDER_ID}"\n'
             f'argv = ["{{python}}", "{fixture_provider}"]\n'
         )
@@ -142,14 +147,17 @@ def run_ask(
     timeout_s: float = 300.0,
 ) -> dict[str, Any]:
     """Executa ``theforge ask`` de verdade. Retorna o envelope --json real."""
-    argv = [*theforge, "ask", intent, "--root", str(ws), "--json",
-            "--use", use]
+    argv = [*theforge, "ask", intent, "--root", str(ws), "--json", "--use", use]
     if capability:
         argv += ["--capability", capability]
     if allow_unverified:
         argv += ["--allow-unverified"]
     proc = subprocess.run(
-        argv, capture_output=True, text=True, env=env, timeout=timeout_s,
+        argv,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=timeout_s,
     )
     out: dict[str, Any] = {
         "argv": argv,
@@ -172,6 +180,7 @@ def run_ask(
 # importação theforge/RunTelemetry/v1 → spans Forge Lens
 # --------------------------------------------------------------------------
 
+
 def _iso(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -181,8 +190,9 @@ def _iso(value: str | None) -> datetime | None:
         return None
 
 
-def _anchor(receipt: dict[str, Any], task: dict[str, Any],
-            telemetry: dict[str, Any]) -> tuple[datetime | None, str]:
+def _anchor(
+    receipt: dict[str, Any], task: dict[str, Any], telemetry: dict[str, Any]
+) -> tuple[datetime | None, str]:
     """Base de tempo de parede para os offsets monotônicos do theforge."""
     for source, doc, key in (
         ("receipt.started_at", receipt, "started_at"),
@@ -193,11 +203,12 @@ def _anchor(receipt: dict[str, Any], task: dict[str, Any],
             return ts, source
     created = _iso(telemetry.get("created_at"))
     if created is not None:
-        ends = [float(s.get("start_ms", 0)) + float(s.get("duration_ms", 0))
-                for s in telemetry.get("spans", [])]
+        ends = [
+            float(s.get("start_ms", 0)) + float(s.get("duration_ms", 0))
+            for s in telemetry.get("spans", [])
+        ]
         if ends:
-            return created - timedelta(milliseconds=max(ends)), \
-                "telemetry.created_at-last_span_end"
+            return created - timedelta(milliseconds=max(ends)), "telemetry.created_at-last_span_end"
     return None, "unanchored"
 
 
@@ -257,21 +268,19 @@ def import_run_spans(
         with tracer.start_span(lens_name, kind=kind, attributes=attrs) as s:
             s.provenance = Provenance.IMPORTED
             if base is not None:
-                s.start_time = base + timedelta(
-                    milliseconds=float(raw.get("start_ms") or 0))
+                s.start_time = base + timedelta(milliseconds=float(raw.get("start_ms") or 0))
             if err:
                 detail = (receipt.get("error") or {}).get("detail") or "error"
                 s.status = Status(
                     code=StatusCode.ERROR,
                     message=_bounded(
-                        f"{(receipt.get('error') or {}).get('code', 'error')}: "
-                        f"{detail}"),
+                        f"{(receipt.get('error') or {}).get('code', 'error')}: {detail}"
+                    ),
                 )
         # `finally` do SDK carimba end_time=now(); sobrescrevemos com a
         # duração REAL medida pelo theforge ancorada na base do run.
         if base is not None and s.start_time is not None:
-            s.end_time = s.start_time + timedelta(
-                milliseconds=float(raw.get("duration_ms") or 0))
+            s.end_time = s.start_time + timedelta(milliseconds=float(raw.get("duration_ms") or 0))
         parent_ref = raw.get("parent")
         if parent_ref is not None and parent_ref in id_map:
             s.parent_span_id = id_map[parent_ref]
@@ -334,43 +343,46 @@ def traced_theforge_ask(
     pelo harness) + filhos IMPORTED (telemetria nativa do theforge)."""
     attrs: dict[str, Any] = {
         "forge_lens.integration": "theforge",
-        "forge_lens.provenance.note":
-            "root=observed(subprocess wall-clock); children=imported"
-            "(theforge/RunTelemetry/v1)",
+        "forge_lens.provenance.note": "root=observed(subprocess wall-clock); children=imported"
+        "(theforge/RunTelemetry/v1)",
         "theforge.workspace": ws.name,
     }
-    with tracer.start_span(f"theforge {label}", kind=SpanKind.INTERNAL,
-                           attributes=attrs) as root:
-        out = run_ask(theforge, ws, env, intent, use=use,
-                      capability=capability, allow_unverified=allow_unverified)
+    with tracer.start_span(f"theforge {label}", kind=SpanKind.INTERNAL, attributes=attrs) as root:
+        out = run_ask(
+            theforge,
+            ws,
+            env,
+            intent,
+            use=use,
+            capability=capability,
+            allow_unverified=allow_unverified,
+        )
         root.attributes["process.exit_code"] = out["exit_code"]
         run_id = out.get("run_id")
         run_status = out.get("run_status") or "unknown"
         root.attributes["theforge.run_id"] = run_id
         root.attributes["theforge.run.status"] = run_status
-        summary: dict[str, Any] = {"run_id": run_id, "run_status": run_status,
-                                   "exit_code": out["exit_code"],
-                                   "mode": "live"}
+        summary: dict[str, Any] = {
+            "run_id": run_id,
+            "run_status": run_status,
+            "exit_code": out["exit_code"],
+            "mode": "live",
+        }
         if run_id:
-            summary.update(import_run_spans(
-                tracer, ws / ".forge" / "runs" / run_id))
+            summary.update(import_run_spans(tracer, ws / ".forge" / "runs" / run_id))
             for key, value in (summary.get("measured_metrics") or {}).items():
                 root.attributes[f"theforge.metric.{key}"] = value
             if summary.get("unknowns"):
-                root.attributes["theforge.unknowns"] = ",".join(
-                    summary["unknowns"])
+                root.attributes["theforge.unknowns"] = ",".join(summary["unknowns"])
         err = summary.get("error")
         if run_status != "ok" or out["exit_code"] != 0:
             root.status = Status(
                 code=StatusCode.ERROR,
-                message=_bounded(
-                    f"run {run_status} (exit {out['exit_code']})"),
+                message=_bounded(f"run {run_status} (exit {out['exit_code']})"),
             )
             if isinstance(err, dict):
-                root.attributes["theforge.error.code"] = _bounded(
-                    err.get("code"), 120)
-                root.attributes["theforge.error.detail"] = _bounded(
-                    err.get("detail"))
+                root.attributes["theforge.error.code"] = _bounded(err.get("code"), 120)
+                root.attributes["theforge.error.detail"] = _bounded(err.get("detail"))
         summary["trace_root_span_id"] = root.span_id
     return summary
 
@@ -395,26 +407,23 @@ def import_captured_run(tracer: Any, captured_dir: Path) -> dict[str, Any]:
         "theforge.run_id": run_id,
         "theforge.run.status": status,
         "theforge.workspace": "<captured>",
-        "forge_lens.provenance.note":
-            "replay of a recorded real run; all spans imported",
+        "forge_lens.provenance.note": "replay of a recorded real run; all spans imported",
     }
     # NOTA: tracer deve estar com auto_flush=False — os tempos do root são
     # corrigidos depois do `with` (o flush explícito leva os valores reais).
-    with tracer.start_span(f"theforge ask [captured] {intent}",
-                           kind=SpanKind.INTERNAL, attributes=attrs) as root:
+    with tracer.start_span(
+        f"theforge ask [captured] {intent}", kind=SpanKind.INTERNAL, attributes=attrs
+    ) as root:
         root.provenance = Provenance.IMPORTED
         summary = import_run_spans(tracer, captured_dir)
         for key, value in (summary.get("measured_metrics") or {}).items():
             root.attributes[f"theforge.metric.{key}"] = value
         err = summary.get("error")
         if status != "ok":
-            root.status = Status(code=StatusCode.ERROR,
-                                 message=_bounded(f"run {status}"))
+            root.status = Status(code=StatusCode.ERROR, message=_bounded(f"run {status}"))
             if isinstance(err, dict):
-                root.attributes["theforge.error.code"] = _bounded(
-                    err.get("code"), 120)
-                root.attributes["theforge.error.detail"] = _bounded(
-                    err.get("detail"))
+                root.attributes["theforge.error.code"] = _bounded(err.get("code"), 120)
+                root.attributes["theforge.error.detail"] = _bounded(err.get("detail"))
     if started is not None:
         root.start_time = started
         root.end_time = finished or started
@@ -426,6 +435,7 @@ def import_captured_run(tracer: Any, captured_dir: Path) -> dict[str, Any]:
 # servidor Forge Lens (uvicorn em thread, porta livre — mesmo padrão dos
 # testes e2e do próprio forge-lens)
 # --------------------------------------------------------------------------
+
 
 @contextmanager
 def lens_server(data_dir: Path) -> Iterator[dict[str, Any]]:
@@ -446,8 +456,7 @@ def lens_server(data_dir: Path) -> Iterator[dict[str, Any]]:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     try:
@@ -473,22 +482,25 @@ def lens_server(data_dir: Path) -> Iterator[dict[str, Any]]:
 # `forge-lens mcp-serve`)
 # --------------------------------------------------------------------------
 
+
 class McpClient:
     """Fala com `python -m forge_lens mcp-serve --db <db>` via stdin/stdout."""
 
     def __init__(self, db: Path, *, cwd: Path | None = None) -> None:
         self.proc = subprocess.Popen(
-            [sys.executable, "-m", "forge_lens", "mcp-serve",
-             "--db", str(db)],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True,
+            [sys.executable, "-m", "forge_lens", "mcp-serve", "--db", str(db)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
             cwd=str(cwd) if cwd else None,
         )
         self._next_id = 0
         self.transcript: list[dict[str, Any]] = []
 
-    def request(self, method: str, params: dict[str, Any] | None = None,
-                *, timeout_s: float = 30.0) -> dict[str, Any]:
+    def request(
+        self, method: str, params: dict[str, Any] | None = None, *, timeout_s: float = 30.0
+    ) -> dict[str, Any]:
         self._next_id += 1
         rid = self._next_id
         req: dict[str, Any] = {"jsonrpc": "2.0", "id": rid, "method": method}
@@ -507,8 +519,7 @@ class McpClient:
             # the child on teardown either way.
             line = self.proc.stdout.readline()
             if not line:
-                raise RuntimeError(
-                    f"mcp-serve closed stdout; stderr: {self._stderr()}")
+                raise RuntimeError(f"mcp-serve closed stdout; stderr: {self._stderr()}")
             try:
                 resp = json.loads(line)
             except json.JSONDecodeError:
@@ -520,8 +531,7 @@ class McpClient:
 
     def notify(self, method: str) -> None:
         assert self.proc.stdin is not None
-        self.proc.stdin.write(
-            json.dumps({"jsonrpc": "2.0", "method": method}) + "\n")
+        self.proc.stdin.write(json.dumps({"jsonrpc": "2.0", "method": method}) + "\n")
         self.proc.stdin.flush()
 
     def call_tool(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -533,9 +543,10 @@ class McpClient:
             payload = json.loads(text)
         except json.JSONDecodeError:
             payload = {"_raw": text}
-        return {"result_meta": {k: v for k, v in result.items()
-                                if k != "content"},
-                "payload": payload}
+        return {
+            "result_meta": {k: v for k, v in result.items() if k != "content"},
+            "payload": payload,
+        }
 
     def _stderr(self) -> str:
         if self.proc.stderr is None:
@@ -566,6 +577,7 @@ class McpClient:
 # sanitização de evidência
 # --------------------------------------------------------------------------
 
+
 def sanitize_for_evidence(obj: Any, roots: dict[str, str]) -> Any:
     """Substitui caminhos absolutos por marcadores estáveis.
 
@@ -575,8 +587,7 @@ def sanitize_for_evidence(obj: Any, roots: dict[str, str]) -> Any:
     """
     if isinstance(obj, str):
         out = obj
-        for marker, prefix in sorted(roots.items(),
-                                     key=lambda kv: -len(kv[1])):
+        for marker, prefix in sorted(roots.items(), key=lambda kv: -len(kv[1])):
             if prefix:
                 out = out.replace(prefix, marker)
         return out
@@ -590,9 +601,10 @@ def sanitize_for_evidence(obj: Any, roots: dict[str, str]) -> Any:
 def dump_json(path: Path, obj: Any, roots: dict[str, str]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(sanitize_for_evidence(obj, roots), indent=2,
-                   sort_keys=True, ensure_ascii=False) + "\n",
-        encoding="utf-8")
+        json.dumps(sanitize_for_evidence(obj, roots), indent=2, sort_keys=True, ensure_ascii=False)
+        + "\n",
+        encoding="utf-8",
+    )
     return path
 
 

@@ -136,9 +136,7 @@ _AUTH_RE = re.compile(
     r"access\s*token.*(invalid|expired)|\b401\b",
     re.IGNORECASE,
 )
-_AUTH_TYPE_RE = re.compile(
-    r"auth|unauthori[sz]ed|unauthenticat|credential", re.IGNORECASE
-)
+_AUTH_TYPE_RE = re.compile(r"auth|unauthori[sz]ed|unauthenticat|credential", re.IGNORECASE)
 
 _PERM_RE = re.compile(
     r"\bforbidden\b|permission\s*(denied|required)|access\s*denied|"
@@ -146,9 +144,7 @@ _PERM_RE = re.compile(
     r"not\s*permitted|\b403\b",
     re.IGNORECASE,
 )
-_PERM_TYPE_RE = re.compile(
-    r"permission|forbidden|accessdenied|privilege", re.IGNORECASE
-)
+_PERM_TYPE_RE = re.compile(r"permission|forbidden|accessdenied|privilege", re.IGNORECASE)
 
 # schema/structured-output signals — checked before invalid_arguments:
 # "schema validation failed" is the more specific read than a bare 400
@@ -339,11 +335,9 @@ def _span_signals(span: Span) -> dict[FailureCategory, list[Signal]]:
         add(FailureCategory.BUDGET_EXCEEDED, f"attr:{key}=true", True)
     if _BUDGET_RE.search(text):
         if code == 429:
-            add(FailureCategory.BUDGET_EXCEEDED,
-                "http_status:429+quota-terms", True)
+            add(FailureCategory.BUDGET_EXCEEDED, "http_status:429+quota-terms", True)
         else:
-            add(FailureCategory.BUDGET_EXCEEDED,
-                "message:budget-quota-terms", False)
+            add(FailureCategory.BUDGET_EXCEEDED, "message:budget-quota-terms", False)
 
     # authentication
     if code == 401:
@@ -359,11 +353,9 @@ def _span_signals(span: Span) -> dict[FailureCategory, list[Signal]]:
         add(FailureCategory.MISSING_PERMISSIONS, "http_status:403", True)
     for t in types:
         if _PERM_TYPE_RE.search(t):
-            add(FailureCategory.MISSING_PERMISSIONS,
-                f"exception_type:{t}", True)
+            add(FailureCategory.MISSING_PERMISSIONS, f"exception_type:{t}", True)
     if _PERM_RE.search(text):
-        add(FailureCategory.MISSING_PERMISSIONS,
-            "message:permission-terms", False)
+        add(FailureCategory.MISSING_PERMISSIONS, "message:permission-terms", False)
 
     # schema mismatch — before invalid_arguments: schema/parse wording
     # is the more specific read of a validation failure
@@ -378,11 +370,9 @@ def _span_signals(span: Span) -> dict[FailureCategory, list[Signal]]:
         add(FailureCategory.INVALID_ARGUMENTS, f"http_status:{code}", True)
     for t in types:
         if _ARG_TYPE_RE.search(t):
-            add(FailureCategory.INVALID_ARGUMENTS,
-                f"exception_type:{t}", True)
+            add(FailureCategory.INVALID_ARGUMENTS, f"exception_type:{t}", True)
     if _ARG_RE.search(text):
-        add(FailureCategory.INVALID_ARGUMENTS, "message:argument-terms",
-            False)
+        add(FailureCategory.INVALID_ARGUMENTS, "message:argument-terms", False)
 
     # retry exhaustion — recorded counters, explicit flags, retry events,
     # RetryError types, or exhaustion wording
@@ -390,39 +380,35 @@ def _span_signals(span: Span) -> dict[FailureCategory, list[Signal]]:
     if n is not None:
         mx = _retry_max(span)
         if mx is not None and n >= mx:
-            add(FailureCategory.RETRY_EXHAUSTION,
-                f"attr:retries={n}>=max={mx}", True)
+            add(FailureCategory.RETRY_EXHAUSTION, f"attr:retries={n}>=max={mx}", True)
         elif n >= RETRY_EXHAUSTION_THRESHOLD:
-            add(FailureCategory.RETRY_EXHAUSTION,
+            add(
+                FailureCategory.RETRY_EXHAUSTION,
                 f"attr:retries={n}>=threshold:{RETRY_EXHAUSTION_THRESHOLD}",
-                True)
+                True,
+            )
     key = _flagged(span, _RETRY_FLAGS)
     if key:
         add(FailureCategory.RETRY_EXHAUSTION, f"attr:{key}=true", True)
     retry_events = sum(1 for ev in span.events if "retr" in ev.name.lower())
     if retry_events >= RETRY_EXHAUSTION_THRESHOLD:
-        add(FailureCategory.RETRY_EXHAUSTION,
-            f"events:retry={retry_events}", True)
+        add(FailureCategory.RETRY_EXHAUSTION, f"events:retry={retry_events}", True)
     for t in types:
         if _RETRY_TYPE_RE.search(t):
-            add(FailureCategory.RETRY_EXHAUSTION, f"exception_type:{t}",
-                True)
+            add(FailureCategory.RETRY_EXHAUSTION, f"exception_type:{t}", True)
     if _RETRY_EXH_RE.search(text):
-        add(FailureCategory.RETRY_EXHAUSTION,
-            "message:retry-exhaustion-terms", False)
+        add(FailureCategory.RETRY_EXHAUSTION, "message:retry-exhaustion-terms", False)
 
     # cancellation — strong: CancelledError types / cancelled flags;
     # weak: cancel wording in the status message alone
     for t in types:
         if _CANCEL_TYPE_RE.search(t):
-            add(FailureCategory.AGENT_CANCELLED, f"exception_type:{t}",
-                True)
+            add(FailureCategory.AGENT_CANCELLED, f"exception_type:{t}", True)
     key = _flagged(span, _CANCEL_FLAGS)
     if key:
         add(FailureCategory.AGENT_CANCELLED, f"attr:{key}=true", True)
     if _CANCEL_RE.search(span.status.message or ""):
-        add(FailureCategory.AGENT_CANCELLED,
-            "status_message:cancelled", False)
+        add(FailureCategory.AGENT_CANCELLED, "status_message:cancelled", False)
 
     # rate limit — plain 429 or throttle wording on the span that errored
     if code == 429:
@@ -474,12 +460,8 @@ class _Scan:
 
 def _scan_trace(trace: Trace) -> _Scan:
     errs = _err_spans(trace)
-    unclosed = [
-        s for s in trace.spans if IntegrityFlag.MISSING_END in s.integrity_flags
-    ]
-    cyclic = sorted(
-        cycle_member_ids({s.span_id: s.parent_span_id for s in trace.spans})
-    )
+    unclosed = [s for s in trace.spans if IntegrityFlag.MISSING_END in s.integrity_flags]
+    cyclic = sorted(cycle_member_ids({s.span_id: s.parent_span_id for s in trace.spans}))
     # an unclosed span in a trace that still declares itself open
     # (ended_at=None) is in-flight, not a failure — truncation is only
     # evidence when the envelope claims the run ended but spans didn't
@@ -497,9 +479,7 @@ def _scan_trace(trace: Trace) -> _Scan:
         if s.status.code is StatusCode.ERROR:
             continue
         strong = [
-            sig
-            for sig in signals[s.span_id].get(FailureCategory.AGENT_CANCELLED, [])
-            if sig[1]
+            sig for sig in signals[s.span_id].get(FailureCategory.AGENT_CANCELLED, []) if sig[1]
         ]
         if strong:
             cancelled.append((s, strong))
@@ -518,9 +498,7 @@ def _signal_evidence(hits: list[tuple[Span, list[Signal]]]) -> dict[str, Any]:
     ordered = sorted(hits, key=lambda h: h[0].span_id)
     return {
         "span_ids": [s.span_id for s, _ in ordered],
-        "signals": {
-            s.span_id: [label for label, _ in sigs] for s, sigs in ordered
-        },
+        "signals": {s.span_id: [label for label, _ in sigs] for s, sigs in ordered},
         "names": sorted({s.name for s, _ in ordered}),
     }
 
@@ -539,10 +517,7 @@ def classify_failure(trace: Trace) -> FailureReport:
     # …) stay evidence, not failure verdicts
     report = FailureReport(
         trace_id=trace.trace_id,
-        failed=bool(scan.errs)
-        or scan.truncated
-        or bool(scan.cyclic)
-        or bool(scan.cancelled),
+        failed=bool(scan.errs) or scan.truncated or bool(scan.cyclic) or bool(scan.cancelled),
     )
 
     # parent-pointer cycle — any member of a real cycle in the stored
@@ -551,9 +526,7 @@ def classify_failure(trace: Trace) -> FailureReport:
     if scan.cyclic:
         report.category = FailureCategory.CYCLE
         report.evidence = {"span_ids": scan.cyclic}
-        report.detail = (
-            "parent-pointer cycle in stored topology — corrupted parentage"
-        )
+        report.detail = "parent-pointer cycle in stored topology — corrupted parentage"
         return report
 
     # signal categories in specificity order — budget/quota before a bare
@@ -613,10 +586,7 @@ def classify_failure(trace: Trace) -> FailureReport:
             "span_ids": [s.span_id for s in scan.unclosed],
             "count": len(scan.unclosed),
         }
-        report.detail = (
-            f"{len(scan.unclosed)} span(s) never ended — host likely "
-            "died mid-run"
-        )
+        report.detail = f"{len(scan.unclosed)} span(s) never ended — host likely died mid-run"
         return report
 
     if scan.errs:

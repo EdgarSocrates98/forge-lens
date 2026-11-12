@@ -33,8 +33,7 @@ def to_unix_nano(dt: datetime) -> int:
     )
     if abs(ns) > _I64_MAX:
         raise ValidationError(
-            f"datetime {dt.isoformat()} is outside the int64 "
-            "nanosecond range (~1678-2262)"
+            f"datetime {dt.isoformat()} is outside the int64 nanosecond range (~1678-2262)"
         )
     return ns
 

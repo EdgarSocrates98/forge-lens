@@ -40,9 +40,7 @@ def _serve(app: Any) -> tuple[str, Any, threading.Thread]:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
-    )
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     deadline = time.monotonic() + 10
@@ -84,9 +82,7 @@ def client(live) -> LensClient:
 # -- live round-trips -----------------------------------------------------
 
 
-def test_list_traces_envelope_and_filters(
-    client: LensClient, live: tuple[str, str]
-) -> None:
+def test_list_traces_envelope_and_filters(client: LensClient, live: tuple[str, str]) -> None:
     _, tid = live
     out = client.list_traces()
     assert {*out} >= {"items", "limit", "offset"}
@@ -120,9 +116,7 @@ def test_list_sessions_and_tools(client: LensClient) -> None:
     assert tools["items"][0]["errors"] == 1
 
 
-def test_trace_intelligence_routes(
-    client: LensClient, live: tuple[str, str]
-) -> None:
+def test_trace_intelligence_routes(client: LensClient, live: tuple[str, str]) -> None:
     _, tid = live
     cost = client.trace_cost(tid)
     assert cost["total_tokens"] == 142
@@ -173,9 +167,7 @@ def test_trace_graph_routes(client: LensClient, live: tuple[str, str]) -> None:
     assert sg["stats"]["truncated"] is False
 
 
-def test_trace_investigation_routes(
-    client: LensClient, live: tuple[str, str]
-) -> None:
+def test_trace_investigation_routes(client: LensClient, live: tuple[str, str]) -> None:
     _, tid = live
     replay = client.trace_replay(tid)
     assert replay["span_count"] == 3
@@ -223,9 +215,7 @@ def test_meta_routes(client: LensClient) -> None:
     assert summary["recent_failures"]  # the seeded trace errored
 
 
-def test_read_side_post_routes(
-    client: LensClient, live: tuple[str, str]
-) -> None:
+def test_read_side_post_routes(client: LensClient, live: tuple[str, str]) -> None:
     _, tid = live
     report = client.eval_run([tid], [{"name": "error_free"}])
     # EvalReport.results is keyed by trace_id
@@ -262,8 +252,7 @@ def test_specialists_and_alerts(client: LensClient, live: tuple[str, str]) -> No
     assert run["findings"]
 
     fired = client.alerts_evaluate(
-        [{"rule_id": "has-errors", "metric": "error_count",
-          "op": ">=", "threshold": 1}]
+        [{"rule_id": "has-errors", "metric": "error_count", "op": ">=", "threshold": 1}]
     )
     assert fired["evaluated"] == 1
     assert fired["fired"][0]["rule_id"] == "has-errors"
@@ -274,9 +263,7 @@ def test_auth_reader_key_required(tmp_path, synthetic_trace: Trace) -> None:
     the same key in the client unlocks every read route."""
     db = tmp_path / "auth.db"
     store = SQLiteTraceStore(db)
-    cfg = LensConfig(
-        data_dir=tmp_path, db_path=db, api_key="reader-key", auth_reads=True
-    )
+    cfg = LensConfig(data_dir=tmp_path, db_path=db, api_key="reader-key", auth_reads=True)
     app = create_app(store=store, config=cfg)
     url, server, thread = _serve(app)
     try:
@@ -405,8 +392,11 @@ def test_post_body_shape() -> None:
 def test_http_error_carries_status_and_detail() -> None:
     def boom(req: Any, timeout: Any = None) -> Any:
         raise urllib.error.HTTPError(
-            req.full_url, 403, "forbidden",
-            hdrs=None, fp=io.BytesIO(b'{"detail": "scope"}'),
+            req.full_url,
+            403,
+            "forbidden",
+            hdrs=None,
+            fp=io.BytesIO(b'{"detail": "scope"}'),
         )
 
     with (
@@ -447,9 +437,7 @@ def test_non_json_response_is_query_error() -> None:
 # -- config resolution -----------------------------------------------------
 
 
-def test_from_config_resolves_env(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_from_config_resolves_env(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """from_config() follows the same env+config.toml chain as the CLI."""
     monkeypatch.chdir(tmp_path)  # no .forge-lens/config.toml here
     monkeypatch.setenv("FORGE_LENS_ENDPOINT", "http://lens.example:9000")
@@ -462,9 +450,7 @@ def test_from_config_resolves_env(
 
 
 def test_from_config_accepts_explicit_config(tmp_path) -> None:
-    cfg = LensConfig(
-        data_dir=tmp_path, endpoint="http://e:1", api_key="k", project_id="p"
-    )
+    cfg = LensConfig(data_dir=tmp_path, endpoint="http://e:1", api_key="k", project_id="p")
     client = LensClient.from_config(cfg)
     assert (client.endpoint, client.api_key, client.project_id) == (
         "http://e:1",

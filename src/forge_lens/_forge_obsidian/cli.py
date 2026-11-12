@@ -83,7 +83,14 @@ def vault_status(forge_id: str) -> dict[str, Any]:
         descriptor["unresolved"].append("configured vault path is not a directory")
         return descriptor
     descriptor["state"] = "ready"
-    descriptor["capabilities"] = ["scan", "preview", "sync-plan", "export", "export-note", "history"]
+    descriptor["capabilities"] = [
+        "scan",
+        "preview",
+        "sync-plan",
+        "export",
+        "export-note",
+        "history",
+    ]
     try:
         receipts = list_obsidian_receipts(vault, limit=100)
     except ObsidianVaultError:
@@ -364,7 +371,11 @@ def obsidian_argparse(
 
     def _mk(verb: str, **fixed: Any) -> Callable[[Any], int]:
         def _run(args: Any) -> int:
-            kw = {k: v for k, v in vars(args).items() if k not in {"command", "obsidian_command", "func"}}
+            kw = {
+                k: v
+                for k, v in vars(args).items()
+                if k not in {"command", "obsidian_command", "func"}
+            }
             kw.update(fixed)
             kw.setdefault("source", src)
             return run_verb(forge_id, verb, **kw)
@@ -465,7 +476,13 @@ def obsidian_app(
         classification: str = typer.Option("internal", "--classification"),
     ) -> None:
         """Dry-run a sync of local FILE into the vault at PATH."""
-        _run("sync-plan", path=path, file=file, baseline_hash=baseline_hash, classification=classification)
+        _run(
+            "sync-plan",
+            path=path,
+            file=file,
+            baseline_hash=baseline_hash,
+            classification=classification,
+        )
 
     @app.command("export")
     def export(
@@ -477,8 +494,15 @@ def obsidian_app(
         no_moc: bool = typer.Option(False, "--no-moc", help="Do not refresh forges/index.md"),
     ) -> None:
         """Apply a reviewed sync plan and emit the real vault receipt."""
-        _run("export", path=path, file=file, baseline_hash=baseline_hash,
-             classification=classification, yes=yes, moc=not no_moc)
+        _run(
+            "export",
+            path=path,
+            file=file,
+            baseline_hash=baseline_hash,
+            classification=classification,
+            yes=yes,
+            moc=not no_moc,
+        )
 
     @app.command("export-note")
     def export_note(
@@ -490,8 +514,15 @@ def obsidian_app(
         no_moc: bool = typer.Option(False, "--no-moc"),
     ) -> None:
         """Export FILE as ``forges/<forge-id>/<name>.md`` — canonical layout."""
-        _run("export-note", name=name, file=file, baseline_hash=baseline_hash,
-             classification=classification, yes=yes, moc=not no_moc)
+        _run(
+            "export-note",
+            name=name,
+            file=file,
+            baseline_hash=baseline_hash,
+            classification=classification,
+            yes=yes,
+            moc=not no_moc,
+        )
 
     @app.command("history")
     def history(limit: int = typer.Option(50, "--limit", min=1, max=100)) -> None:

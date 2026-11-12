@@ -11,9 +11,7 @@ from forge_lens.sdk.tracer import LensTracer, instrument_tool, span
 def _tracer() -> tuple[LensTracer, InMemoryExporter]:
     exporter = InMemoryExporter()
     return (
-        LensTracer(
-            service_name="test-svc", exporter=exporter, register_atexit=False
-        ),
+        LensTracer(service_name="test-svc", exporter=exporter, register_atexit=False),
         exporter,
     )
 
@@ -123,7 +121,9 @@ def test_auto_flush_export_failure_is_swallowed() -> None:
     """Observability must never break the observed program."""
     exporter = _FlakyExporter(failures=10)
     tracer = LensTracer(
-        service_name="t", exporter=exporter, register_atexit=False,
+        service_name="t",
+        exporter=exporter,
+        register_atexit=False,
         max_export_failures=100,
     )
     with tracer.start_span("root"):  # would raise ExportError on root end
@@ -136,7 +136,9 @@ def test_auto_flush_never_masks_app_exception() -> None:
     """P0: app raises ValueError; failing export must not replace it."""
     exporter = _FlakyExporter(failures=10)
     tracer = LensTracer(
-        service_name="t", exporter=exporter, register_atexit=False,
+        service_name="t",
+        exporter=exporter,
+        register_atexit=False,
         max_export_failures=100,
     )
     with pytest.raises(ValueError, match="app-bug"), tracer.start_span("root"):
@@ -257,8 +259,11 @@ def test_poison_batch_salvages_good_traces() -> None:
     the salvage pass re-exports each alone."""
     exporter = _PoisonAwareExporter()
     tracer = LensTracer(
-        service_name="t", exporter=exporter, auto_flush=False,
-        register_atexit=False, max_export_failures=3,
+        service_name="t",
+        exporter=exporter,
+        auto_flush=False,
+        register_atexit=False,
+        max_export_failures=3,
     )
     with tracer.start_span("good"):
         pass
@@ -277,8 +282,11 @@ def test_persistent_failure_dead_letters_trace() -> None:
     exporter = _FlakyExporter(failures=99)
     dead: list = []
     tracer = LensTracer(
-        service_name="t", exporter=exporter, auto_flush=False,
-        register_atexit=False, max_export_failures=2,
+        service_name="t",
+        exporter=exporter,
+        auto_flush=False,
+        register_atexit=False,
+        max_export_failures=2,
         on_dead_letter=dead.append,
     )
     with tracer.start_span("doomed"):
@@ -315,7 +323,9 @@ def test_concurrent_spans_during_export_are_not_lost() -> None:
 
     exporter = _SlowExporter()
     tracer = LensTracer(
-        service_name="t", exporter=exporter, auto_flush=False,
+        service_name="t",
+        exporter=exporter,
+        auto_flush=False,
         register_atexit=False,
     )
     stack = ExitStack()
@@ -327,9 +337,7 @@ def test_concurrent_spans_during_export_are_not_lost() -> None:
 
         def add_span() -> None:
             # worker thread: no contextvar parent — joins the trace via id
-            with tracer.start_span(
-                "during-flight", trace_id=root_span.trace_id
-            ):
+            with tracer.start_span("during-flight", trace_id=root_span.trace_id):
                 pass
 
         add_thread = threading.Thread(target=add_span)
@@ -396,6 +404,7 @@ def test_instrument_tool_async() -> None:
     tool = next(s for s in trace.spans if s.kind == SpanKind.TOOL)
     assert tool.end_time is not None
     import json as _json
+
     params = _json.loads(tool.attributes["tool.parameters"])
     assert params["args"] == ["http://x"]
 
@@ -464,9 +473,7 @@ def test_redact_hook_error_never_breaks_app() -> None:
     def bad(_s: object) -> None:
         raise RuntimeError("hook blew up")
 
-    tracer = LensTracer(
-        service_name="t", exporter=exporter, register_atexit=False, redact=bad
-    )
+    tracer = LensTracer(service_name="t", exporter=exporter, register_atexit=False, redact=bad)
     with tracer.start_span("root"):
         pass
     assert tracer.export_errors == 1
@@ -504,8 +511,12 @@ def test_dead_letters_bounded_with_drop_counter() -> None:
     exporter = _FlakyExporter(failures=9999)
     dead: list = []
     tracer = LensTracer(
-        service_name="t", exporter=exporter, auto_flush=False,
-        register_atexit=False, max_export_failures=1, max_dead_letters=2,
+        service_name="t",
+        exporter=exporter,
+        auto_flush=False,
+        register_atexit=False,
+        max_export_failures=1,
+        max_dead_letters=2,
         on_dead_letter=dead.append,
     )
     for _ in range(4):
@@ -543,17 +554,17 @@ def test_tool_call_exotic_arg_keys_never_crash_host() -> None:
     spans = [s for t in tracer.exporter.traces for s in t.spans]
     assert len(spans) == 2
     import json as _json
+
     for s in spans:
         assert s.attributes["forge_lens.tool_args_unhashable"] is True
         assert "forge_lens.tool_args_sha256" not in s.attributes
     # mixed int/str keys coerce without sort_keys — real params land;
     # tuple keys can't encode at all → parseable marker
     assert _json.loads(spans[0].attributes["tool.parameters"]) == {
-        "1": "a", "k": "v",
+        "1": "a",
+        "k": "v",
     }
-    assert _json.loads(spans[1].attributes["tool.parameters"])[
-        "_forge_lens.unserializable"
-    ] is True
+    assert _json.loads(spans[1].attributes["tool.parameters"])["_forge_lens.unserializable"] is True
 
 
 def test_finalize_empty_trace_stays_unset_not_ok() -> None:

@@ -79,11 +79,20 @@ def _trace(
     )
 
 
-_PRICED = {"model": "gpt-4o", "input_tokens": 1000, "output_tokens": 500,
-           "total_tokens": 1500, "measurement_source": "provider"}
-_UNPRICED = {"model": "no-such-model-zz", "input_tokens": 100,
-             "output_tokens": 50, "total_tokens": 150,
-             "measurement_source": "provider"}
+_PRICED = {
+    "model": "gpt-4o",
+    "input_tokens": 1000,
+    "output_tokens": 500,
+    "total_tokens": 1500,
+    "measurement_source": "provider",
+}
+_UNPRICED = {
+    "model": "no-such-model-zz",
+    "input_tokens": 100,
+    "output_tokens": 50,
+    "total_tokens": 150,
+    "measurement_source": "provider",
+}
 
 
 @pytest.fixture
@@ -97,19 +106,42 @@ def seeded(tmp_path: Path) -> SQLiteTraceStore:
     foreign: other project — must not leak into project scope.
     """
     store = SQLiteTraceStore(tmp_path / "m.db")
-    store.upsert_trace(_trace("aa", [
-        _span("aa", 1, kind=SpanKind.LLM, usage=dict(_PRICED)),
-    ], duration_ms=100))
-    store.upsert_trace(_trace("bb", [
-        _span("bb", 1, kind=SpanKind.LLM, usage=dict(_UNPRICED),
-              error=True),
-    ], duration_ms=200, status=StatusCode.ERROR))
-    store.upsert_trace(_trace("cc", [
-        _span("cc", i, kind=SpanKind.TOOL, name="read") for i in range(4)
-    ], duration_ms=50))
-    store.upsert_trace(_trace("dd", [
-        _span("dd", 1, kind=SpanKind.LLM, usage=dict(_PRICED)),
-    ], duration_ms=999, project_id="other"))
+    store.upsert_trace(
+        _trace(
+            "aa",
+            [
+                _span("aa", 1, kind=SpanKind.LLM, usage=dict(_PRICED)),
+            ],
+            duration_ms=100,
+        )
+    )
+    store.upsert_trace(
+        _trace(
+            "bb",
+            [
+                _span("bb", 1, kind=SpanKind.LLM, usage=dict(_UNPRICED), error=True),
+            ],
+            duration_ms=200,
+            status=StatusCode.ERROR,
+        )
+    )
+    store.upsert_trace(
+        _trace(
+            "cc",
+            [_span("cc", i, kind=SpanKind.TOOL, name="read") for i in range(4)],
+            duration_ms=50,
+        )
+    )
+    store.upsert_trace(
+        _trace(
+            "dd",
+            [
+                _span("dd", 1, kind=SpanKind.LLM, usage=dict(_PRICED)),
+            ],
+            duration_ms=999,
+            project_id="other",
+        )
+    )
     yield store
     store.close()
 
@@ -118,9 +150,15 @@ def test_metric_catalog() -> None:
     assert "span_count" in METRICS
     assert "trace_count" in METRICS
     for name in (
-        "avg_duration_ms", "max_duration_ms", "p95_duration_ms",
-        "error_traces", "error_trace_rate", "token_total",
-        "cost_total_usd", "cost_per_trace_usd", "unpriced_model_count",
+        "avg_duration_ms",
+        "max_duration_ms",
+        "p95_duration_ms",
+        "error_traces",
+        "error_trace_rate",
+        "token_total",
+        "cost_total_usd",
+        "cost_per_trace_usd",
+        "unpriced_model_count",
         "loop_traces",
     ):
         assert name in METRICS, name
@@ -198,9 +236,7 @@ def test_window_cap_and_empty_store(tmp_path: Path) -> None:
 
 
 def test_only_skips_trace_scan(seeded: SQLiteTraceStore) -> None:
-    m = resolve_metrics(
-        seeded, "default", PricingRegistry(), only={"span_count", "bogus"}
-    )
+    m = resolve_metrics(seeded, "default", PricingRegistry(), only={"span_count", "bogus"})
     assert m == {"span_count": 6.0}  # unknown names ignored, not error
 
 
@@ -210,10 +246,14 @@ def test_unended_trace_excluded_from_durations(
     store = SQLiteTraceStore(tmp_path / "u.db")
     try:
         store.upsert_trace(_trace("ee", [_span("ee", 1)], duration_ms=40))
-        store.upsert_trace(_trace(
-            "ff", [_span("ff", 1)], ended=False,
-            status=StatusCode.UNSET,
-        ))
+        store.upsert_trace(
+            _trace(
+                "ff",
+                [_span("ff", 1)],
+                ended=False,
+                status=StatusCode.UNSET,
+            )
+        )
         m = resolve_metrics(store, "default", PricingRegistry())
         assert m["trace_count"] == 2.0
         assert m["avg_duration_ms"] == 40.0
@@ -227,21 +267,23 @@ def test_metric_window_bound_is_documented() -> None:
 
 
 def test_endpoint_resolves_new_metrics(
-    tmp_path: Path, seeded: SQLiteTraceStore,
+    tmp_path: Path,
+    seeded: SQLiteTraceStore,
 ) -> None:
     cfg = LensConfig(data_dir=tmp_path, db_path=tmp_path / "api.db")
     app = create_app(store=seeded, config=cfg)
     with TestClient(app) as c:
-        r = c.post("/v1/alerts/evaluate", json={"rules": [
-            {"rule_id": "costy", "metric": "cost_total_usd",
-             "op": ">", "threshold": 0.001},
-            {"rule_id": "loopy", "metric": "loop_traces",
-             "op": ">=", "threshold": 1},
-            {"rule_id": "slow", "metric": "p95_duration_ms",
-             "op": ">", "threshold": 10000},
-            {"rule_id": "err", "metric": "error_trace_rate",
-             "op": ">", "threshold": 0.3},
-        ]})
+        r = c.post(
+            "/v1/alerts/evaluate",
+            json={
+                "rules": [
+                    {"rule_id": "costy", "metric": "cost_total_usd", "op": ">", "threshold": 0.001},
+                    {"rule_id": "loopy", "metric": "loop_traces", "op": ">=", "threshold": 1},
+                    {"rule_id": "slow", "metric": "p95_duration_ms", "op": ">", "threshold": 10000},
+                    {"rule_id": "err", "metric": "error_trace_rate", "op": ">", "threshold": 0.3},
+                ]
+            },
+        )
         assert r.status_code == 200
         fired = {f["rule_id"] for f in r.json()["fired"]}
         assert fired == {"costy", "loopy", "err"}

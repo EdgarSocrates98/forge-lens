@@ -4,19 +4,19 @@
 
 ```python
 LensTracer(
-    service_name="meu-agente",     # obrigatório → TraceSource.system
-    exporter=HTTPExporter(...)|InMemoryExporter()|duck-type,
-    on_flush=lambda trace: ...,    # callback por trace flushada
+    service_name="meu-agente",  # obrigatório → TraceSource.system
+    exporter=HTTPExporter(...) | InMemoryExporter() | duck - type,
+    on_flush=lambda trace: ...,  # callback por trace flushada
     on_export_error=lambda exc, trace: ...,  # falha de auto-flush
-    on_dead_letter=lambda trace: ...,        # trace movida a dead_letters
-    redact=lambda span: ...,       # hook de redação: por span, no flush,
-                                   # antes do snapshot — pode mutar attrs;
-                                   # erro do hook conta em export_errors
-    auto_flush=True,               # flush quando o span raiz fecha
+    on_dead_letter=lambda trace: ...,  # trace movida a dead_letters
+    redact=lambda span: ...,  # hook de redação: por span, no flush,
+    # antes do snapshot — pode mutar attrs;
+    # erro do hook conta em export_errors
+    auto_flush=True,  # flush quando o span raiz fecha
     session_id=None,
-    project_id="default",          # gravado em cada Trace (envelope só preenche "default")
-    max_export_failures=5,         # falhas consecutivas antes de dead-letter
-    register_atexit=True,          # flush best-effort ao sair do processo
+    project_id="default",  # gravado em cada Trace (envelope só preenche "default")
+    max_export_failures=5,  # falhas consecutivas antes de dead-letter
+    register_atexit=True,  # flush best-effort ao sair do processo
 )
 ```
 
@@ -108,8 +108,7 @@ uma trace remota. `current_span()` lê o topo da pilha (contextvar).
 ## `HTTPExporter`
 
 ```python
-HTTPExporter(endpoint="http://127.0.0.1:7777", api_key=None,
-             project_id="default", timeout_s=10)
+HTTPExporter(endpoint="http://127.0.0.1:7777", api_key=None, project_id="default", timeout_s=10)
 ```
 
 `export(traces, source)` → `POST /v1/traces` (stdlib urllib, zero deps de
@@ -138,9 +137,8 @@ API emite — nada fabricado nem recalculado localmente).
 ```python
 from forge_lens.sdk import LensClient, QueryError
 
-LensClient(endpoint="http://127.0.0.1:7777", api_key=None,
-           project_id="default", timeout_s=10.0)
-LensClient.from_config(config=None)   # resolve via load_config() — a
+LensClient(endpoint="http://127.0.0.1:7777", api_key=None, project_id="default", timeout_s=10.0)
+LensClient.from_config(config=None)  # resolve via load_config() — a
 # mesma cadeia FORGE_LENS_* + .forge-lens/config.toml da CLI e do serve
 # (endpoint, api_key, project_id)
 ```

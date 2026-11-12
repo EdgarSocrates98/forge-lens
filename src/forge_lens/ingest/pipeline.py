@@ -123,15 +123,9 @@ def flag_integrity(trace: Trace) -> list[str]:
         # contradict the spans they claim to cover
         earliest = min(s.start_time for s in trace.spans)
         if ensure_aware(trace.started_at) > earliest:
-            warnings.append(
-                "declared started_at is after the earliest span start"
-            )
+            warnings.append("declared started_at is after the earliest span start")
         ends = [s.end_time for s in trace.spans if s.end_time is not None]
-        if (
-            trace.ended_at is not None
-            and ends
-            and ensure_aware(trace.ended_at) < max(ends)
-        ):
+        if trace.ended_at is not None and ends and ensure_aware(trace.ended_at) < max(ends):
             warnings.append("declared ended_at is before the latest span end")
     return warnings
 
@@ -141,8 +135,7 @@ def _ensure_storable(trace: Trace) -> None:
     int64-range timestamps, unencodable TEXT — BEFORE the first write
     of the batch, so ingest is all-or-nothing for input errors."""
     if not trace.project_id or not trace.project_id.strip():
-        raise ValidationError(
-            f"trace {trace.trace_id}: project_id must be non-empty")
+        raise ValidationError(f"trace {trace.trace_id}: project_id must be non-empty")
     to_unix_nano(trace.started_at)
     if trace.ended_at is not None:
         to_unix_nano(trace.ended_at)
@@ -161,8 +154,8 @@ def _ensure_storable(trace: Trace) -> None:
                 cur.encode("utf-8")
             except UnicodeEncodeError:
                 raise ValidationError(
-                    f"trace {trace.trace_id}: unencodable string "
-                    "(lone surrogate)") from None
+                    f"trace {trace.trace_id}: unencodable string (lone surrogate)"
+                ) from None
         elif isinstance(cur, dict):
             stack.extend(cur.values())
         elif isinstance(cur, (list, tuple)):
@@ -297,8 +290,7 @@ class IngestPipeline:
                     ):
                         span.integrity_flags.append(IntegrityFlag.ORPHAN)
                         warn_sink.append(
-                            f"{trace.trace_id}: span {span.span_id} parent "
-                            f"belongs to trace {owner}"
+                            f"{trace.trace_id}: span {span.span_id} parent belongs to trace {owner}"
                         )
 
                 inserted, updated, duplicates = self.store.upsert_trace(trace)
@@ -310,9 +302,8 @@ class IngestPipeline:
                 # fields() means a future counter can't be dropped
                 # from the aggregate by a stale name list
                 for field in fields(SanitizeReport):
-                    result.sanitize[field.name] = (
-                        result.sanitize.get(field.name, 0)
-                        + getattr(report, field.name)
+                    result.sanitize[field.name] = result.sanitize.get(field.name, 0) + getattr(
+                        report, field.name
                     )
 
         METRICS.inc(M_TRACES_INGESTED, len(traces))

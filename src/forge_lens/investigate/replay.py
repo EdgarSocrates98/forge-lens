@@ -55,9 +55,7 @@ def replay_timeline(trace: Trace) -> dict[str, Any]:
     # deterministic order, waterfall-sensible: at an identical timestamp
     # a span's start precedes its events, which precede its end
     kind_rank = {"span_start": 0, "event": 1, "span_end": 2}
-    entries.sort(
-        key=lambda e: (e["_sort"], e["span_id"], kind_rank[e["kind"]])
-    )
+    entries.sort(key=lambda e: (e["_sort"], e["span_id"], kind_rank[e["kind"]]))
     if not entries:
         return {
             "trace_id": trace.trace_id,
@@ -70,9 +68,7 @@ def replay_timeline(trace: Trace) -> dict[str, Any]:
     t0 = entries[0]["_sort"]
     total_ms = (entries[-1]["_sort"] - t0).total_seconds() * 1000.0
     for e in entries:
-        e["offset_ms"] = round(
-            (e["_sort"] - t0).total_seconds() * 1000.0, 3
-        )
+        e["offset_ms"] = round((e["_sort"] - t0).total_seconds() * 1000.0, 3)
         del e["_sort"]
     return {
         "trace_id": trace.trace_id,

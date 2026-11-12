@@ -145,9 +145,7 @@ def test_session_graph_sequences_traces() -> None:
 
 
 def test_cost_report_exact_pricing_math() -> None:
-    reg = PricingRegistry(
-        {"test-model": ModelPrice(2.50, 10.00, cached_input_per_mtok=1.25)}
-    )
+    reg = PricingRegistry({"test-model": ModelPrice(2.50, 10.00, cached_input_per_mtok=1.25)})
     llm = _span(
         "f1",
         "llm call",
@@ -169,9 +167,7 @@ def test_cost_report_prefix_resolution_and_unpriced() -> None:
         kind=SpanKind.LLM,
         attrs=_usage("gpt-4o-2024-08-06", 100, 50),
     )
-    unknown = _span(
-        "22", "llm", kind=SpanKind.LLM, attrs=_usage("mystery-llm", 10, 10), start_s=1
-    )
+    unknown = _span("22", "llm", kind=SpanKind.LLM, attrs=_usage("mystery-llm", 10, 10), start_s=1)
     report = trace_cost(_trace([dated, unknown]), reg)
     assert report.span_costs[0].priced  # prefix-resolved
     assert not report.span_costs[1].priced
@@ -186,16 +182,12 @@ def test_cost_report_flags_llm_spans_without_usage() -> None:
 
 
 def test_cost_cached_and_reasoning_rates() -> None:
-    reg = PricingRegistry(
-        {"m": ModelPrice(4.0, 8.0, cached_input_per_mtok=1.0)}
-    )
+    reg = PricingRegistry({"m": ModelPrice(4.0, 8.0, cached_input_per_mtok=1.0)})
     llm = _span(
         "f1",
         "llm",
         kind=SpanKind.LLM,
-        attrs=_usage(
-            "m", 1000, 0, cached_input_tokens=400, reasoning_tokens=100
-        ),
+        attrs=_usage("m", 1000, 0, cached_input_tokens=400, reasoning_tokens=100),
     )
     report = trace_cost(_trace([llm]), reg)
     # uncached 600x4.0 + cached 400x1.0 + reasoning 100x8.0 (as output)
@@ -209,8 +201,7 @@ def test_cost_cached_and_reasoning_rates() -> None:
 def test_waste_retry_amplification() -> None:
     args = {"forge_lens.tool_args": '{"q": "same"}'}
     spans = [
-        _span(f"1{i}", "search", kind=SpanKind.TOOL, parent="10",
-              start_s=i, attrs=dict(args))
+        _span(f"1{i}", "search", kind=SpanKind.TOOL, parent="10", start_s=i, attrs=dict(args))
         for i in range(3)
     ]
     findings = detect_waste(_trace(spans), PricingRegistry())
@@ -221,8 +212,9 @@ def test_waste_retry_amplification() -> None:
 
 def test_waste_context_replay_and_unknown_tokens() -> None:
     llms = [
-        _span(f"2{i}", "llm", kind=SpanKind.LLM, start_s=i,
-              attrs=_usage("gpt-4o", 1000 * (i + 1), 10))
+        _span(
+            f"2{i}", "llm", kind=SpanKind.LLM, start_s=i, attrs=_usage("gpt-4o", 1000 * (i + 1), 10)
+        )
         for i in range(3)
     ]
     bare = _span("2e", "llm", kind=SpanKind.LLM, start_s=9)
@@ -243,9 +235,7 @@ def test_waste_duplicate_delivery_priced() -> None:
         attrs=_usage("gpt-4o", 1000, 100),
         flags=[IntegrityFlag.DUPLICATE],
     )
-    findings = detect_waste(
-        _trace([dup]), PricingRegistry({"gpt-4o": ModelPrice(2.5, 10.0)})
-    )
+    findings = detect_waste(_trace([dup]), PricingRegistry({"gpt-4o": ModelPrice(2.5, 10.0)}))
     dd = [f for f in findings if f.kind == "duplicate_delivery"]
     assert len(dd) == 1
     assert dd[0].estimated_usd == round((1000 * 2.5 + 100 * 10.0) / 1e6, 8)
@@ -284,8 +274,9 @@ def test_critical_path_deep_chain_no_recursion() -> None:
     """2000-deep linear chain — plausible for looping agents — must not
     hit the interpreter recursion limit."""
     spans = [
-        _span(f"{i:04x}", f"s{i}", parent=(f"{i - 1:04x}" if i else None),
-              start_s=i * 0.001, dur_ms=1)
+        _span(
+            f"{i:04x}", f"s{i}", parent=(f"{i - 1:04x}" if i else None), start_s=i * 0.001, dur_ms=1
+        )
         for i in range(2000)
     ]
     cp = critical_path(build_trace_graph(_trace(spans)))
@@ -305,8 +296,9 @@ def test_critical_path_multi_root_takes_max() -> None:
 # -- Cycle 05: failure classification, replay, incident -----------------------
 
 
-def _err_span(sid: str, name: str, kind: SpanKind, msg: str = "",
-              attrs: dict | None = None) -> Span:
+def _err_span(
+    sid: str, name: str, kind: SpanKind, msg: str = "", attrs: dict | None = None
+) -> Span:
     from forge_lens.contracts.v1.trace import Status, StatusCode
 
     s = _span(sid, name, kind=kind, attrs=attrs)
@@ -331,8 +323,7 @@ def test_classify_timeout_and_tool_error() -> None:
 def test_classify_rate_limit_and_llm() -> None:
     from forge_lens.investigate import classify_failure
 
-    rl = _err_span("a1", "gen", SpanKind.LLM,
-                   attrs={"http.status_code": 429})
+    rl = _err_span("a1", "gen", SpanKind.LLM, attrs={"http.status_code": 429})
     assert classify_failure(_trace([rl])).category == "rate_limit"
     bare = _err_span("b1", "gen", SpanKind.LLM, msg="server error")
     assert classify_failure(_trace([bare])).category == "llm_error"
@@ -372,8 +363,7 @@ def test_incident_bundle_composes_evidence() -> None:
     from forge_lens.intel import PricingRegistry
     from forge_lens.investigate import incident_bundle
 
-    t = _trace([_err_span("a1", "llm", SpanKind.LLM, msg="timeout",
-                         attrs=_usage("gpt-4o", 10, 5))])
+    t = _trace([_err_span("a1", "llm", SpanKind.LLM, msg="timeout", attrs=_usage("gpt-4o", 10, 5))])
     b = incident_bundle(t, PricingRegistry())
     assert b["failure"]["category"] == "timeout"
     assert b["graph"]["critical_path"]["path"]
@@ -466,17 +456,13 @@ def test_classify_context_length_exceeded_not_timeout() -> None:
 def test_classify_timeout_via_exception_type() -> None:
     from forge_lens.investigate import classify_failure
 
-    s = _err_span("a1", "call", SpanKind.TOOL,
-                  attrs={"exception.type": "TimeoutError"})
+    s = _err_span("a1", "call", SpanKind.TOOL, attrs={"exception.type": "TimeoutError"})
     assert classify_failure(_trace([s])).category == "timeout"
 
 
 def test_cycle_members_linear_deep_chain() -> None:
     """O(n) walk: 5k-deep chain reports zero cycle members quickly."""
-    spans = [
-        _span(f"{i:04x}", f"s{i}", parent=f"{i - 1:04x}" if i else None)
-        for i in range(5000)
-    ]
+    spans = [_span(f"{i:04x}", f"s{i}", parent=f"{i - 1:04x}" if i else None) for i in range(5000)]
     g = build_trace_graph(_trace(spans))
     assert g.stats["cycle_members"] == 0
     assert g.stats["span_count"] == 5000
@@ -486,10 +472,13 @@ def test_cycle_members_disconnected_cycles() -> None:
     from forge_lens.graph.builder import cycle_member_ids
 
     p = {
-        "a": "b", "b": "a",          # cycle 1
-        "c": "d", "d": "e", "e": "c",  # cycle 2 (3 nodes)
-        "f": "a",                     # leads into cycle 1 — not a member
-        "g": None,                    # clean root
+        "a": "b",
+        "b": "a",  # cycle 1
+        "c": "d",
+        "d": "e",
+        "e": "c",  # cycle 2 (3 nodes)
+        "f": "a",  # leads into cycle 1 — not a member
+        "g": None,  # clean root
     }
     assert cycle_member_ids(p) == {"a", "b", "c", "d", "e"}
 
@@ -563,14 +552,15 @@ def test_replay_kind_order_at_same_timestamp() -> None:
 def test_node_has_token_usage_requires_parseable() -> None:
     """Malformed usage dict → has_token_usage False (UNKNOWN_TOKENS bar)."""
     bad = _span(
-        "a1", "gen", kind=SpanKind.LLM,
+        "a1",
+        "gen",
+        kind=SpanKind.LLM,
         attrs={"forge_lens.token_usage": {"model": 42, "input_tokens": "x"}},
     )
     g = build_trace_graph(_trace([bad]))
     assert g.nodes[0].has_token_usage is False
 
-    good = _span("b1", "gen2", kind=SpanKind.LLM,
-                 attrs=_usage("gpt-4o", 1, 1))
+    good = _span("b1", "gen2", kind=SpanKind.LLM, attrs=_usage("gpt-4o", 1, 1))
     g2 = build_trace_graph(_trace([good]))
     assert g2.nodes[0].has_token_usage is True
 
@@ -597,17 +587,16 @@ def test_eval_latency_and_token_budget() -> None:
     from forge_lens.eval import run_evaluators
 
     t = _trace([_span("a1", "work", dur_ms=250)])
-    res = run_evaluators(
-        t, [{"name": "latency_budget", "params": {"budget_ms": 20000}}]
-    )
+    res = run_evaluators(t, [{"name": "latency_budget", "params": {"budget_ms": 20000}}])
     assert res[0].score == 1.0  # envelope wall-clock = 10s ≤ 20s
 
-    t2 = _trace([_span("a1", "llm", kind=SpanKind.LLM,
-                       attrs=_usage("gpt-4o", 300, 200))])
+    t2 = _trace([_span("a1", "llm", kind=SpanKind.LLM, attrs=_usage("gpt-4o", 300, 200))])
     res2 = run_evaluators(
         t2,
-        [{"name": "token_budget", "params": {"max_total_tokens": 400}},
-         {"name": "token_budget", "params": {"max_total_tokens": 600}}],
+        [
+            {"name": "token_budget", "params": {"max_total_tokens": 400}},
+            {"name": "token_budget", "params": {"max_total_tokens": 600}},
+        ],
     )
     assert res2[0].score == 0.0  # 500 > 400
     assert res2[1].score == 1.0  # 500 ≤ 600
@@ -619,9 +608,7 @@ def test_eval_token_budget_rejects_bool_and_string() -> None:
 
     t = _trace([_span("a1", "x")])
     for bad in (True, False, "500", "0"):
-        res = run_evaluators(
-            t, [{"name": "token_budget", "params": {"max_total_tokens": bad}}]
-        )
+        res = run_evaluators(t, [{"name": "token_budget", "params": {"max_total_tokens": bad}}])
         assert res[0].score is None, f"{bad!r} must not produce a verdict"
         assert res[0].metric == "evaluator_error"
         assert "number" in res[0].details["reason"]
@@ -640,9 +627,7 @@ def test_eval_token_budget_counts_total_tokens_only_usage() -> None:
         }
     }
     t = _trace([_span("a1", "llm", kind=SpanKind.LLM, attrs=total_only)])
-    res = run_evaluators(
-        t, [{"name": "token_budget", "params": {"max_total_tokens": 1000}}]
-    )
+    res = run_evaluators(t, [{"name": "token_budget", "params": {"max_total_tokens": 1000}}])
     assert res[0].score == 0.0  # 50000 > 1000 — never a silent pass
     assert res[0].details["total_tokens"] == "50000"
 
@@ -668,7 +653,8 @@ def test_eval_report_summary_and_nulls() -> None:
         _trace([_err_span("a1", "bad", SpanKind.TOOL)], trace_id="a" * 32),
     ]
     report = evaluate_traces(
-        traces, [{"name": "error_free"}, {"name": "tool_success"}],
+        traces,
+        [{"name": "error_free"}, {"name": "tool_success"}],
         dataset="ds1",
     )
     assert report.trace_ids == ["a" * 32, "b" * 32]
@@ -685,11 +671,13 @@ def test_eval_compare_significance() -> None:
     # insufficient data: <10 samples → no significance claim
     a = evaluate_traces(
         [_trace([_err_span("a1", "x", SpanKind.TOOL)])],
-        [{"name": "error_free"}], dataset="a",
+        [{"name": "error_free"}],
+        dataset="a",
     )
     b = evaluate_traces(
         [_trace([_span("b1", "y", kind=SpanKind.TOOL)])],
-        [{"name": "error_free"}], dataset="b",
+        [{"name": "error_free"}],
+        dataset="b",
     )
     out = compare_runs(a, b)
     d = out["deltas"][0]
@@ -700,14 +688,17 @@ def test_eval_compare_significance() -> None:
 
     # significant: 20 all-fail vs 20 all-pass → extreme z
     many_a = evaluate_traces(
-        [_trace([_err_span("a1", "x", SpanKind.TOOL)],
-                trace_id=f"{i:032x}") for i in range(20)],
-        [{"name": "error_free"}], dataset="a",
+        [_trace([_err_span("a1", "x", SpanKind.TOOL)], trace_id=f"{i:032x}") for i in range(20)],
+        [{"name": "error_free"}],
+        dataset="a",
     )
     many_b = evaluate_traces(
-        [_trace([_span("b1", "y", kind=SpanKind.TOOL)],
-                trace_id=f"{i + 100:032x}") for i in range(20)],
-        [{"name": "error_free"}], dataset="b",
+        [
+            _trace([_span("b1", "y", kind=SpanKind.TOOL)], trace_id=f"{i + 100:032x}")
+            for i in range(20)
+        ],
+        [{"name": "error_free"}],
+        dataset="b",
     )
     out2 = compare_runs(many_a, many_b)
     d2 = out2["deltas"][0]
@@ -723,14 +714,17 @@ def test_eval_tool_success_binary_ztest() -> None:
     from forge_lens.eval import compare_runs, evaluate_traces
 
     a = evaluate_traces(
-        [_trace([_span("a1", "t", kind=SpanKind.TOOL)],
-                trace_id=f"{i:032x}") for i in range(15)],
-        [{"name": "tool_success"}], dataset="a",
+        [_trace([_span("a1", "t", kind=SpanKind.TOOL)], trace_id=f"{i:032x}") for i in range(15)],
+        [{"name": "tool_success"}],
+        dataset="a",
     )
     b = evaluate_traces(
-        [_trace([_err_span("a1", "t", SpanKind.TOOL)],
-                trace_id=f"{i + 100:032x}") for i in range(15)],
-        [{"name": "tool_success"}], dataset="b",
+        [
+            _trace([_err_span("a1", "t", SpanKind.TOOL)], trace_id=f"{i + 100:032x}")
+            for i in range(15)
+        ],
+        [{"name": "tool_success"}],
+        dataset="b",
     )
     out = compare_runs(a, b)
     d = out["deltas"][0]
@@ -745,14 +739,17 @@ def test_eval_compare_not_computable_when_degenerate() -> None:
     from forge_lens.eval import compare_runs, evaluate_traces
 
     a = evaluate_traces(
-        [_trace([_span("a1", "t", kind=SpanKind.TOOL)],
-                trace_id=f"{i:032x}") for i in range(15)],
-        [{"name": "error_free"}], dataset="a",
+        [_trace([_span("a1", "t", kind=SpanKind.TOOL)], trace_id=f"{i:032x}") for i in range(15)],
+        [{"name": "error_free"}],
+        dataset="a",
     )
     b = evaluate_traces(
-        [_trace([_span("b1", "t", kind=SpanKind.TOOL)],
-                trace_id=f"{i + 100:032x}") for i in range(15)],
-        [{"name": "error_free"}], dataset="b",
+        [
+            _trace([_span("b1", "t", kind=SpanKind.TOOL)], trace_id=f"{i + 100:032x}")
+            for i in range(15)
+        ],
+        [{"name": "error_free"}],
+        dataset="b",
     )
     d = compare_runs(a, b)["deltas"][0]
     assert d["significance"] == "not_computable"
@@ -766,10 +763,9 @@ def test_eval_negative_envelope_duration_is_no_verdict() -> None:
     t.ended_at = t.started_at  # ended BEFORE started claims → invalid
     t.started_at = t.started_at  # keep; shift end instead
     from datetime import timedelta
+
     t.ended_at = t.ended_at - timedelta(milliseconds=5)
-    res = run_evaluators(
-        t, [{"name": "latency_budget", "params": {"budget_ms": 99999}}]
-    )
+    res = run_evaluators(t, [{"name": "latency_budget", "params": {"budget_ms": 99999}}])
     assert res[0].score is None
     assert "negative" in res[0].details["reason"]
 
@@ -791,8 +787,12 @@ def test_retry_amplification_via_sdk_fingerprint() -> None:
     reg = PricingRegistry()
     fp = "a" * 16
     spans = [
-        _span(f"{i:016x}", "tool search", kind=SpanKind.TOOL,
-              attrs={"forge_lens.tool_args_sha256": fp})
+        _span(
+            f"{i:016x}",
+            "tool search",
+            kind=SpanKind.TOOL,
+            attrs={"forge_lens.tool_args_sha256": fp},
+        )
         for i in range(1, 4)
     ]
     findings = detect_waste(_trace(spans), reg)
@@ -821,23 +821,29 @@ def test_children_order_by_instant_not_offset_string() -> None:
     )
 
     early_instant = GraphNode(
-        id="nz", name="nz", kind="span",
-        start_time=datetime(2026, 1, 1, 12, 0, 0,
-                            tzinfo=timezone(timedelta(hours=12))),
+        id="nz",
+        name="nz",
+        kind="span",
+        start_time=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone(timedelta(hours=12))),
         duration_ms=1.0,
     )
     later_z = GraphNode(
-        id="zz", name="zz", kind="span",
+        id="zz",
+        name="zz",
+        kind="span",
         start_time=datetime(2026, 1, 1, 1, 0, 0, tzinfo=UTC),
         duration_ms=1.0,
     )
     parent = GraphNode(
-        id="pp", name="pp", kind="span",
+        id="pp",
+        name="pp",
+        kind="span",
         start_time=datetime(2025, 12, 31, 23, 0, 0, tzinfo=UTC),
         duration_ms=10.0,
     )
     g = ExecutionGraph(
-        subject_id=TRACE_ID, project_id="p1",
+        subject_id=TRACE_ID,
+        project_id="p1",
         nodes=[parent, later_z, early_instant],
         edges=[
             GraphEdge(source="pp", target="zz", kind=EdgeKind.PARENT),
@@ -862,12 +868,15 @@ def test_critical_path_survives_dangling_parent_target() -> None:
     )
 
     parent = GraphNode(
-        id="pp", name="pp", kind="span",
+        id="pp",
+        name="pp",
+        kind="span",
         start_time=datetime(2025, 12, 31, 23, 0, 0, tzinfo=UTC),
         duration_ms=10.0,
     )
     g = ExecutionGraph(
-        subject_id=TRACE_ID, project_id="p1",
+        subject_id=TRACE_ID,
+        project_id="p1",
         nodes=[parent],
         edges=[GraphEdge(source="pp", target="ghost", kind=EdgeKind.PARENT)],
     )
