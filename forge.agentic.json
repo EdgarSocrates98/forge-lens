@@ -61,6 +61,7 @@
     "{cli}",
     "mcp-serve"
   ],
+  "mcp_verify_tool": "lens.capabilities",
   "host_adapters": [
     "claude"
   ],
