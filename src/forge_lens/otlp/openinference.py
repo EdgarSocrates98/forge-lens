@@ -119,9 +119,7 @@ _OTEL_KIND_NAMES: dict[str, SpanKind] = {
 }
 
 
-def map_span_kind(
-    attributes: dict[str, Any], otel_kind: int | str | None
-) -> SpanKind:
+def map_span_kind(attributes: dict[str, Any], otel_kind: int | str | None) -> SpanKind:
     """Resolve effective span kind: OpenInference kind wins over OTel kind."""
     oi = attributes.get(OI_SPAN_KIND)
     if isinstance(oi, str):

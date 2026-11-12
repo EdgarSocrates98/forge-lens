@@ -29,9 +29,7 @@ def _sdk_package() -> dict:
 
 
 def _gen_sbom():
-    spec = importlib.util.spec_from_file_location(
-        "gen_sbom", ROOT / "scripts" / "gen_sbom.py"
-    )
+    spec = importlib.util.spec_from_file_location("gen_sbom", ROOT / "scripts" / "gen_sbom.py")
     assert spec
     assert spec.loader
     mod = importlib.util.module_from_spec(spec)
@@ -73,9 +71,9 @@ def test_python_matrix_covers_declared_classifiers() -> None:
 
 def test_python_matrix_satisfies_requires_python() -> None:
     """No matrix version may fall outside `requires-python`."""
-    floor = re.fullmatch(
-        r">=(\d+\.\d+)", _pyproject()["project"]["requires-python"].strip()
-    ).group(1)
+    floor = re.fullmatch(r">=(\d+\.\d+)", _pyproject()["project"]["requires-python"].strip()).group(
+        1
+    )
     matrix = re.search(r"python: \[([^\]]+)\]", CI_YML.read_text(encoding="utf-8")).group(1)
     for v in re.findall(r"\d+\.\d+", matrix):
         assert tuple(map(int, v.split("."))) >= tuple(map(int, floor.split(".")))
@@ -85,9 +83,7 @@ def test_sdk_engines_floor_matches_ci_matrix() -> None:
     """engines.node floor == lowest Node version exercised in CI."""
     engines = _sdk_package()["engines"]["node"]
     floor = int(re.fullmatch(r">=(\d+)", engines.strip()).group(1))
-    matrix_block = re.search(
-        r"node: \[([^\]]+)\]", CI_YML.read_text(encoding="utf-8")
-    ).group(1)
+    matrix_block = re.search(r"node: \[([^\]]+)\]", CI_YML.read_text(encoding="utf-8")).group(1)
     matrix = sorted(int(v) for v in re.findall(r"\d+", matrix_block))
     assert floor == matrix[0]
 

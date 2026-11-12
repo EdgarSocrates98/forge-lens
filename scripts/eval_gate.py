@@ -100,17 +100,11 @@ _SCHEMA = "forge-lens/eval-gate@1"
 # drift there breaks loudly instead of silently misclassifying here
 _REASON_METRICS_NOT_OBJECT = "gate.metrics must be an object"
 _REASON_SPEC_NOT_OBJECT = "metric gate spec must be an object"
-_REASON_NOT_EVALUATED = (
-    "metric not evaluated — cannot gate on unmeasured evidence"
-)
+_REASON_NOT_EVALUATED = "metric not evaluated — cannot gate on unmeasured evidence"
 _REASON_BELOW_MIN = "pass_rate_b below minimum"
-_REASON_DROP_UNMEASURED = (
-    "max_drop unmeasured — pass rate missing on one or both sides"
-)
+_REASON_DROP_UNMEASURED = "max_drop unmeasured — pass rate missing on one or both sides"
 
-_USAGE_FAILURE_REASONS = frozenset(
-    {_REASON_METRICS_NOT_OBJECT, _REASON_SPEC_NOT_OBJECT}
-)
+_USAGE_FAILURE_REASONS = frozenset({_REASON_METRICS_NOT_OBJECT, _REASON_SPEC_NOT_OBJECT})
 
 # "not_computable" is deliberately NOT thin: var==0 only happens when
 # both sides observed identical samples (z: same extreme proportion;
@@ -185,14 +179,9 @@ def _load_dataset(
         elif isinstance(raw, dict):
             specs = raw.get("evaluators")
             info["id"] = raw.get("dataset_id") or raw.get("id")
-            info["version"] = (
-                raw.get("dataset_version") or raw.get("version")
-            )
+            info["version"] = raw.get("dataset_version") or raw.get("version")
         else:
-            _usage_error(
-                "dataset: file must contain a JSON object or a list of "
-                "evaluator specs"
-            )
+            _usage_error("dataset: file must contain a JSON object or a list of evaluator specs")
     else:
         info["source"] = "store"
         ds_id: str
@@ -212,14 +201,9 @@ def _load_dataset(
         if version is not None:
             dv = store.get_dataset_version(ds_id, version, project_id)
             if dv is None:
-                _usage_error(
-                    f"dataset: {ds_id!r}@{version!r} not found in "
-                    f"project {project_id!r}"
-                )
+                _usage_error(f"dataset: {ds_id!r}@{version!r} not found in project {project_id!r}")
             specs = (dv.get("metadata") or {}).get("evaluators")
-            origin = (
-                f"dataset version {ds_id}@{version} metadata.evaluators"
-            )
+            origin = f"dataset version {ds_id}@{version} metadata.evaluators"
         else:
             specs = (dataset.get("metadata") or {}).get("evaluators")
             origin = f"dataset {ds_id} metadata.evaluators"
@@ -230,15 +214,8 @@ def _load_dataset(
                 "([{'name': ..., 'params': {...}}, ...]); for file-based "
                 "specs pass the file path instead"
             )
-    if (
-        not isinstance(specs, list)
-        or not specs
-        or len(specs) > _MAX_EVAL_SPECS
-    ):
-        _usage_error(
-            "dataset: evaluators must be a list of "
-            f"1..{_MAX_EVAL_SPECS} specs"
-        )
+    if not isinstance(specs, list) or not specs or len(specs) > _MAX_EVAL_SPECS:
+        _usage_error(f"dataset: evaluators must be a list of 1..{_MAX_EVAL_SPECS} specs")
     label = info.get("id") or None
     if info.get("version"):
         label = f"{label}@{info['version']}" if label else None
@@ -263,10 +240,7 @@ def _load_cohort(
     elif isinstance(raw, dict):
         spec = raw
     else:
-        _usage_error(
-            f"{side}: cohort spec must be a JSON object or a list of "
-            "trace ids"
-        )
+        _usage_error(f"{side}: cohort spec must be a JSON object or a list of trace ids")
     ids = spec.get("trace_ids")
     if (
         not isinstance(ids, list)
@@ -274,10 +248,7 @@ def _load_cohort(
         or len(ids) > _MAX_TRACE_IDS
         or not all(isinstance(t, str) and t for t in ids)
     ):
-        _usage_error(
-            f"{side}: trace_ids must be a list of 1..{_MAX_TRACE_IDS} "
-            "non-empty strings"
-        )
+        _usage_error(f"{side}: trace_ids must be a list of 1..{_MAX_TRACE_IDS} non-empty strings")
     pid = spec.get("project_id")
     if pid is not None and not isinstance(pid, str):
         _usage_error(f"{side}: project_id must be a string")
@@ -338,14 +309,9 @@ def _classify(
     A failure only blocks (exit 1) when it is backed by observed numbers;
     criteria that could not be evaluated at all are insufficient data."""
     failures: list[dict[str, Any]] = gate_out.get("failures", [])
-    bad_spec = [
-        f for f in failures if f.get("reason") in _USAGE_FAILURE_REASONS
-    ]
+    bad_spec = [f for f in failures if f.get("reason") in _USAGE_FAILURE_REASONS]
     if bad_spec:
-        _usage_error(
-            "gate: malformed spec — "
-            + json.dumps(bad_spec, sort_keys=True)
-        )
+        _usage_error("gate: malformed spec — " + json.dumps(bad_spec, sort_keys=True))
     evidence_failures: list[dict[str, Any]] = []
     missing_failures: list[dict[str, Any]] = []
     for f in failures:
@@ -378,8 +344,7 @@ def _classify(
     if gate.get("metrics"):
         return _EXIT_PASS, "pass", [], []
     tested = any(
-        d.get("p_value") is not None
-        or d.get("significance") == "not_computable"  # proven equality
+        d.get("p_value") is not None or d.get("significance") == "not_computable"  # proven equality
         for d in compare["deltas"]
     )
     if tested:
@@ -402,9 +367,7 @@ def _human_report(report: dict[str, Any]) -> str:
     """Deterministic plain-text summary for CI logs (stderr)."""
     lines: list[str] = []
     v = report["verdict"]
-    lines.append(
-        f"eval-gate: {v['status']} (exit {v['exit_code']}) — {v['reason']}"
-    )
+    lines.append(f"eval-gate: {v['status']} (exit {v['exit_code']}) — {v['reason']}")
     ds = report["dataset"]
     lines.append(
         f"dataset: {ds.get('label') or ds['ref']} "
@@ -412,14 +375,9 @@ def _human_report(report: dict[str, Any]) -> str:
     )
     for side in ("baseline", "candidate"):
         c = report[side]
-        miss = (
-            f" MISSING {len(c['missing_trace_ids'])}"
-            if c["missing_trace_ids"]
-            else ""
-        )
+        miss = f" MISSING {len(c['missing_trace_ids'])}" if c["missing_trace_ids"] else ""
         lines.append(
-            f"{side}: {c['resolved']}/{c['requested']} traces "
-            f"project={c['project_id']}{miss}"
+            f"{side}: {c['resolved']}/{c['requested']} traces project={c['project_id']}{miss}"
         )
     compare = report.get("compare")
     if compare:
@@ -438,9 +396,7 @@ def _human_report(report: dict[str, Any]) -> str:
         if compare.get("multiple_comparisons"):
             lines.append(f"  note: {compare['multiple_comparisons']}")
     for f in report["verdict"]["evidence_failures"]:
-        extra = {
-            k: x for k, x in f.items() if k not in ("metric", "reason")
-        }
+        extra = {k: x for k, x in f.items() if k not in ("metric", "reason")}
         lines.append(
             f"  FAIL {f.get('metric')}: {f.get('reason')} "
             + json.dumps(extra, sort_keys=True, default=str)
@@ -471,8 +427,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--baseline",
         required=True,
         metavar="SPEC|@FILE",
-        help="baseline cohort: {trace_ids, label?, project_id?, dataset?} "
-        "or a bare trace-id list",
+        help="baseline cohort: {trace_ids, label?, project_id?, dataset?} or a bare trace-id list",
     )
     p.add_argument(
         "--candidate",
@@ -488,8 +443,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--gate",
         metavar="JSON|@FILE",
-        help="apply_gate spec (default: "
-        '{"fail_on_significant_regression": true})',
+        help='apply_gate spec (default: {"fail_on_significant_regression": true})',
     )
     p.add_argument(
         "--project",
@@ -524,12 +478,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         specs, ds_info = _load_dataset(store, args.dataset, default_project)
-        baseline = _load_cohort(
-            store, args.baseline, "baseline", default_project
-        )
-        candidate = _load_cohort(
-            store, args.candidate, "candidate", default_project
-        )
+        baseline = _load_cohort(store, args.baseline, "baseline", default_project)
+        candidate = _load_cohort(store, args.candidate, "candidate", default_project)
     finally:
         store.close()
 
@@ -543,12 +493,8 @@ def main(argv: list[str] | None = None) -> int:
         "schema": _SCHEMA,
         "dataset": ds_info,
         "evaluator_specs": specs,
-        "baseline": {
-            k: v for k, v in baseline.items() if k != "traces"
-        },
-        "candidate": {
-            k: v for k, v in candidate.items() if k != "traces"
-        },
+        "baseline": {k: v for k, v in baseline.items() if k != "traces"},
+        "candidate": {k: v for k, v in candidate.items() if k != "traces"},
         "compare": None,
         "gate": None,
         "warnings": [],
@@ -593,9 +539,7 @@ def main(argv: list[str] | None = None) -> int:
                 "missing_evidence_failures": [],
             }
             print(_human_report(report), file=sys.stderr)
-            print(
-                json.dumps(report, indent=2, sort_keys=True, default=str)
-            )
+            print(json.dumps(report, indent=2, sort_keys=True, default=str))
             return _EXIT_INTERNAL
         try:
             gate_out = apply_gate(compare, gate)
@@ -614,26 +558,17 @@ def main(argv: list[str] | None = None) -> int:
                 "missing_evidence_failures": [],
             }
             print(_human_report(report), file=sys.stderr)
-            print(
-                json.dumps(report, indent=2, sort_keys=True, default=str)
-            )
+            print(json.dumps(report, indent=2, sort_keys=True, default=str))
             return _EXIT_INTERNAL
         report["compare"] = compare
         report["gate"] = gate_out
-        code, status, ev_fail, missing_fail = _classify(
-            compare, gate_out, gate
-        )
+        code, status, ev_fail, missing_fail = _classify(compare, gate_out, gate)
         report["warnings"] = [
-            f"{m}: significance untested (thin data)"
-            for m in _thin_metrics(compare)
+            f"{m}: significance untested (thin data)" for m in _thin_metrics(compare)
         ]
         reason = {
-            _EXIT_PASS: (
-                "all gate criteria evaluated on observed evidence"
-            ),
-            _EXIT_REGRESSION: (
-                "gate failures backed by observed evidence"
-            ),
+            _EXIT_PASS: ("all gate criteria evaluated on observed evidence"),
+            _EXIT_REGRESSION: ("gate failures backed by observed evidence"),
             _EXIT_INSUFFICIENT: (
                 "no gate failure, but no criterion produced an "
                 "evidence-backed verdict either (thin data)"

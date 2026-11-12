@@ -88,9 +88,7 @@ def _trace(
     )
 
 
-def _run(
-    trace: Trace, name: str, params: Any = None
-) -> EvaluationResult:
+def _run(trace: Trace, name: str, params: Any = None) -> EvaluationResult:
     return run_evaluators(trace, [{"name": name, "params": params}])[0]
 
 
@@ -156,10 +154,10 @@ def test_every_evaluator_deterministic_identical_runs() -> None:
     t = _trace(
         [
             _span("a1", "agent", kind=SpanKind.AGENT),
-            _span("b1", "call", kind=SpanKind.TOOL,
-                  attrs={"tool.name": "web_search"}),
-            _span("c1", "llm", kind=SpanKind.LLM,
-                  attrs={"output.value": "alpha beta", **_usage(5, 7)}),
+            _span("b1", "call", kind=SpanKind.TOOL, attrs={"tool.name": "web_search"}),
+            _span(
+                "c1", "llm", kind=SpanKind.LLM, attrs={"output.value": "alpha beta", **_usage(5, 7)}
+            ),
         ]
     )
     specs: list[dict[str, Any]] = [
@@ -169,23 +167,17 @@ def test_every_evaluator_deterministic_identical_runs() -> None:
         {"name": "task_completion"},
         {"name": "token_budget", "params": {"max_total_tokens": 100}},
         {"name": "latency_budget", "params": {"max_duration_ms": 20000}},
-        {"name": "token_f1",
-         "params": {"field": "output.value", "expected": "alpha beta"}},
+        {"name": "token_f1", "params": {"field": "output.value", "expected": "alpha beta"}},
         {"name": "allowed_tools", "params": {"allowed": ["web_search"]}},
         {"name": "contains", "params": {"text": "alpha"}},
         {"name": "regex", "params": {"pattern": r"alpha"}},
         {"name": "tool_call_count", "params": {"min": 0, "max": 5}},
-        {"name": "exact_match",
-         "params": {"field": "output.value", "expected": "alpha beta"}},
-        {"name": "schema_validation",
-         "params": {"schema": {"type": "string"}}},
-        {"name": "evidence_coverage",
-         "params": {"required_attrs": ["tool.name", "output.value"]}},
+        {"name": "exact_match", "params": {"field": "output.value", "expected": "alpha beta"}},
+        {"name": "schema_validation", "params": {"schema": {"type": "string"}}},
+        {"name": "evidence_coverage", "params": {"required_attrs": ["tool.name", "output.value"]}},
         {"name": "human_review"},
-        {"name": "precision_recall",
-         "params": {"tool": True, "expected_items": ["web_search"]}},
-        {"name": "claims_grounded",
-         "params": {"required_source_attr": "tool.name"}},
+        {"name": "precision_recall", "params": {"tool": True, "expected_items": ["web_search"]}},
+        {"name": "claims_grounded", "params": {"required_source_attr": "tool.name"}},
     ]
     first = [r.model_dump(mode="json") for r in run_evaluators(t, specs)]
     second = [r.model_dump(mode="json") for r in run_evaluators(t, specs)]
@@ -201,10 +193,10 @@ def test_spec_and_params_shape_errors_never_raise() -> None:
     results = run_evaluators(
         t,
         [
-            "not-a-dict",                          # spec not an object
+            "not-a-dict",  # spec not an object
             {"name": "error_free", "params": "x"},  # params not object
             {"name": "does_not_exist"},
-            {},                                    # nameless spec
+            {},  # nameless spec
         ],
     )
     assert [r.metric for r in results] == [
@@ -232,9 +224,7 @@ def test_error_free_multiple_errors_named_and_deterministic() -> None:
     res = _run(t, "error_free")
     assert res.score == 0.0
     assert res.details["error_count"] == "2"
-    assert res.details["error_span_ids"] == ",".join(
-        [s.ljust(16, "0") for s in ("a1", "c3")]
-    )
+    assert res.details["error_span_ids"] == ",".join([s.ljust(16, "0") for s in ("a1", "c3")])
 
 
 def test_error_free_empty_trace_is_pass_not_null() -> None:
@@ -278,8 +268,7 @@ def test_token_budget_bound_violations_are_evaluator_error() -> None:
     """Negative or fractional budgets are malformed specs — reporting a
     score=0.0 would masquerade a spec bug as a trace verdict."""
     t = _trace([_span("a1", "llm", attrs=_usage(3, 2), kind=SpanKind.LLM)])
-    for bad in (-1, -0.5, 100.5, float("inf"), float("nan"), None,
-                [100], {"b": 1}, True, "500"):
+    for bad in (-1, -0.5, 100.5, float("inf"), float("nan"), None, [100], {"b": 1}, True, "500"):
         res = _run(t, "token_budget", {"max_total_tokens": bad})
         assert res.score is None, bad
         assert res.metric == "evaluator_error", bad
@@ -294,10 +283,12 @@ def test_token_budget_zero_budget_and_unobserved_spans() -> None:
     assert res.details["spans_without_usage"] == "1"
     assert "unobserved" in res.details["caveat"]
 
-    mixed = _trace([
-        _span("a1", "llm", kind=SpanKind.LLM, attrs=_usage(10, 10)),
-        _span("b1", "llm", kind=SpanKind.LLM),  # no usage block
-    ])
+    mixed = _trace(
+        [
+            _span("a1", "llm", kind=SpanKind.LLM, attrs=_usage(10, 10)),
+            _span("b1", "llm", kind=SpanKind.LLM),  # no usage block
+        ]
+    )
     res2 = _run(mixed, "token_budget", {"max_total_tokens": 20})
     assert res2.score == 1.0
     assert res2.details["total_tokens"] == "20"
@@ -364,8 +355,14 @@ def test_has_span_malformed_filters_are_evaluator_error() -> None:
     """A non-string name or a kind outside the closed enum can never
     match honestly — they are spec bugs, not silent misses."""
     t = _trace([_span("a1", "x")])
-    for params in ({"name": 42}, {"name": ["x"]}, {"kind": 7},
-                   {"kind": "tol"}, {"kind": "TOOL"}, {"kind": ""}):
+    for params in (
+        {"name": 42},
+        {"name": ["x"]},
+        {"kind": 7},
+        {"kind": "tol"},
+        {"kind": "TOOL"},
+        {"kind": ""},
+    ):
         res = _run(t, "has_span", params)
         assert res.score is None, params
         assert res.metric == "evaluator_error", params
@@ -413,8 +410,7 @@ def test_exact_match_field_param_validation() -> None:
 
 def test_token_f1_score_math_and_params() -> None:
     t = _trace([_span("a1", "llm", attrs={"output.value": "alpha beta gamma"})])
-    res = _run(t, "token_f1",
-               {"field": "output.value", "expected": "alpha beta delta"})
+    res = _run(t, "token_f1", {"field": "output.value", "expected": "alpha beta delta"})
     # common={alpha,beta}=2 → p=2/3, r=2/3 → f1=0.666667
     assert res.score == pytest.approx(0.666667, abs=1e-6)
     assert res.details["precision"].startswith("0.666")
@@ -434,10 +430,12 @@ def test_token_f1_empty_and_non_string_evidence() -> None:
     assert res2.score is None
     assert "not observed as string" in res2.details["reason"]
 
-    for params in ({"expected": "x"},            # field missing
-                   {"field": "out"},             # expected missing
-                   {"field": "out", "expected": 7},
-                   {"field": "out", "expected": None}):
+    for params in (
+        {"expected": "x"},  # field missing
+        {"field": "out"},  # expected missing
+        {"field": "out", "expected": 7},
+        {"field": "out", "expected": None},
+    ):
         res3 = _run(punct, "token_f1", params)
         assert res3.score is None, params
         assert res3.metric == "evaluator_error", params
@@ -449,24 +447,18 @@ def test_token_f1_empty_and_non_string_evidence() -> None:
 def test_allowed_tools_semantic_names_and_violations() -> None:
     t = _trace(
         [
-            _span("a1", "call", kind=SpanKind.TOOL,
-                  attrs={"tool.name": "web_search"}),
+            _span("a1", "call", kind=SpanKind.TOOL, attrs={"tool.name": "web_search"}),
             _span("b2", "raw_http", kind=SpanKind.TOOL),  # no tool.name
         ]
     )
-    ok = _run(t, "allowed_tools",
-              {"allowed": ["web_search", "raw_http"]})
+    ok = _run(t, "allowed_tools", {"allowed": ["web_search", "raw_http"]})
     assert ok.score == 1.0
     bad = _run(t, "allowed_tools", {"allowed": ["web_search"]})
     assert bad.score == 0.0
     assert bad.details["violations"] == "raw_http"
     # violations are a sorted set — one name, many calls
     t2 = _trace(
-        [
-            _span(f"{i:x}", "call", kind=SpanKind.TOOL,
-                  attrs={"tool.name": "db"})
-            for i in range(3)
-        ]
+        [_span(f"{i:x}", "call", kind=SpanKind.TOOL, attrs={"tool.name": "db"}) for i in range(3)]
     )
     res2 = _run(t2, "allowed_tools", {"allowed": []})
     assert res2.score == 0.0
@@ -476,14 +468,18 @@ def test_allowed_tools_semantic_names_and_violations() -> None:
 def test_allowed_tools_empty_trace_and_params_validation() -> None:
     """No TOOL spans → vacuous pass (empty set ⊆ allowlist); malformed
     ``allowed`` is a spec bug."""
-    res = _run(_trace([_span("a1", "x")]), "allowed_tools",
-               {"allowed": []})
+    res = _run(_trace([_span("a1", "x")]), "allowed_tools", {"allowed": []})
     assert res.score == 1.0
     assert res.details["tool_spans"] == "0"
 
     t = _trace([_span("a1", "call", kind=SpanKind.TOOL)])
-    for params in ({}, {"allowed": "web_search"}, {"allowed": [1, 2]},
-                   {"allowed": None}, {"allowed": ["a", 3]}):
+    for params in (
+        {},
+        {"allowed": "web_search"},
+        {"allowed": [1, 2]},
+        {"allowed": None},
+        {"allowed": ["a", 3]},
+    ):
         res = _run(t, "allowed_tools", params)
         assert res.score is None, params
         assert res.metric == "evaluator_error", params
@@ -524,8 +520,7 @@ def test_schema_validation_extreme_depth_string_never_crashes() -> None:
     t = _trace([_span("a1", "llm", attrs={"output.value": deep})])
     res = _run(t, "schema_validation", {"schema": {}})
     assert res.score is not None  # parsed or string — never raises
-    res2 = _run(t, "schema_validation",
-                {"schema": {"type": "object"}})
+    res2 = _run(t, "schema_validation", {"schema": {"type": "object"}})
     assert res2.score is not None
 
 
@@ -534,8 +529,7 @@ def test_precision_recall_extreme_depth_string_never_crashes() -> None:
     depth is the singleton fallback, never an escaping exception."""
     deep = "[" * 100_000 + "1" + "]" * 100_000
     t = _trace([_span("a1", "x", attrs={"ents": deep})])
-    res = _run(t, "precision_recall",
-               {"field": "ents", "expected_items": ["1"]})
+    res = _run(t, "precision_recall", {"field": "ents", "expected_items": ["1"]})
     assert res.score is not None
 
 
@@ -544,12 +538,10 @@ def test_schema_validation_null_resource_attr_is_observed() -> None:
     validates against ``{\"type\": \"null\"}`` and fails ``object`` —
     presence ≠ non-nullity."""
     t = _trace([_span("a1", "x")], resource_attrs={"payload": None})
-    res = _run(t, "schema_validation",
-               {"field": "payload", "schema": {"type": "null"}})
+    res = _run(t, "schema_validation", {"field": "payload", "schema": {"type": "null"}})
     assert res.score == 1.0
     assert res.details["instance_kind"] == "null"
-    bad = _run(t, "schema_validation",
-               {"field": "payload", "schema": {"type": "object"}})
+    bad = _run(t, "schema_validation", {"field": "payload", "schema": {"type": "object"}})
     assert bad.score == 0.0
     assert "expected object, got null" in bad.details["violations"]
 
@@ -560,12 +552,9 @@ def test_schema_validation_null_resource_attr_is_observed() -> None:
 def test_wilson_ci_reference_values() -> None:
     """Hand-computed Wilson bounds (z=1.96) — never derived by copying
     the implementation's formula."""
-    assert _wilson_ci(0.25, 20) == pytest.approx([0.111860, 0.468705],
-                                                abs=1e-6)
-    assert _wilson_ci(1 / 3, 3) == pytest.approx([0.061490, 0.792345],
-                                               abs=1e-6)
-    assert _wilson_ci(0.45, 1000) == pytest.approx([0.419415, 0.480968],
-                                                 abs=1e-6)
+    assert _wilson_ci(0.25, 20) == pytest.approx([0.111860, 0.468705], abs=1e-6)
+    assert _wilson_ci(1 / 3, 3) == pytest.approx([0.061490, 0.792345], abs=1e-6)
+    assert _wilson_ci(0.45, 1000) == pytest.approx([0.419415, 0.480968], abs=1e-6)
 
 
 def test_mann_whitney_reference_values_with_and_without_ties() -> None:
@@ -580,7 +569,7 @@ def test_mann_whitney_reference_values_with_and_without_ties() -> None:
     res = _mann_whitney([0.5, 0.5, 1.0], [0.5, 1.0, 2.0])
     assert res is not None
     u, p = res
-    assert u == 2.5                       # ties: 0.5 x3 group, 1.0 x2 group
+    assert u == 2.5  # ties: 0.5 x3 group, 1.0 x2 group
     assert p == pytest.approx(0.479500, abs=1e-6)
 
     res = _mann_whitney(
@@ -612,8 +601,7 @@ def test_summary_counts_nulls_and_scores_separately() -> None:
     """n counts scored results only; nulls are their own column and
     pass_rate is passes/n — a fabricated zero would poison both."""
     traces = [
-        _trace([_span("a1", "call", kind=SpanKind.TOOL)],
-               trace_id="a" * 32),
+        _trace([_span("a1", "call", kind=SpanKind.TOOL)], trace_id="a" * 32),
         _trace([_span("a1", "x")], trace_id="b" * 32),  # no tool span
     ]
     report = evaluate_traces(traces, [{"name": "tool_success"}])
@@ -651,9 +639,7 @@ def test_evaluated_at_is_none_without_injected_clock() -> None:
 def _load_gate_module() -> Any:
     import importlib.util
 
-    path = (
-        Path(__file__).resolve().parents[2] / "scripts" / "eval_gate.py"
-    )
+    path = Path(__file__).resolve().parents[2] / "scripts" / "eval_gate.py"
     spec = importlib.util.spec_from_file_location("eval_gate", path)
     assert spec is not None
     assert spec.loader is not None
@@ -672,15 +658,16 @@ def _seed_gate_db(path: Path) -> tuple[list[str], list[str]]:
     def mk(tid: str, fail: bool) -> Trace:
         spans = [
             _span("11", "agent", kind=SpanKind.AGENT),
-            _span("22", "call", kind=SpanKind.TOOL,
-                  attrs={"tool.name": "web_search"},
-                  error=fail),
+            _span("22", "call", kind=SpanKind.TOOL, attrs={"tool.name": "web_search"}, error=fail),
         ]
         for s in spans:
             s.trace_id = tid
         return Trace(
-            trace_id=tid, project_id="default", started_at=T0,
-            ended_at=T0 + timedelta(seconds=2), spans=spans,
+            trace_id=tid,
+            project_id="default",
+            started_at=T0,
+            ended_at=T0 + timedelta(seconds=2),
+            spans=spans,
         )
 
     base = [f"{0xAAAA000000000000000000000000 + i:032x}" for i in range(12)]
@@ -693,33 +680,40 @@ def _seed_gate_db(path: Path) -> tuple[list[str], list[str]]:
     return base, cand
 
 
-def _gate_args(tmp_path: Path, base: list[str], cand: list[str],
-               gate: str | None = None) -> list[str]:
+def _gate_args(
+    tmp_path: Path, base: list[str], cand: list[str], gate: str | None = None
+) -> list[str]:
     suite = tmp_path / "suite.json"
-    suite.write_text(json.dumps({
-        "dataset_id": "qa-suite",
-        "evaluators": [{"name": "error_free"}, {"name": "tool_success"}],
-    }))
+    suite.write_text(
+        json.dumps(
+            {
+                "dataset_id": "qa-suite",
+                "evaluators": [{"name": "error_free"}, {"name": "tool_success"}],
+            }
+        )
+    )
     bf = tmp_path / "base.json"
     bf.write_text(json.dumps({"trace_ids": base}))
     argv = [
-        "--db", str(tmp_path / "lens.db"),
-        "--dataset", str(suite),
-        "--baseline", f"@{bf}",
-        "--candidate", json.dumps({"trace_ids": cand}),
+        "--db",
+        str(tmp_path / "lens.db"),
+        "--dataset",
+        str(suite),
+        "--baseline",
+        f"@{bf}",
+        "--candidate",
+        json.dumps({"trace_ids": cand}),
     ]
     if gate is not None:
         argv += ["--gate", gate]
     return argv
 
 
-def test_gate_regression_exit_1(tmp_path: Path,
-                                capsys: pytest.CaptureFixture[str]) -> None:
+def test_gate_regression_exit_1(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     gate = _load_gate_module()
     base, cand = _seed_gate_db(tmp_path / "lens.db")
     code = gate.main(
-        _gate_args(tmp_path, base, cand,
-                   gate='{"fail_on_significant_regression": true}')
+        _gate_args(tmp_path, base, cand, gate='{"fail_on_significant_regression": true}')
     )
     assert code == 1
     out = json.loads(capsys.readouterr().out)
@@ -728,17 +722,18 @@ def test_gate_regression_exit_1(tmp_path: Path,
     assert out["gate"]["gate_passed"] is False
 
 
-def test_gate_pass_exit_0_and_deterministic(tmp_path: Path,
-                                            capsys: pytest.CaptureFixture[str]
-                                            ) -> None:
+def test_gate_pass_exit_0_and_deterministic(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Identical inputs → identical report bytes: the JSON document is
     the machine contract and must be byte-stable."""
     gate = _load_gate_module()
     base, _cand = _seed_gate_db(tmp_path / "lens.db")
     args = _gate_args(
-        tmp_path, base, base,
-        gate='{"metrics": {"error_free/no_error_spans": '
-             '{"min_pass_rate_b": 1.0}}}',
+        tmp_path,
+        base,
+        base,
+        gate='{"metrics": {"error_free/no_error_spans": {"min_pass_rate_b": 1.0}}}',
     )
     assert gate.main(args) == 0
     first = capsys.readouterr().out
@@ -757,14 +752,16 @@ def test_gate_thin_data_never_fails(tmp_path: Path) -> None:
     gate = _load_gate_module()
     base, _cand = _seed_gate_db(tmp_path / "lens.db")
     code = gate.main(
-        _gate_args(tmp_path, base[:8], base[4:],
-                   gate='{"fail_on_significant_regression": true}')
+        _gate_args(tmp_path, base[:8], base[4:], gate='{"fail_on_significant_regression": true}')
     )
     assert code == 2
     code2 = gate.main(
-        _gate_args(tmp_path, base, base,
-                   gate='{"metrics": {"unmeasured/metric": '
-                        '{"min_pass_rate_b": 1.0}}}')
+        _gate_args(
+            tmp_path,
+            base,
+            base,
+            gate='{"metrics": {"unmeasured/metric": {"min_pass_rate_b": 1.0}}}',
+        )
     )
     assert code2 == 2  # gating on unmeasured evidence is insufficient
 
@@ -772,9 +769,7 @@ def test_gate_thin_data_never_fails(tmp_path: Path) -> None:
 def test_gate_missing_traces_is_insufficient(tmp_path: Path) -> None:
     gate = _load_gate_module()
     base, cand = _seed_gate_db(tmp_path / "lens.db")
-    code = gate.main(
-        _gate_args(tmp_path, [*base, "f" * 32], cand)
-    )
+    code = gate.main(_gate_args(tmp_path, [*base, "f" * 32], cand))
     assert code == 2
 
 
@@ -787,12 +782,18 @@ def test_gate_usage_errors_exit_64(tmp_path: Path) -> None:
     assert exc.value.code == 64
     # missing dataset record in the store
     with pytest.raises(SystemExit) as exc2:
-        gate.main([
-            "--db", str(tmp_path / "lens.db"),
-            "--dataset", "no-such-dataset",
-            "--baseline", json.dumps({"trace_ids": base}),
-            "--candidate", json.dumps({"trace_ids": cand}),
-        ])
+        gate.main(
+            [
+                "--db",
+                str(tmp_path / "lens.db"),
+                "--dataset",
+                "no-such-dataset",
+                "--baseline",
+                json.dumps({"trace_ids": base}),
+                "--candidate",
+                json.dumps({"trace_ids": cand}),
+            ]
+        )
     assert exc2.value.code == 64
     # argparse usage error remapped off 2 (2 = insufficient data)
     with pytest.raises(SystemExit) as exc3:
@@ -800,19 +801,24 @@ def test_gate_usage_errors_exit_64(tmp_path: Path) -> None:
     assert exc3.value.code == 64
 
 
-def test_apply_gate_max_drop_null_pass_rate_fails_as_unmeasured(
-) -> None:
+def test_apply_gate_max_drop_null_pass_rate_fails_as_unmeasured() -> None:
     """max_drop on a metric never observed on one side is a
     missing-evidence failure — never a vacuous pass."""
     from forge_lens.eval.compare import apply_gate
 
-    result = {"deltas": [{
-        "evaluator": "token_f1", "metric": "score",
-        "pass_rate_a": 0.9, "pass_rate_b": None,
-        "n_a": 12, "n_b": 0,
-    }]}
-    out = apply_gate(
-        result, {"metrics": {"token_f1/score": {"max_drop": 0.10}}})
+    result = {
+        "deltas": [
+            {
+                "evaluator": "token_f1",
+                "metric": "score",
+                "pass_rate_a": 0.9,
+                "pass_rate_b": None,
+                "n_a": 12,
+                "n_b": 0,
+            }
+        ]
+    }
+    out = apply_gate(result, {"metrics": {"token_f1/score": {"max_drop": 0.10}}})
     assert out["gate_passed"] is False
     (f,) = out["failures"]
     assert f["observed"] is None
@@ -820,7 +826,8 @@ def test_apply_gate_max_drop_null_pass_rate_fails_as_unmeasured(
 
 
 def test_gate_max_drop_unmeasured_is_insufficient_e2e(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Candidate cohort with no tool spans → tool_success yields
     pass_rate_b=None → max_drop cannot be evaluated → exit 2, not 0."""
@@ -832,12 +839,16 @@ def test_gate_max_drop_unmeasured_is_insufficient_e2e(
     def mk(tid: str, with_tool: bool) -> Trace:
         spans = [_span("11", "agent", kind=SpanKind.AGENT)]
         if with_tool:
-            spans.append(_span("22", "call", kind=SpanKind.TOOL,
-                               attrs={"tool.name": "web_search"}))
+            spans.append(_span("22", "call", kind=SpanKind.TOOL, attrs={"tool.name": "web_search"}))
         for s in spans:
             s.trace_id = tid
-        return Trace(trace_id=tid, project_id="default", started_at=T0,
-                     ended_at=T0 + timedelta(seconds=2), spans=spans)
+        return Trace(
+            trace_id=tid,
+            project_id="default",
+            started_at=T0,
+            ended_at=T0 + timedelta(seconds=2),
+            spans=spans,
+        )
 
     base = [f"{0xCCCC000000000000000000000000 + i:032x}" for i in range(4)]
     cand = [f"{0xDDDD000000000000000000000000 + i:032x}" for i in range(4)]
@@ -847,11 +858,14 @@ def test_gate_max_drop_unmeasured_is_insufficient_e2e(
         store.upsert_trace(mk(tid, with_tool=False))
     store.close()
 
-    code = gate.main(_gate_args(
-        tmp_path, base, cand,
-        gate='{"metrics": {"tool_success/tool_success_rate": '
-             '{"max_drop": 0.05}}}',
-    ))
+    code = gate.main(
+        _gate_args(
+            tmp_path,
+            base,
+            cand,
+            gate='{"metrics": {"tool_success/tool_success_rate": {"max_drop": 0.05}}}',
+        )
+    )
     assert code == 2
     out = json.loads(capsys.readouterr().out)
     assert out["verdict"]["status"] == "insufficient_data"
@@ -859,23 +873,30 @@ def test_gate_max_drop_unmeasured_is_insufficient_e2e(
 
 
 def test_gate_bad_config_exits_64(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Malformed FORGE_LENS_* config is a usage error — a traceback
     exit-1 would be misread by CI as a regression."""
     monkeypatch.setenv("FORGE_LENS_AUTH_MODE", "not-a-mode")
     gate = _load_gate_module()
     with pytest.raises(SystemExit) as exc:
-        gate.main([
-            "--dataset", "x",
-            "--baseline", json.dumps({"trace_ids": []}),
-            "--candidate", json.dumps({"trace_ids": []}),
-        ])
+        gate.main(
+            [
+                "--dataset",
+                "x",
+                "--baseline",
+                json.dumps({"trace_ids": []}),
+                "--candidate",
+                json.dumps({"trace_ids": []}),
+            ]
+        )
     assert exc.value.code == 64
 
 
 def test_gate_engine_valueerror_is_70_not_64(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Narrow-catch contract: only apply_gate's authored spec errors are
@@ -901,11 +922,15 @@ def test_gate_engine_valueerror_is_70_not_64(
     # apply_gate's authored ValueError path is intact.
     monkeypatch.undo()
     with pytest.raises(SystemExit) as exc:
-        gate.main(_gate_args(
-            tmp_path, base, cand,
-            gate='{"metrics": {"error_free/no_error_spans": '
-                 '{"min_pass_rate_b": "not-a-number"}}}',
-        ))
+        gate.main(
+            _gate_args(
+                tmp_path,
+                base,
+                cand,
+                gate='{"metrics": {"error_free/no_error_spans": '
+                '{"min_pass_rate_b": "not-a-number"}}}',
+            )
+        )
     assert exc.value.code == 64
 
 
@@ -914,8 +939,7 @@ def test_gate_reason_strings_match_compare_contract() -> None:
     strings — this pins the exact wording so a drift in compare.py is
     a loud test break, not a silent misclassification."""
     src = (
-        Path(__file__).resolve().parents[2]
-        / "src" / "forge_lens" / "eval" / "compare.py"
+        Path(__file__).resolve().parents[2] / "src" / "forge_lens" / "eval" / "compare.py"
     ).read_text(encoding="utf-8")
     for reason in (
         "metric not evaluated — cannot gate on unmeasured evidence",

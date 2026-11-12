@@ -66,5 +66,5 @@ def capability_matrix() -> dict[str, Any]:
     return {
         "hosts": {k: dict(v) for k, v in sorted(HOST_CAPABILITIES.items())},
         "note": "coverage claims are per-mechanism; 'unsupported' means"
-                " no verified path exists today",
+        " no verified path exists today",
     }

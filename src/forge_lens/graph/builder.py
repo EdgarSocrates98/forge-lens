@@ -56,11 +56,7 @@ def build_trace_graph(trace: Trace) -> ExecutionGraph:
         parent = s.parent_span_id if s.parent_span_id in ids else None
         siblings.setdefault(parent, []).append(s)
         if s.parent_span_id and s.parent_span_id in ids:
-            edges.append(
-                GraphEdge(
-                    source=s.parent_span_id, target=s.span_id, kind=EdgeKind.PARENT
-                )
-            )
+            edges.append(GraphEdge(source=s.parent_span_id, target=s.span_id, kind=EdgeKind.PARENT))
         for link in s.links:
             edges.append(
                 GraphEdge(
@@ -73,15 +69,12 @@ def build_trace_graph(trace: Trace) -> ExecutionGraph:
 
     for group in siblings.values():
         for prev, nxt in itertools.pairwise(group):
-            edges.append(
-                GraphEdge(source=prev.span_id, target=nxt.span_id, kind=EdgeKind.SEQUENCE)
-            )
+            edges.append(GraphEdge(source=prev.span_id, target=nxt.span_id, kind=EdgeKind.SEQUENCE))
 
     edges.sort(key=lambda e: (e.kind.value, e.source, e.target))
     roots = siblings.get(None, [])
     root_id: str | None = (
-        trace.root_span_id if trace.root_span_id in ids
-        else (roots[0].span_id if roots else None)
+        trace.root_span_id if trace.root_span_id in ids else (roots[0].span_id if roots else None)
     )
     members = cycle_member_ids({s.span_id: s.parent_span_id for s in spans})
     return ExecutionGraph(
@@ -132,9 +125,7 @@ def cycle_member_ids(parent_of: dict[str, str | None]) -> set[str]:
     return members
 
 
-def _max_depth(
-    siblings: dict[str | None, list[Span]], cyclic_members: set[str]
-) -> int:
+def _max_depth(siblings: dict[str | None, list[Span]], cyclic_members: set[str]) -> int:
     """Longest parent→leaf chain across the WHOLE trace; 0 when empty.
 
     BFS starts from every root-level span (a partial trace can carry

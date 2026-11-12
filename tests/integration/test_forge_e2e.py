@@ -34,9 +34,7 @@ def _load_forge_bridge() -> Any:
     package; a path insertion would leak into every test's imports)."""
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location(
-        "forge_bridge", _EXAMPLES / "forge_bridge.py"
-    )
+    spec = importlib.util.spec_from_file_location("forge_bridge", _EXAMPLES / "forge_bridge.py")
     assert spec is not None
     assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
@@ -86,19 +84,33 @@ def flow(tmp_path_factory: pytest.TempPathFactory) -> dict:
             ws.mkdir()
             env = fb.theforge_env(ws)
             fb.init_workspace(theforge, ws, env)
-            runs.append(fb.traced_theforge_ask(
-                tracer, theforge, ws, env,
-                intent=OK_INTENT, use=fb.OK_PROVIDER_ID,
-                label="ask echo-forge"))
-            runs.append(fb.traced_theforge_ask(
-                tracer, theforge, ws, env,
-                intent=FAIL_INTENT, use=fb.FAIL_PROVIDER_ID,
-                capability=fb.FAIL_CAPABILITY, allow_unverified=True,
-                label="ask failing-forge"))
+            runs.append(
+                fb.traced_theforge_ask(
+                    tracer,
+                    theforge,
+                    ws,
+                    env,
+                    intent=OK_INTENT,
+                    use=fb.OK_PROVIDER_ID,
+                    label="ask echo-forge",
+                )
+            )
+            runs.append(
+                fb.traced_theforge_ask(
+                    tracer,
+                    theforge,
+                    ws,
+                    env,
+                    intent=FAIL_INTENT,
+                    use=fb.FAIL_PROVIDER_ID,
+                    capability=fb.FAIL_CAPABILITY,
+                    allow_unverified=True,
+                    label="ask failing-forge",
+                )
+            )
         else:
             for name in ("ok", "fail"):
-                runs.append(fb.import_captured_run(
-                    tracer, fb.CAPTURED_DIR / name))
+                runs.append(fb.import_captured_run(tracer, fb.CAPTURED_DIR / name))
         tracer.flush()
         results["runs"] = runs
         results["db"] = srv["db"]
@@ -109,45 +121,53 @@ def flow(tmp_path_factory: pytest.TempPathFactory) -> dict:
         items = srv["store"].list_traces(project_id=fb.PROJECT_ID)
         results["stored_items"] = items
         results["traces"] = {
-            i["trace_id"]: srv["store"].get_trace(
-                i["trace_id"], project_id=fb.PROJECT_ID)
+            i["trace_id"]: srv["store"].get_trace(i["trace_id"], project_id=fb.PROJECT_ID)
             for i in items
         }
         results["fail_trace_id"] = next(
-            (tid for tid, t in results["traces"].items()
-             if t and any(
-                 s.status.code.value == "error"
-                 and "failing-forge" in json.dumps(s.attributes)
-                 for s in t.spans)),
+            (
+                tid
+                for tid, t in results["traces"].items()
+                if t
+                and any(
+                    s.status.code.value == "error" and "failing-forge" in json.dumps(s.attributes)
+                    for s in t.spans
+                )
+            ),
             None,
         )
         results["fail_report"] = (
             classify_failure(results["traces"][results["fail_trace_id"]])
-            if results["fail_trace_id"] else None
+            if results["fail_trace_id"]
+            else None
         )
         # MCP stdio real: o servidor lê o mesmo db em modo readonly
         with fb.McpClient(results["db"], cwd=data_dir) as mcp:
-            results["mcp_init"] = mcp.request("initialize", {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "e2e-test", "version": "0"},
-            })
+            results["mcp_init"] = mcp.request(
+                "initialize",
+                {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "e2e-test", "version": "0"},
+                },
+            )
             mcp.notify("notifications/initialized")
             results["mcp_tools"] = mcp.request("tools/list")
-            results["mcp_list"] = mcp.call_tool(
-                "lens.list_traces", {"project_id": fb.PROJECT_ID})
+            results["mcp_list"] = mcp.call_tool("lens.list_traces", {"project_id": fb.PROJECT_ID})
             if results["fail_trace_id"]:
                 results["mcp_failure"] = mcp.call_tool(
                     "lens.failure",
-                    {"trace_id": results["fail_trace_id"],
-                     "project_id": fb.PROJECT_ID})
+                    {"trace_id": results["fail_trace_id"], "project_id": fb.PROJECT_ID},
+                )
         # REST real sobre o socket vivo (ainda dentro do with)
         results["rest_list"] = fb.http_get(
-            f"{srv['endpoint']}/v1/traces?project_id={fb.PROJECT_ID}")
+            f"{srv['endpoint']}/v1/traces?project_id={fb.PROJECT_ID}"
+        )
         if results["fail_trace_id"]:
             results["rest_failure"] = fb.http_get(
                 f"{srv['endpoint']}/v1/traces/{results['fail_trace_id']}"
-                f"/failure?project_id={fb.PROJECT_ID}")
+                f"/failure?project_id={fb.PROJECT_ID}"
+            )
     return results
 
 
@@ -175,13 +195,11 @@ def test_spans_persisted_and_queryable(flow: dict) -> None:
         assert t is not None
         # 1 root do harness + N spans importados do theforge
         assert len(t.spans) >= 4
-        imported = [s for s in t.spans
-                    if s.provenance == Provenance.IMPORTED]
+        imported = [s for s in t.spans if s.provenance == Provenance.IMPORTED]
         assert len(imported) >= 3
         assert all(s.end_time is not None for s in t.spans)
         names = {s.name for s in t.spans}
-        assert any(n.startswith("theforge.") or n.startswith("provider:")
-                   for n in names), names
+        assert any(n.startswith("theforge.") or n.startswith("provider:") for n in names), names
 
 
 def test_rest_reads_over_real_socket(flow: dict) -> None:
@@ -218,12 +236,8 @@ def test_mcp_stdio_round_trip(flow: dict) -> None:
 def test_captured_fixtures_import_offline() -> None:
     """O caminho de fallback (sibling ausente) é exercido sempre — fixtures
     são artefatos REAIS gravados de runs anteriores, nunca sintéticos."""
-    tracer = LensTracer(service_name="captured-check", auto_flush=False,
-                        register_atexit=False)
-    summaries = [
-        fb.import_captured_run(tracer, fb.CAPTURED_DIR / name)
-        for name in ("ok", "fail")
-    ]
+    tracer = LensTracer(service_name="captured-check", auto_flush=False, register_atexit=False)
+    summaries = [fb.import_captured_run(tracer, fb.CAPTURED_DIR / name) for name in ("ok", "fail")]
     assert tracer.flush() is not None
     traces = tracer.exporter.traces
     assert len(traces) == 2
@@ -243,14 +257,16 @@ def test_error_span_carries_real_theforge_evidence(flow: dict) -> None:
     # also IMPORTED+ERROR (its own run-status replay), so a bare
     # "first imported error" pick lands on the root, which carries
     # theforge.run_id evidence but no theforge.span.name
-    err = next(s for s in t.spans if s.status.code == StatusCode.ERROR
-               and s.provenance == Provenance.IMPORTED
-               and s.attributes.get("theforge.span.name")
-               == "provider:failing-forge")
+    err = next(
+        s
+        for s in t.spans
+        if s.status.code == StatusCode.ERROR
+        and s.provenance == Provenance.IMPORTED
+        and s.attributes.get("theforge.span.name") == "provider:failing-forge"
+    )
     assert err.attributes["theforge.span.name"] == "provider:failing-forge"
     assert err.attributes["error.type"] == "FORGE-PROTO-EXIT"
     assert "exit code 3" in err.attributes["error.message"]
     # duração importada é a medida real do theforge, não um placeholder
     assert err.attributes["theforge.duration_ms"] > 0
-    assert err.duration_ms == pytest.approx(
-        float(err.attributes["theforge.duration_ms"]), abs=1.0)
+    assert err.duration_ms == pytest.approx(float(err.attributes["theforge.duration_ms"]), abs=1.0)

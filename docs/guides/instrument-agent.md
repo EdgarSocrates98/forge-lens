@@ -9,11 +9,9 @@ with tracer.agent("researcher", **{"agent.role": "web-research"}):
     plan = make_plan()
     with tracer.llm_call("claude-sonnet-4", provider="anthropic") as s:
         resp = call_model(plan)
-        tracer.record_usage(s, input_tokens=resp.usage.input,
-                            output_tokens=resp.usage.output)
+        tracer.record_usage(s, input_tokens=resp.usage.input, output_tokens=resp.usage.output)
     for item in resp.todos:
-        with tracer.tool_call("web_search", capture_args=True,
-                              arguments={"q": item.query}):
+        with tracer.tool_call("web_search", capture_args=True, arguments={"q": item.query}):
             results = search(item.query)
 ```
 

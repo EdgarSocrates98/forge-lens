@@ -58,9 +58,7 @@ def _loop_trace() -> Trace:
 
 
 @pytest.fixture
-def seeded_db(
-    tmp_path: Path, synthetic_trace: Trace, monkeypatch: pytest.MonkeyPatch
-) -> Path:
+def seeded_db(tmp_path: Path, synthetic_trace: Trace, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A closed store on disk — ``serve`` reopens it readonly.
 
     ``load_config()`` (called by ``serve`` for the pricing registry)
@@ -98,23 +96,23 @@ def _serve(
     capsys: pytest.CaptureFixture[str],
 ) -> dict[int, dict[str, Any]]:
     init = {
-        "jsonrpc": "2.0", "id": 0, "method": "initialize",
-        "params": {"protocolVersion": "2024-11-05", "capabilities": {},
-                   "clientInfo": {"name": "test", "version": "0"}},
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"},
+        },
     }
-    stdin = io.StringIO(
-        "".join(json.dumps(m) + "\n" for m in [init, *msgs]))
+    stdin = io.StringIO("".join(json.dumps(m) + "\n" for m in [init, *msgs]))
     old = sys.stdin
     sys.stdin = stdin
     try:
         serve(str(db))
     finally:
         sys.stdin = old
-    out = [
-        json.loads(line)
-        for line in capsys.readouterr().out.splitlines()
-        if line
-    ]
+    out = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
     return {o["id"]: o for o in out}
 
 
@@ -123,13 +121,13 @@ def _payload(resp: dict[str, Any]) -> dict[str, Any]:
     return json.loads(resp["result"]["content"][0]["text"])
 
 
-def test_pre_init_calls_are_rejected(
-    seeded_db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_pre_init_calls_are_rejected(seeded_db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """MCP requires initialize first; tool failures mark isError."""
     stdin = io.StringIO(
-        json.dumps(_call_tool(9, "lens.sessions", {})) + "\n"
-        + json.dumps(_rpc("tools/list", 10)) + "\n"
+        json.dumps(_call_tool(9, "lens.sessions", {}))
+        + "\n"
+        + json.dumps(_rpc("tools/list", 10))
+        + "\n"
     )
     old = sys.stdin
     sys.stdin = stdin
@@ -137,8 +135,7 @@ def test_pre_init_calls_are_rejected(
         serve(str(seeded_db))
     finally:
         sys.stdin = old
-    out = [json.loads(line)
-           for line in capsys.readouterr().out.splitlines() if line]
+    out = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
     for resp in out:
         assert resp["error"]["code"] == -32602
         assert "initialize" in resp["error"]["message"]
@@ -154,9 +151,7 @@ def test_pre_init_calls_are_rejected(
     assert "not found" in _payload(by_id[1])["error"]
 
 
-def test_tools_list_covers_read_intel(
-    seeded_db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_tools_list_covers_read_intel(seeded_db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     by_id = _serve(seeded_db, [_rpc("tools/list", 1)], capsys)
     tools = by_id[1]["result"]["tools"]
     assert {t["name"] for t in tools} == {
@@ -186,17 +181,13 @@ def test_existing_tools_still_work(
         seeded_db,
         [
             _call_tool(1, "lens.list_traces", {"limit": 5}),
-            _call_tool(
-                2, "lens.get_trace", {"trace_id": synthetic_trace.trace_id}
-            ),
+            _call_tool(2, "lens.get_trace", {"trace_id": synthetic_trace.trace_id}),
             _call_tool(3, "lens.stats"),
         ],
         capsys,
     )
     assert len(_payload(by_id[1])["traces"]) == 2
-    assert (
-        _payload(by_id[2])["trace"]["trace_id"] == synthetic_trace.trace_id
-    )
+    assert _payload(by_id[2])["trace"]["trace_id"] == synthetic_trace.trace_id
     assert _payload(by_id[3])["traces"] == 2
 
 
@@ -285,11 +276,7 @@ def test_cost_uses_pricing_file_env(
     """Same path as the API: FORGE_LENS_PRICING_FILE → from_file."""
     monkeypatch.chdir(tmp_path)
     prices = tmp_path / "prices.json"
-    prices.write_text(
-        json.dumps(
-            {"gpt-test": {"input_per_mtok": 1.0, "output_per_mtok": 2.0}}
-        )
-    )
+    prices.write_text(json.dumps({"gpt-test": {"input_per_mtok": 1.0, "output_per_mtok": 2.0}}))
     monkeypatch.setenv("FORGE_LENS_PRICING_FILE", str(prices))
     db = tmp_path / "m.db"
     store = SQLiteTraceStore(db)
@@ -337,9 +324,7 @@ def test_failure_classification(
     by_id = _serve(
         seeded_db,
         [
-            _call_tool(
-                1, "lens.failure", {"trace_id": synthetic_trace.trace_id}
-            ),
+            _call_tool(1, "lens.failure", {"trace_id": synthetic_trace.trace_id}),
             _call_tool(2, "lens.failure", {"trace_id": LOOP_TID}),
         ],
         capsys,
@@ -353,9 +338,7 @@ def test_failure_classification(
     assert clean["category"] == "unknown"
 
 
-def test_list_datasets(
-    seeded_db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_list_datasets(seeded_db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     by_id = _serve(
         seeded_db,
         [
@@ -370,9 +353,7 @@ def test_list_datasets(
     assert _payload(by_id[2])["datasets"] == []
 
 
-def test_capabilities_matrix(
-    seeded_db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_capabilities_matrix(seeded_db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     by_id = _serve(seeded_db, [_call_tool(1, "lens.capabilities")], capsys)
     out = _payload(by_id[1])
     assert "claude_code" in out["hosts"]
@@ -423,8 +404,7 @@ def test_ping_allowed_before_initialize(
         serve(str(seeded_db))
     finally:
         sys.stdin = old
-    out = [json.loads(line)
-           for line in capsys.readouterr().out.splitlines() if line]
+    out = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
     assert out == [{"jsonrpc": "2.0", "id": 42, "result": {}}]
 
 
@@ -436,6 +416,7 @@ def test_internal_error_is_opaque_on_the_wire(
     """-32603 carries the exception TYPE only — exception text can
     embed payload fragments/paths/secrets and never crosses."""
     secret = "sk-ant-oat01-SECRET-VALUE-9f8e7d6c"
+
     # An impl raising mid-call is the -32603 path — stage it via the
     # store seam so the ValueError message itself carries the secret.
     def _boom(*a: Any, **kw: Any) -> Any:
@@ -465,9 +446,7 @@ def test_unknown_tool_is_data_not_death(
     assert by_id[2]["result"] == {}
 
 
-def test_sessions_tool_rolls_up(
-    seeded_db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_sessions_tool_rolls_up(seeded_db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Two traces sharing session_id collapse to one roll-up row."""
     db_store = SQLiteTraceStore(seeded_db, readonly=False)
     base = _loop_trace()
@@ -493,15 +472,16 @@ def test_sessions_tool_rolls_up(
     assert shared
     assert shared[0]["traces"] == 2
     assert set(shared[0]) == {
-        "session_id", "traces", "spans",
-        "first_started_at", "last_activity_at",
+        "session_id",
+        "traces",
+        "spans",
+        "first_started_at",
+        "last_activity_at",
     }
     assert by_id[2]["error"]["code"] == -32602
 
 
-def test_sessions_tools_offset_pages(
-    seeded_db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_sessions_tools_offset_pages(seeded_db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """offset walks both roll-ups without overlap; bad offset → error."""
     by_id = _serve(
         seeded_db,
@@ -529,9 +509,7 @@ def test_sessions_tools_offset_pages(
     assert by_id[6]["error"]["code"] == -32602
 
 
-def test_tools_tool_rolls_up(
-    seeded_db: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_tools_tool_rolls_up(seeded_db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """lens.tools mirrors /v1/tools — per-name fleet roll-up."""
     db_store = SQLiteTraceStore(seeded_db, readonly=False)
     t = _loop_trace()

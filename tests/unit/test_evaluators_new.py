@@ -61,9 +61,7 @@ def _output_trace() -> Trace:
     )
 
 
-def _run(
-    trace: Trace, name: str, params: Any = None
-) -> EvaluationResult:
+def _run(trace: Trace, name: str, params: Any = None) -> EvaluationResult:
     # run_evaluators normalizes a missing/None params to {} — passing it
     # through exercises the same spec path the API exposes
     return run_evaluators(trace, [{"name": name, "params": params}])[0]
@@ -92,16 +90,12 @@ def test_contains_case_sensitivity() -> None:
     t = _output_trace()
     # default is case-sensitive — a lowercase needle misses
     assert _run(t, "contains", {"text": "paris"}).score == 0.0
-    insensitive = _run(
-        t, "contains", {"text": "paris", "case_sensitive": False}
-    )
+    insensitive = _run(t, "contains", {"text": "paris", "case_sensitive": False})
     assert insensitive.score == 1.0
     assert insensitive.details["case_sensitive"] == "false"
     # a non-bool falls back to the default rather than flipping semantics
     # (same convention as task_completion's require_no_error)
-    fallback = _run(
-        t, "contains", {"text": "paris", "case_sensitive": "no"}
-    )
+    fallback = _run(t, "contains", {"text": "paris", "case_sensitive": "no"})
     assert fallback.score == 0.0
     assert fallback.details["case_sensitive"] == "true"
 
@@ -150,9 +144,7 @@ def test_regex_match_reports_span_and_substring() -> None:
 def test_regex_no_match_and_case_insensitive() -> None:
     t = _output_trace()
     assert _run(t, "regex", {"pattern": "PARIS"}).score == 0.0
-    insensitive = _run(
-        t, "regex", {"pattern": "PARIS", "case_sensitive": False}
-    )
+    insensitive = _run(t, "regex", {"pattern": "PARIS", "case_sensitive": False})
     assert insensitive.score == 1.0
 
 
@@ -210,14 +202,14 @@ def test_latency_budget_unended_trace_is_none() -> None:
 def test_latency_budget_bad_params_evaluator_error() -> None:
     t = _trace([_span("a1", "work")])
     bad_params: list[dict[str, Any]] = [
-        {},                                   # missing bound
-        {"max_duration_ms": "5000"},          # wire string, not a number
-        {"max_duration_ms": True},            # bool must not become 1.0
-        {"max_duration_ms": float("inf")},    # non-finite
-        {"max_duration_ms": float("nan")},    # non-finite
-        {"max_duration_ms": 0},               # must be positive
-        {"max_duration_ms": -100},            # must be positive
-        {"max_duration_ms": None},            # non-numeric
+        {},  # missing bound
+        {"max_duration_ms": "5000"},  # wire string, not a number
+        {"max_duration_ms": True},  # bool must not become 1.0
+        {"max_duration_ms": float("inf")},  # non-finite
+        {"max_duration_ms": float("nan")},  # non-finite
+        {"max_duration_ms": 0},  # must be positive
+        {"max_duration_ms": -100},  # must be positive
+        {"max_duration_ms": None},  # non-numeric
     ]
     for params in bad_params:
         res = _run(t, "latency_budget", params)
@@ -232,14 +224,11 @@ def _tools_trace() -> Trace:
     return _trace(
         [
             _span("a1", "agent", kind=SpanKind.AGENT),
-            _span("c1", "call", kind=SpanKind.TOOL,
-                  attrs={"tool.name": "web_search"}),
-            _span("c2", "call", kind=SpanKind.TOOL,
-                  attrs={"tool.name": "web_search"}),
-            _span("c3", "call", kind=SpanKind.TOOL,
-                  attrs={"tool.name": "db_query"}),
+            _span("c1", "call", kind=SpanKind.TOOL, attrs={"tool.name": "web_search"}),
+            _span("c2", "call", kind=SpanKind.TOOL, attrs={"tool.name": "web_search"}),
+            _span("c3", "call", kind=SpanKind.TOOL, attrs={"tool.name": "db_query"}),
             _span("c4", "call", kind=SpanKind.TOOL),  # no tool.name attr
-            _span("d1", "llm", kind=SpanKind.LLM),    # not a tool span
+            _span("d1", "llm", kind=SpanKind.LLM),  # not a tool span
         ]
     )
 
@@ -261,8 +250,7 @@ def test_tool_call_count_all_tool_spans() -> None:
 
 def test_tool_call_count_tool_filter() -> None:
     t = _tools_trace()
-    res = _run(t, "tool_call_count",
-               {"min": 2, "max": 2, "tool": "web_search"})
+    res = _run(t, "tool_call_count", {"min": 2, "max": 2, "tool": "web_search"})
     assert res.score == 1.0
     assert res.details["count"] == "2"
     assert res.details["tool"] == "web_search"
@@ -279,13 +267,13 @@ def test_tool_call_count_tool_filter() -> None:
 def test_tool_call_count_bad_params_evaluator_error() -> None:
     t = _tools_trace()
     bad_params: list[dict[str, Any]] = [
-        {"max": 2},                       # missing min
-        {"min": 0},                       # missing max
-        {"min": 3, "max": 1},             # inverted bounds
-        {"min": -1, "max": 2},            # negative bound
-        {"min": "1", "max": 2},           # wire string, not an int
-        {"min": True, "max": 2},          # bool is not a count
-        {"min": 0.5, "max": 2},           # fractional float
+        {"max": 2},  # missing min
+        {"min": 0},  # missing max
+        {"min": 3, "max": 1},  # inverted bounds
+        {"min": -1, "max": 2},  # negative bound
+        {"min": "1", "max": 2},  # wire string, not an int
+        {"min": True, "max": 2},  # bool is not a count
+        {"min": 0.5, "max": 2},  # fractional float
         {"min": 0, "max": float("nan")},  # non-finite
         {"min": 0, "max": 2, "tool": 7},  # tool must be a string
     ]

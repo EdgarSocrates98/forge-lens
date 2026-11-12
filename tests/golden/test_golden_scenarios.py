@@ -194,13 +194,9 @@ def _validate_input(path: Path, inp: Any) -> str:
         if "payload_bytes" in inp and not isinstance(inp["payload_bytes"], int):
             raise _err(path, "input.payload_bytes must be an integer")
     elif op == "engine":
-        _unknown(
-            path, inp, {"op", "function", "trace_id", "project_id", "params"}, "input"
-        )
+        _unknown(path, inp, {"op", "function", "trace_id", "project_id", "params"}, "input")
         if inp.get("function") not in _ENGINE_FUNCTIONS:
-            raise _err(
-                path, f"input.function must be one of {sorted(_ENGINE_FUNCTIONS)}"
-            )
+            raise _err(path, f"input.function must be one of {sorted(_ENGINE_FUNCTIONS)}")
         if not isinstance(inp.get("trace_id"), str):
             raise _err(path, "input.trace_id must be a string")
         if "params" in inp and not isinstance(inp["params"], dict):
@@ -231,8 +227,7 @@ def _validate(path: Path, data: Any) -> dict[str, Any]:
     if data["scenario_id"] != path.stem:
         raise _err(
             path,
-            f"scenario_id {data['scenario_id']!r} must equal filename stem "
-            f"{path.stem!r}",
+            f"scenario_id {data['scenario_id']!r} must equal filename stem {path.stem!r}",
         )
     if data["category"] not in CATEGORIES:
         raise _err(path, f"category must be one of {sorted(CATEGORIES)}")
@@ -262,8 +257,7 @@ def _validate(path: Path, data: Any) -> dict[str, Any]:
                     raise _err(path, f"setup.{key}[{i}].{req} must be a string")
     for key in ("store_traces", "ingest_traces"):
         if key in setup and (
-            not isinstance(setup[key], list)
-            or any(not isinstance(t, dict) for t in setup[key])
+            not isinstance(setup[key], list) or any(not isinstance(t, dict) for t in setup[key])
         ):
             raise _err(path, f"setup.{key} must be a list of Trace objects")
     for i, req in enumerate(setup.get("requests", [])):
@@ -327,9 +321,7 @@ def _subset(expected: Any, actual: Any, where: str) -> list[str]:
         if not isinstance(actual, list):
             return [f"{where}: expected list, got {type(actual).__name__}"]
         if len(actual) != len(expected):
-            return [
-                f"{where}: expected {len(expected)} items, got {len(actual)}"
-            ]
+            return [f"{where}: expected {len(expected)} items, got {len(actual)}"]
         out = []
         for i, (e, a) in enumerate(zip(expected, actual, strict=True)):
             out.extend(_subset(e, a, f"{where}[{i}]"))
@@ -355,9 +347,7 @@ def _resolve_path(obj: Any, path: str) -> Any:
     return cur
 
 
-def _assert_contains(
-    mapping: dict[str, Any], payload: Any, where: str
-) -> list[str]:
+def _assert_contains(mapping: dict[str, Any], payload: Any, where: str) -> list[str]:
     """Each expected substring must appear inside the resolved value."""
     out: list[str] = []
     for path, needles in mapping.items():
@@ -389,9 +379,7 @@ def _walk_dicts(obj: Any) -> list[dict[str, Any]]:
 
 
 def _provenance_values(obj: Any) -> list[Any]:
-    return [
-        d["provenance"] for d in _walk_dicts(obj) if "provenance" in d
-    ]
+    return [d["provenance"] for d in _walk_dicts(obj) if "provenance" in d]
 
 
 # -- harness ----------------------------------------------------------------
@@ -426,9 +414,7 @@ class _Harness:
 
             from forge_lens.api.app import create_app
 
-            self._client = TestClient(
-                create_app(store=self.store, config=self.config)
-            )
+            self._client = TestClient(create_app(store=self.store, config=self.config))
             self._client.__enter__()
         return self._client
 
@@ -449,9 +435,7 @@ class _Harness:
         for raw in setup.get("store_traces", []):
             self.store.upsert_trace(Trace.model_validate(raw))
         if setup.get("ingest_traces"):
-            self.pipeline().ingest(
-                [Trace.model_validate(t) for t in setup["ingest_traces"]]
-            )
+            self.pipeline().ingest([Trace.model_validate(t) for t in setup["ingest_traces"]])
         for req in setup.get("requests", []):
             r = self._http(req)
             if r.status_code >= 300:
@@ -486,17 +470,13 @@ class _Harness:
             calls: list[dict[str, Any]] = []
             for _ in range(inp.get("times", 1)):
                 try:
-                    res = self.pipeline().ingest(
-                        traces, payload_bytes=inp.get("payload_bytes")
-                    )
+                    res = self.pipeline().ingest(traces, payload_bytes=inp.get("payload_bytes"))
                     calls.append({"result": res, "error": None})
                 except Exception as exc:  # the scenario decides how to assert
                     calls.append({"result": None, "error": exc})
             return {"kind": "pipeline", "calls": calls}
         if op == "engine":
-            trace = self.store.get_trace(
-                inp["trace_id"], project_id=inp.get("project_id")
-            )
+            trace = self.store.get_trace(inp["trace_id"], project_id=inp.get("project_id"))
             if trace is None:
                 raise ScenarioError(
                     f"engine input: trace {inp['trace_id']!r} not stored — "
@@ -520,9 +500,7 @@ class _Harness:
         # env for the pricing registry — pin both for determinism.
         monkeypatch.chdir(self.tmp_path)
         monkeypatch.delenv("FORGE_LENS_PRICING_FILE", raising=False)
-        stdin = io.StringIO(
-            "".join(json.dumps(f) + "\n" for f in inp["frames"])
-        )
+        stdin = io.StringIO("".join(json.dumps(f) + "\n" for f in inp["frames"]))
         old = sys.stdin
         sys.stdin = stdin
         try:
@@ -530,18 +508,14 @@ class _Harness:
         finally:
             sys.stdin = old
         replies = [
-            json.loads(line)
-            for line in capsys.readouterr().out.splitlines()
-            if line.strip()
+            json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()
         ]
         out = {str(o.get("id")): o for o in replies}
         out["_rc"] = rc
         return out
 
 
-def _engine_output(
-    name: str, trace: Trace, params: dict[str, Any]
-) -> dict[str, Any]:
+def _engine_output(name: str, trace: Trace, params: dict[str, Any]) -> dict[str, Any]:
     if name == "detect_loops":
         from forge_lens.ops.loops import detect_loops
 
@@ -586,9 +560,7 @@ def _result_dict(result: Any) -> dict[str, Any]:
 def _check_response(r_exp: dict[str, Any], resp: Any, where: str) -> list[str]:
     problems: list[str] = []
     if "status" in r_exp and resp.status_code != r_exp["status"]:
-        problems.append(
-            f"{where}.status: expected {r_exp['status']}, got {resp.status_code}"
-        )
+        problems.append(f"{where}.status: expected {r_exp['status']}, got {resp.status_code}")
     body: Any = None
     if "json" in r_exp or "json_contains" in r_exp:
         try:
@@ -599,9 +571,7 @@ def _check_response(r_exp: dict[str, Any], resp: Any, where: str) -> list[str]:
     if "json" in r_exp:
         problems.extend(_subset(r_exp["json"], body, f"{where}.json"))
     if "json_contains" in r_exp:
-        problems.extend(
-            _assert_contains(r_exp["json_contains"], body, f"{where}.json_contains")
-        )
+        problems.extend(_assert_contains(r_exp["json_contains"], body, f"{where}.json_contains"))
     for s in r_exp.get("body_contains", []):
         if s not in resp.text:
             problems.append(f"{where}.body_contains: {s!r} absent")
@@ -637,29 +607,21 @@ def _row_matches(
     return problems
 
 
-def _assert_store(
-    store: SQLiteTraceStore, exp: dict[str, Any]
-) -> list[str]:
+def _assert_store(store: SQLiteTraceStore, exp: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     rows = store.list_traces()
     if "trace_count" in exp and len(rows) != exp["trace_count"]:
-        problems.append(
-            f"store.trace_count: expected {exp['trace_count']}, got {len(rows)}"
-        )
+        problems.append(f"store.trace_count: expected {exp['trace_count']}, got {len(rows)}")
     if "span_count" in exp:
         actual = int(store.stats()["spans"])
         if actual != exp["span_count"]:
-            problems.append(
-                f"store.span_count: expected {exp['span_count']}, got {actual}"
-            )
+            problems.append(f"store.span_count: expected {exp['span_count']}, got {actual}")
     for tid, fields in exp.get("traces", {}).items():
         trace = store.get_trace(tid)
         if trace is None:
             problems.append(f"store.traces.{tid}: trace not stored")
             continue
-        problems.extend(
-            _subset(fields, trace.model_dump(mode="json"), f"store.traces.{tid}")
-        )
+        problems.extend(_subset(fields, trace.model_dump(mode="json"), f"store.traces.{tid}"))
     for key, fields in exp.get("spans", {}).items():
         span, err = _span_lookup(store, key, "store.spans")
         if err:
@@ -675,9 +637,7 @@ def _assert_store(
         have = set(span["integrity_flags"])
         for f in flags:
             if f not in have:
-                problems.append(
-                    f"store.span_flags.{key}: flag {f!r} absent (have {sorted(have)})"
-                )
+                problems.append(f"store.span_flags.{key}: flag {f!r} absent (have {sorted(have)})")
     for key, flags in exp.get("span_flag_absent", {}).items():
         span, err = _span_lookup(store, key, "store.span_flag_absent")
         if err:
@@ -687,29 +647,19 @@ def _assert_store(
         have = set(span["integrity_flags"])
         for f in flags:
             if f in have:
-                problems.append(
-                    f"store.span_flag_absent.{key}: flag {f!r} unexpectedly present"
-                )
+                problems.append(f"store.span_flag_absent.{key}: flag {f!r} unexpectedly present")
     for key, attrs in exp.get("span_attrs", {}).items():
         span, err = _span_lookup(store, key, "store.span_attrs")
         if err:
             problems.append(err)
         else:
-            problems.extend(
-                _subset(attrs, span["attributes"], f"store.span_attrs.{key}")
-            )
+            problems.extend(_subset(attrs, span["attributes"], f"store.span_attrs.{key}"))
     if "sessions" in exp:
-        problems.extend(
-            _row_matches(exp["sessions"], store.list_sessions(), "store.sessions")
-        )
+        problems.extend(_row_matches(exp["sessions"], store.list_sessions(), "store.sessions"))
     if "tools" in exp:
-        problems.extend(
-            _row_matches(exp["tools"], store.list_tools(), "store.tools")
-        )
+        problems.extend(_row_matches(exp["tools"], store.list_tools(), "store.tools"))
     if "audit" in exp:
-        problems.extend(
-            _row_matches(exp["audit"], store.list_audit(limit=500), "store.audit")
-        )
+        problems.extend(_row_matches(exp["audit"], store.list_audit(limit=500), "store.audit"))
     return problems
 
 
@@ -724,13 +674,10 @@ def _assert_forbidden(
     if op_result["kind"] == "http":
         bodies = [r.text for r in op_result["responses"]]
     else:
-        payload = (
-            op_result.get("output")
-            or [
-                _result_dict(c["result"]) if c["result"] else repr(c["error"])
-                for c in op_result.get("calls", [])
-            ]
-        )
+        payload = op_result.get("output") or [
+            _result_dict(c["result"]) if c["result"] else repr(c["error"])
+            for c in op_result.get("calls", [])
+        ]
         output_json = json.dumps(payload, sort_keys=True, default=str)
         bodies = [output_json]
     for s in forbidden.get("body_not_contains", []):
@@ -748,19 +695,13 @@ def _assert_forbidden(
                 stored.append(json.dumps(t.model_dump(mode="json"), default=str))
         for s in forbidden.get("store_json_not_contains", []):
             if any(s in blob for blob in stored):
-                problems.append(
-                    f"forbidden.store_json_not_contains: {s!r} in stored trace"
-                )
+                problems.append(f"forbidden.store_json_not_contains: {s!r} in stored trace")
         for tid in forbidden.get("trace_ids_absent", []):
             if any(r["trace_id"] == tid for r in store.list_traces()):
-                problems.append(
-                    f"forbidden.trace_ids_absent: {tid!r} still stored"
-                )
+                problems.append(f"forbidden.trace_ids_absent: {tid!r} still stored")
             for text in bodies:
                 if tid in text:
-                    problems.append(
-                        f"forbidden.trace_ids_absent: {tid!r} in response body"
-                    )
+                    problems.append(f"forbidden.trace_ids_absent: {tid!r} in response body")
     audit_blob = json.dumps(store.list_audit(limit=500), default=str)
     for s in forbidden.get("audit_not_contains", []):
         if s in audit_blob:
@@ -769,9 +710,7 @@ def _assert_forbidden(
         banned = set(forbidden["status_not"])
         for i, r in enumerate(op_result["responses"]):
             if r.status_code in banned:
-                problems.append(
-                    f"forbidden.status_not: response {i} has {r.status_code}"
-                )
+                problems.append(f"forbidden.status_not: response {i} has {r.status_code}")
     return problems
 
 
@@ -794,9 +733,7 @@ def _op_output_json(op_result: dict[str, Any]) -> Any:
 def _assert_evidence(op_result: dict[str, Any]) -> list[str]:
     """Every evidence-bearing object must carry non-empty evidence."""
     payload = _op_output_json(op_result)
-    holders = [
-        d for d in _walk_dicts(payload) if any(k in d for k in _EVIDENCE_KEYS)
-    ]
+    holders = [d for d in _walk_dicts(payload) if any(k in d for k in _EVIDENCE_KEYS)]
     if not holders:
         return [
             "evidence_required: no evidence-bearing object "
@@ -813,10 +750,7 @@ def _assert_evidence(op_result: dict[str, Any]) -> list[str]:
 def _assert_provenance(declared: str, op_result: dict[str, Any]) -> list[str]:
     values = _provenance_values(_op_output_json(op_result))
     if not values:
-        return [
-            f"provenance: declared {declared!r} but op output carries no "
-            "provenance field"
-        ]
+        return [f"provenance: declared {declared!r} but op output carries no provenance field"]
     bad = [v for v in values if v != declared]
     if bad:
         return [f"provenance: expected {declared!r}, observed {bad!r}"]
@@ -852,9 +786,7 @@ def _run_scenario(
                         f"{len(responses)} responses"
                     )
                 else:
-                    for i, (want, r) in enumerate(
-                        zip(exp["statuses"], responses, strict=True)
-                    ):
+                    for i, (want, r) in enumerate(zip(exp["statuses"], responses, strict=True)):
                         if r.status_code != want:
                             problems.append(
                                 f"expected.statuses[{i}]: got {r.status_code}, "
@@ -864,14 +796,8 @@ def _run_scenario(
                 if i >= len(responses):
                     problems.append(f"expected.responses[{i}]: no such response")
                     continue
-                problems.extend(
-                    _check_response(r_exp, responses[i], f"expected.responses[{i}]")
-                )
-            last_check = {
-                k: exp[k]
-                for k in ("json", "json_contains", "body_contains")
-                if k in exp
-            }
+                problems.extend(_check_response(r_exp, responses[i], f"expected.responses[{i}]"))
+            last_check = {k: exp[k] for k in ("json", "json_contains", "body_contains") if k in exp}
             if last_check:
                 problems.extend(_check_response(last_check, responses[-1], "expected"))
         elif op_result["kind"] == "pipeline":
@@ -879,50 +805,34 @@ def _run_scenario(
             if "results" in exp:
                 if len(exp["results"]) != len(calls):
                     problems.append(
-                        f"expected.results: {len(exp['results'])} entries for "
-                        f"{len(calls)} calls"
+                        f"expected.results: {len(exp['results'])} entries for {len(calls)} calls"
                     )
                 else:
-                    for i, (e, c) in enumerate(
-                        zip(exp["results"], calls, strict=True)
-                    ):
+                    for i, (e, c) in enumerate(zip(exp["results"], calls, strict=True)):
                         if c["result"] is None:
-                            problems.append(
-                                f"expected.results[{i}]: call raised "
-                                f"{c['error']!r}"
-                            )
+                            problems.append(f"expected.results[{i}]: call raised {c['error']!r}")
                             continue
-                        problems.extend(
-                            _subset(e, _result_dict(c["result"]), f"results[{i}]")
-                        )
+                        problems.extend(_subset(e, _result_dict(c["result"]), f"results[{i}]"))
             if "result" in exp:
                 last = calls[-1]
                 if last["result"] is None:
-                    problems.append(
-                        f"expected.result: call raised {last['error']!r}"
-                    )
+                    problems.append(f"expected.result: call raised {last['error']!r}")
                 else:
-                    problems.extend(
-                        _subset(exp["result"], _result_dict(last["result"]), "result")
-                    )
+                    problems.extend(_subset(exp["result"], _result_dict(last["result"]), "result"))
             if "error" in exp:
                 last = calls[-1]
                 if last["error"] is None:
-                    problems.append(
-                        "expected.error: no exception raised by last call"
-                    )
+                    problems.append("expected.error: no exception raised by last call")
                 else:
                     exc = last["error"]
                     want = exp["error"]
                     if "type" in want and type(exc).__name__ != want["type"]:
                         problems.append(
-                            f"expected.error.type: {type(exc).__name__} "
-                            f"!= {want['type']}"
+                            f"expected.error.type: {type(exc).__name__} != {want['type']}"
                         )
                     if "contains" in want and want["contains"] not in str(exc):
                         problems.append(
-                            f"expected.error.contains: {want['contains']!r} "
-                            f"absent in {exc}"
+                            f"expected.error.contains: {want['contains']!r} absent in {exc}"
                         )
         else:
             out = op_result["output"]
@@ -930,16 +840,12 @@ def _run_scenario(
                 problems.extend(_subset(exp["output"], out, "expected.output"))
             if "output_contains" in exp:
                 problems.extend(
-                    _assert_contains(
-                        exp["output_contains"], out, "expected.output_contains"
-                    )
+                    _assert_contains(exp["output_contains"], out, "expected.output_contains")
                 )
 
         if "store" in exp:
             problems.extend(_assert_store(harness.store, exp["store"]))
-        problems.extend(
-            _assert_forbidden(scenario["forbidden"], op_result, harness.store)
-        )
+        problems.extend(_assert_forbidden(scenario["forbidden"], op_result, harness.store))
         if scenario.get("evidence_required"):
             problems.extend(_assert_evidence(op_result))
         if "provenance" in scenario:
@@ -983,9 +889,7 @@ def test_corpus_schema_valid() -> None:
     assert not problems, "malformed golden scenario(s):\n" + "\n".join(problems)
 
 
-@pytest.mark.parametrize(
-    "path", _scenario_files(), ids=lambda p: p.stem
-)
+@pytest.mark.parametrize("path", _scenario_files(), ids=lambda p: p.stem)
 def test_golden_scenario(
     path: Path,
     tmp_path: Path,
@@ -995,7 +899,6 @@ def test_golden_scenario(
     data = json.loads(path.read_text(encoding="utf-8"))
     scenario = _validate(path, data)
     problems = _run_scenario(scenario, tmp_path, monkeypatch, capsys)
-    assert not problems, (
-        f"scenario {scenario['scenario_id']} failed:\n"
-        + "\n".join(f"  - {p}" for p in problems)
+    assert not problems, f"scenario {scenario['scenario_id']} failed:\n" + "\n".join(
+        f"  - {p}" for p in problems
     )

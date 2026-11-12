@@ -234,9 +234,7 @@ def _dump_with_raw_attrs(
 def _span_comparable_dump(span: Span) -> dict[str, Any]:
     """Full span dump for digest/equality — deep attrs, events and links
     all bypass the pydantic-core recursion budget."""
-    dump = _dump_with_raw_attrs(
-        span, exclude={"integrity_flags", "events", "links"}
-    )
+    dump = _dump_with_raw_attrs(span, exclude={"integrity_flags", "events", "links"})
     dump["events"] = [_dump_with_raw_attrs(e) for e in span.events]
     dump["links"] = [_dump_with_raw_attrs(lk) for lk in span.links]
     return dump
@@ -304,9 +302,7 @@ def _require_utf8(bound: dict[str, str | None]) -> None:
     surfacing mid-write."""
     bad = [name for name, value in bound.items() if not _utf8_ok(value)]
     if bad:
-        raise ValidationError(
-            f"unencodable string (lone surrogate) in: {', '.join(sorted(bad))}"
-        )
+        raise ValidationError(f"unencodable string (lone surrogate) in: {', '.join(sorted(bad))}")
 
 
 def _like_escape(value: str) -> str:
@@ -317,11 +313,7 @@ def _like_escape(value: str) -> str:
     so a ``%`` in a search term matches a literal percent sign, never
     acts as a wildcard.
     """
-    return (
-        value.replace("\\", "\\\\")
-        .replace("%", "\\%")
-        .replace("_", "\\_")
-    )
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _derived_status_code(spans: list[Span]) -> str | None:
@@ -338,8 +330,7 @@ def _derived_status_code(spans: list[Span]) -> str | None:
 
 def _events_json(events: list[SpanEvent]) -> str:
     dumped = [
-        _dump_with_raw_attrs(e.model_copy(update={"time": ensure_aware(e.time)}))
-        for e in events
+        _dump_with_raw_attrs(e.model_copy(update={"time": ensure_aware(e.time)})) for e in events
     ]
     return json.dumps(_json_finite(dumped), sort_keys=True, default=str)
 
@@ -362,9 +353,7 @@ def _merge_events(stored: list[SpanEvent], incoming: list[SpanEvent]) -> list[Sp
     place would make the merged==stored no-op check invisible to the
     difference (the new attributes would never be persisted).
     """
-    by_key: dict[tuple[str, str], SpanEvent] = {
-        (e.name, e.time.isoformat()): e for e in stored
-    }
+    by_key: dict[tuple[str, str], SpanEvent] = {(e.name, e.time.isoformat()): e for e in stored}
     order = [(e.name, e.time.isoformat()) for e in stored]
     for ev in incoming:
         key = (ev.name, ev.time.isoformat())
@@ -372,9 +361,7 @@ def _merge_events(stored: list[SpanEvent], incoming: list[SpanEvent]) -> list[Sp
             stored_ev = by_key[key]
             merged_attrs = {**stored_ev.attributes, **ev.attributes}
             if merged_attrs != stored_ev.attributes:
-                by_key[key] = stored_ev.model_copy(
-                    update={"attributes": merged_attrs}
-                )
+                by_key[key] = stored_ev.model_copy(update={"attributes": merged_attrs})
         else:
             by_key[key] = ev
             order.append(key)
@@ -391,9 +378,7 @@ def _merge_links(stored: list[SpanLink], incoming: list[SpanLink]) -> list[SpanL
             stored_lk = by_id[key]
             merged_attrs = {**stored_lk.attributes, **lk.attributes}
             if merged_attrs != stored_lk.attributes:
-                by_id[key] = stored_lk.model_copy(
-                    update={"attributes": merged_attrs}
-                )
+                by_id[key] = stored_lk.model_copy(update={"attributes": merged_attrs})
         else:
             by_id[key] = lk
             order.append(key)
@@ -433,9 +418,7 @@ class SQLiteTraceStore:
             # with a schema probe and falls back to plain ro, where
             # busy_timeout arbitrates the live peer.
             immutable = not (wal.exists() or shm.exists())
-            uri = self.path.as_uri() + (
-                "?mode=ro&immutable=1" if immutable else "?mode=ro"
-            )
+            uri = self.path.as_uri() + ("?mode=ro&immutable=1" if immutable else "?mode=ro")
             conn: sqlite3.Connection | None = None
             try:
                 conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
@@ -543,8 +526,7 @@ class SQLiteTraceStore:
                     # the prefetch predates it, so re-read live (exactly
                     # the row the old per-span SELECT would have seen)
                     row = self._conn.execute(
-                        "SELECT * FROM spans WHERE project_id=? AND trace_id=? "
-                        "AND span_id=?",
+                        "SELECT * FROM spans WHERE project_id=? AND trace_id=? AND span_id=?",
                         (trace.project_id, span.trace_id, span.span_id),
                     ).fetchone()
                 else:
@@ -655,7 +637,8 @@ class SQLiteTraceStore:
                     trace.source.model_dump_json(),
                     json.dumps(
                         _json_finite(trace.resource_attributes),
-                        sort_keys=True, default=str,
+                        sort_keys=True,
+                        default=str,
                     ),
                     trace.provenance.value,
                     len(trace.spans),
@@ -750,9 +733,7 @@ class SQLiteTraceStore:
             )
         )
 
-    def _merge_span(
-        self, stored: Span, incoming: Span, project_id: str
-    ) -> Span | None:
+    def _merge_span(self, stored: Span, incoming: Span, project_id: str) -> Span | None:
         """Merge a re-delivered span into the stored row.
 
         Returns the merged ``Span`` when it adds information, ``None``
@@ -777,9 +758,7 @@ class SQLiteTraceStore:
                 "links": _merge_links(stored.links, incoming.links),
                 "status": _merge_status(stored.status, incoming.status),
                 # same rule as the trace row: strongest provenance wins
-                "provenance": _stronger_provenance(
-                    stored.provenance, incoming.provenance
-                ),
+                "provenance": _stronger_provenance(stored.provenance, incoming.provenance),
             }
         )
         # integrity flags: union minus flags resolved by the merged data
@@ -800,9 +779,7 @@ class SQLiteTraceStore:
             return None
         return merged
 
-    def _union_flags(
-        self, row: sqlite3.Row, span: Span, *, conflict: bool = False
-    ) -> None:
+    def _union_flags(self, row: sqlite3.Row, span: Span, *, conflict: bool = False) -> None:
         """Union incoming integrity flags into the stored row.
 
         Every re-delivery leaves evidence: ``DUPLICATE`` for a replay,
@@ -812,9 +789,11 @@ class SQLiteTraceStore:
         the payload itself changed nothing.
         """
         stored = set(json.loads(row["integrity_flags_json"] or "[]"))
-        merged = stored | {f.value for f in span.integrity_flags} | {
-            (IntegrityFlag.CONFLICT if conflict else IntegrityFlag.DUPLICATE).value
-        }
+        merged = (
+            stored
+            | {f.value for f in span.integrity_flags}
+            | {(IntegrityFlag.CONFLICT if conflict else IntegrityFlag.DUPLICATE).value}
+        )
         if merged != stored:
             self._conn.execute(
                 "UPDATE spans SET integrity_flags_json=? "
@@ -1008,16 +987,14 @@ class SQLiteTraceStore:
                 ph = ", ".join("?" for _ in chunk)
                 if project_id is not None:
                     trows = self._conn.execute(
-                        "SELECT * FROM traces WHERE project_id=? "
-                        f"AND trace_id IN ({ph})",
+                        f"SELECT * FROM traces WHERE project_id=? AND trace_id IN ({ph})",
                         (project_id, *chunk),
                     ).fetchall()
                 else:
                     # wildcard — ORDER BY last_seen_ns DESC so the first
                     # row per trace_id wins, mirroring get_trace's LIMIT 1
                     trows = self._conn.execute(
-                        f"SELECT * FROM traces WHERE trace_id IN ({ph}) "
-                        "ORDER BY last_seen_ns DESC",
+                        f"SELECT * FROM traces WHERE trace_id IN ({ph}) ORDER BY last_seen_ns DESC",
                         tuple(chunk),
                     ).fetchall()
                 winners: dict[str, sqlite3.Row] = {}
@@ -1044,9 +1021,7 @@ class SQLiteTraceStore:
                     ).fetchall():
                         spans_by_tid.setdefault(r["trace_id"], []).append(r)
                 for tid, trow in winners.items():
-                    out[tid] = self._trace_from_rows(
-                        trow, spans_by_tid.get(tid, [])
-                    )
+                    out[tid] = self._trace_from_rows(trow, spans_by_tid.get(tid, []))
         return out
 
     def list_traces(
@@ -1111,8 +1086,7 @@ class SQLiteTraceStore:
         # an unencodable filter can never match stored TEXT → empty page,
         # never a UnicodeEncodeError from the driver
         if not all(
-            _utf8_ok(v)
-            for v in (project_id, session_id, status, q, tool, model, agent, host)
+            _utf8_ok(v) for v in (project_id, session_id, status, q, tool, model, agent, host)
         ):
             return []
         clauses: list[str] = []
@@ -1274,7 +1248,7 @@ class SQLiteTraceStore:
                            MIN(started_ns) AS first_started_ns,
                            MAX(MAX(started_ns, COALESCE(ended_ns, started_ns)))
                                AS last_activity_ns
-                    FROM traces WHERE {' AND '.join(clauses)}
+                    FROM traces WHERE {" AND ".join(clauses)}
                     GROUP BY session_id
                     ORDER BY last_activity_ns DESC, session_id ASC
                     LIMIT ? OFFSET ?""",
@@ -1285,12 +1259,8 @@ class SQLiteTraceStore:
                 "session_id": r["session_id"],
                 "traces": r["trace_count"],
                 "spans": r["span_total"] or 0,
-                "first_started_at": (
-                    d.isoformat() if (d := _dt(r["first_started_ns"])) else None
-                ),
-                "last_activity_at": (
-                    d.isoformat() if (d := _dt(r["last_activity_ns"])) else None
-                ),
+                "first_started_at": (d.isoformat() if (d := _dt(r["first_started_ns"])) else None),
+                "last_activity_at": (d.isoformat() if (d := _dt(r["last_activity_ns"])) else None),
             }
             for r in rows
         ]
@@ -1325,7 +1295,7 @@ class SQLiteTraceStore:
                                     THEN 1 ELSE 0 END) AS errors,
                            AVG(duration_ms) AS avg_ms,
                            COUNT(DISTINCT trace_id) AS trace_count
-                    FROM spans WHERE {' AND '.join(clauses)}
+                    FROM spans WHERE {" AND ".join(clauses)}
                     GROUP BY tool_name
                     ORDER BY calls DESC, tool_name ASC
                     LIMIT ? OFFSET ?""",
@@ -1333,8 +1303,7 @@ class SQLiteTraceStore:
             ).fetchall()
         return [
             {
-                "tool": r["tool_name"] if r["tool_name"] is not None
-                else "(unnamed)",
+                "tool": r["tool_name"] if r["tool_name"] is not None else "(unnamed)",
                 "calls": r["calls"],
                 "traces": r["trace_count"],
                 "errors": r["errors"],
@@ -1422,14 +1391,11 @@ class SQLiteTraceStore:
                     name,
                     task,
                     now_ns,
-                    json.dumps(_json_finite(metadata or {}),
-                               sort_keys=True, default=str),
+                    json.dumps(_json_finite(metadata or {}), sort_keys=True, default=str),
                 ),
             )
 
-    def get_dataset(
-        self, dataset_id: str, project_id: str = "default"
-    ) -> dict[str, Any] | None:
+    def get_dataset(self, dataset_id: str, project_id: str = "default") -> dict[str, Any] | None:
         if not _utf8_ok(dataset_id) or not _utf8_ok(project_id):
             return None
         with self._lock:
@@ -1454,8 +1420,7 @@ class SQLiteTraceStore:
         with self._lock:
             if project_id is not None:
                 rows = self._conn.execute(
-                    "SELECT * FROM datasets WHERE project_id=? "
-                    "ORDER BY dataset_id",
+                    "SELECT * FROM datasets WHERE project_id=? ORDER BY dataset_id",
                     (project_id,),
                 ).fetchall()
             else:
@@ -1468,9 +1433,7 @@ class SQLiteTraceStore:
                 "project_id": r["project_id"],
                 "name": r["name"],
                 "task": r["task"],
-                "created_at": (
-                    d.isoformat() if (d := _dt(r["created_ns"])) else None
-                ),
+                "created_at": (d.isoformat() if (d := _dt(r["created_ns"])) else None),
             }
             for r in rows
         ]
@@ -1514,8 +1477,7 @@ class SQLiteTraceStore:
                     version,
                     description,
                     now_ns,
-                    json.dumps(_json_finite(metadata or {}),
-                               sort_keys=True, default=str),
+                    json.dumps(_json_finite(metadata or {}), sort_keys=True, default=str),
                 ),
             )
             if cur.rowcount == 0:
@@ -1534,16 +1496,17 @@ class SQLiteTraceStore:
                         project_id,
                         version,
                         str(c.get("case_id", "")),
-                        json.dumps(_json_finite(c.get("input") or {}),
-                                   sort_keys=True, default=str),
-                        json.dumps(_json_finite(c.get("expected") or {}),
-                                   sort_keys=True, default=str),
-                        json.dumps(_json_finite(c.get("allowed_tools") or []),
-                                   default=str),
-                        json.dumps(_json_finite(c.get("constraints") or {}),
-                                   sort_keys=True, default=str),
-                        json.dumps(_json_finite(c.get("rubric") or {}),
-                                   sort_keys=True, default=str),
+                        json.dumps(_json_finite(c.get("input") or {}), sort_keys=True, default=str),
+                        json.dumps(
+                            _json_finite(c.get("expected") or {}), sort_keys=True, default=str
+                        ),
+                        json.dumps(_json_finite(c.get("allowed_tools") or []), default=str),
+                        json.dumps(
+                            _json_finite(c.get("constraints") or {}), sort_keys=True, default=str
+                        ),
+                        json.dumps(
+                            _json_finite(c.get("rubric") or {}), sort_keys=True, default=str
+                        ),
                     ),
                 )
         return len(cases)
@@ -1558,8 +1521,7 @@ class SQLiteTraceStore:
             return None
         with self._lock:
             vrow = self._conn.execute(
-                "SELECT * FROM dataset_versions WHERE project_id=? "
-                "AND dataset_id=? AND version=?",
+                "SELECT * FROM dataset_versions WHERE project_id=? AND dataset_id=? AND version=?",
                 (project_id, dataset_id, version),
             ).fetchone()
             if vrow is None:
@@ -1574,9 +1536,7 @@ class SQLiteTraceStore:
             "project_id": vrow["project_id"],
             "version": vrow["version"],
             "description": vrow["description"],
-            "created_at": (
-                d.isoformat() if (d := _dt(vrow["created_ns"])) else None
-            ),
+            "created_at": (d.isoformat() if (d := _dt(vrow["created_ns"])) else None),
             "metadata": json.loads(vrow["metadata_json"] or "{}"),
             "cases": [
                 {
@@ -1614,9 +1574,7 @@ class SQLiteTraceStore:
                 "version": r["version"],
                 "description": r["description"],
                 "case_count": r["case_count"],
-                "created_at": (
-                    d.isoformat() if (d := _dt(r["created_ns"])) else None
-                ),
+                "created_at": (d.isoformat() if (d := _dt(r["created_ns"])) else None),
             }
             for r in rows
         ]
@@ -1637,9 +1595,7 @@ class SQLiteTraceStore:
             "status": row["status"],
             "result_ref": row["result_ref"],
             "provenance": row["provenance"],
-            "created_at": (
-                d.isoformat() if (d := _dt(row["created_ns"])) else None
-            ),
+            "created_at": (d.isoformat() if (d := _dt(row["created_ns"])) else None),
             "metadata": json.loads(row["metadata_json"] or "{}"),
         }
 
@@ -1698,12 +1654,9 @@ class SQLiteTraceStore:
                     description,
                     dataset_id,
                     dataset_version,
-                    json.dumps(_json_finite(cohorts or {}),
-                               sort_keys=True, default=str),
-                    json.dumps(_json_finite(evaluators or []),
-                               sort_keys=True, default=str),
-                    json.dumps(_json_finite(metadata or {}),
-                               sort_keys=True, default=str),
+                    json.dumps(_json_finite(cohorts or {}), sort_keys=True, default=str),
+                    json.dumps(_json_finite(evaluators or []), sort_keys=True, default=str),
+                    json.dumps(_json_finite(metadata or {}), sort_keys=True, default=str),
                     provenance,
                     now_ns,
                 ),
@@ -1743,8 +1696,7 @@ class SQLiteTraceStore:
                 ).fetchall()
             else:
                 rows = self._conn.execute(
-                    "SELECT * FROM experiments "
-                    "ORDER BY project_id, experiment_id LIMIT ? OFFSET ?",
+                    "SELECT * FROM experiments ORDER BY project_id, experiment_id LIMIT ? OFFSET ?",
                     (max(0, limit), max(0, offset)),
                 ).fetchall()
         return [
@@ -1754,9 +1706,7 @@ class SQLiteTraceStore:
                 "name": r["name"],
                 "status": r["status"],
                 "result_ref": r["result_ref"],
-                "created_at": (
-                    d.isoformat() if (d := _dt(r["created_ns"])) else None
-                ),
+                "created_at": (d.isoformat() if (d := _dt(r["created_ns"])) else None),
             }
             for r in rows
         ]
@@ -1772,8 +1722,7 @@ class SQLiteTraceStore:
         _require_utf8({"status": status})
         with self._lock, self._conn:
             cur = self._conn.execute(
-                "UPDATE experiments SET status=? "
-                "WHERE project_id=? AND experiment_id=?",
+                "UPDATE experiments SET status=? WHERE project_id=? AND experiment_id=?",
                 (status, project_id, experiment_id),
             )
         return cur.rowcount > 0
@@ -1800,8 +1749,7 @@ class SQLiteTraceStore:
             ).fetchone()
             if exists is None:
                 raise ValidationError(
-                    f"experiment {experiment_id!r} not found "
-                    f"in project {project_id!r}"
+                    f"experiment {experiment_id!r} not found in project {project_id!r}"
                 )
             cur = self._conn.execute(
                 """INSERT INTO experiment_results(experiment_id, project_id,
@@ -1811,8 +1759,7 @@ class SQLiteTraceStore:
                     experiment_id,
                     project_id,
                     run_ns,
-                    json.dumps(_json_finite(report),
-                               sort_keys=True, default=str),
+                    json.dumps(_json_finite(report), sort_keys=True, default=str),
                 ),
             )
             run_id = int(cur.lastrowid or 0)
@@ -1846,9 +1793,7 @@ class SQLiteTraceStore:
                 "run_id": r["run_id"],
                 "experiment_id": r["experiment_id"],
                 "project_id": r["project_id"],
-                "run_at": (
-                    d.isoformat() if (d := _dt(r["run_ns"])) else None
-                ),
+                "run_at": (d.isoformat() if (d := _dt(r["run_ns"])) else None),
                 "report": json.loads(r["report_json"] or "{}"),
             }
             for r in rows
@@ -1908,16 +1853,12 @@ class SQLiteTraceStore:
         if not _utf8_ok(key_id):
             return None
         with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM api_keys WHERE key_id=?", (key_id,)
-            ).fetchone()
+            row = self._conn.execute("SELECT * FROM api_keys WHERE key_id=?", (key_id,)).fetchone()
         return self._api_key_dict(row) if row else None
 
     def list_api_keys(self) -> list[dict[str, Any]]:
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM api_keys ORDER BY key_id"
-            ).fetchall()
+            rows = self._conn.execute("SELECT * FROM api_keys ORDER BY key_id").fetchall()
         return [self._api_key_dict(r) for r in rows]
 
     @staticmethod
@@ -1927,12 +1868,8 @@ class SQLiteTraceStore:
             "name": row["name"],
             "role": row["role"],
             "projects": json.loads(row["projects_json"] or "[]"),
-            "created_at": (
-                d.isoformat() if (d := _dt(row["created_ns"])) else None
-            ),
-            "revoked_at": (
-                d.isoformat() if (d := _dt(row["revoked_ns"])) else None
-            ),
+            "created_at": (d.isoformat() if (d := _dt(row["created_ns"])) else None),
+            "revoked_at": (d.isoformat() if (d := _dt(row["revoked_ns"])) else None),
         }
 
     def revoke_api_key(self, key_id: str, *, now_ns: int | None = None) -> bool:
@@ -1975,8 +1912,7 @@ class SQLiteTraceStore:
                     action,
                     resource,
                     outcome,
-                    json.dumps(_json_finite(detail or {}),
-                           sort_keys=True, default=str),
+                    json.dumps(_json_finite(detail or {}), sort_keys=True, default=str),
                 ),
             )
 
@@ -2020,9 +1956,7 @@ class SQLiteTraceStore:
             for r in rows
         ]
 
-    def prune_traces(
-        self, *, before_ns: int, project_id: str | None = None
-    ) -> dict[str, int]:
+    def prune_traces(self, *, before_ns: int, project_id: str | None = None) -> dict[str, int]:
         """Retention: delete traces (and their spans) started before
         ``before_ns``. Bounded to trace granularity — partial-trace
         deletion would fabricate incomplete executions."""

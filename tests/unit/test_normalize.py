@@ -35,11 +35,7 @@ def test_otlp_openinference_kind_and_tokens(otlp_payload: dict) -> None:
 
 
 def test_otlp_missing_span_id_rejected() -> None:
-    payload = {
-        "resourceSpans": [
-            {"scopeSpans": [{"spans": [{"traceId": "a" * 32, "name": "x"}]}]}
-        ]
-    }
+    payload = {"resourceSpans": [{"scopeSpans": [{"spans": [{"traceId": "a" * 32, "name": "x"}]}]}]}
     with pytest.raises(ValidationError):
         normalize_otlp_request(payload)
 
@@ -62,9 +58,7 @@ def test_otlp_bad_intvalue_raises_in_strict_mode() -> None:
                                 "spanId": "d" * 16,
                                 "name": "x",
                                 "startTimeUnixNano": "1767264000000000000",
-                                "attributes": [
-                                    {"key": "n", "value": {"intValue": "junk"}}
-                                ],
+                                "attributes": [{"key": "n", "value": {"intValue": "junk"}}],
                             }
                         ]
                     }
@@ -118,11 +112,7 @@ def test_otlp_quarantine_keeps_valid_spans(otlp_payload: dict) -> None:
 
 
 def test_otlp_quarantine_reported_for_missing_ids() -> None:
-    payload = {
-        "resourceSpans": [
-            {"scopeSpans": [{"spans": [{"traceId": "a" * 32, "name": "x"}]}]}
-        ]
-    }
+    payload = {"resourceSpans": [{"scopeSpans": [{"spans": [{"traceId": "a" * 32, "name": "x"}]}]}]}
     errors: list[str] = []
     traces = normalize_otlp_request(payload, errors=errors)
     assert traces == []
@@ -138,9 +128,7 @@ def _span_payload(**over: object) -> dict:
         "startTimeUnixNano": "1767264000000000000",
     }
     base.update(over)
-    return {
-        "resourceSpans": [{"scopeSpans": [{"spans": [base]}]}]
-    }
+    return {"resourceSpans": [{"scopeSpans": [{"spans": [base]}]}]}
 
 
 def test_otlp_enum_name_span_kind() -> None:
@@ -158,13 +146,9 @@ def test_otlp_enum_name_span_kind() -> None:
         trace = normalize_otlp_request(_span_payload(kind=raw_kind))[0]
         assert trace.spans[0].kind == expected, raw_kind
     # numeric kinds still work; unknown names degrade to internal
+    assert normalize_otlp_request(_span_payload(kind=3))[0].spans[0].kind == SpanKind.CLIENT
     assert (
-        normalize_otlp_request(_span_payload(kind=3))[0].spans[0].kind
-        == SpanKind.CLIENT
-    )
-    assert (
-        normalize_otlp_request(_span_payload(kind="SOMETHING_ELSE"))[0]
-        .spans[0].kind
+        normalize_otlp_request(_span_payload(kind="SOMETHING_ELSE"))[0].spans[0].kind
         == SpanKind.INTERNAL
     )
     # OpenInference kind still wins over the OTel field
@@ -172,17 +156,13 @@ def test_otlp_enum_name_span_kind() -> None:
     payload["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"] = [
         {"key": "openinference.span.kind", "value": {"stringValue": "LLM"}}
     ]
-    assert (
-        normalize_otlp_request(payload)[0].spans[0].kind == SpanKind.LLM
-    )
+    assert normalize_otlp_request(payload)[0].spans[0].kind == SpanKind.LLM
 
 
 def test_otlp_all_zero_parent_span_id_is_absent() -> None:
     """An all-zero parentSpanId means 'no parent' (W3C) — it must not
     create a phantom MISSING_PARENT flag."""
-    trace = normalize_otlp_request(
-        _span_payload(parentSpanId="0000000000000000")
-    )[0]
+    trace = normalize_otlp_request(_span_payload(parentSpanId="0000000000000000"))[0]
     span = trace.spans[0]
     assert span.parent_span_id is None
     assert not any(f.value == "missing_parent" for f in span.integrity_flags)
@@ -205,8 +185,8 @@ def test_otlp_event_without_time_is_evidence_not_silent() -> None:
     payload = _span_payload(
         events=[
             {"name": "ok", "timeUnixNano": "1767264001000000000"},
-            {"name": "lost"},          # no timeUnixNano
-            "not-even-a-dict",          # malformed
+            {"name": "lost"},  # no timeUnixNano
+            "not-even-a-dict",  # malformed
         ]
     )
     errors: list[str] = []
@@ -223,9 +203,7 @@ def test_otlp_event_without_time_is_evidence_not_silent() -> None:
 def test_otlp_event_drop_recorded_in_strict_mode_too() -> None:
     """Strict mode (errors=None) still marks the span — evidence is
     data-level, not just a warning channel."""
-    trace = normalize_otlp_request(
-        _span_payload(events=[{"name": "lost"}])
-    )[0]
+    trace = normalize_otlp_request(_span_payload(events=[{"name": "lost"}]))[0]
     assert trace.spans[0].events == []
     assert trace.spans[0].attributes["_otlp.events_dropped"] == 1
 
@@ -274,9 +252,7 @@ def test_otlp_bytesvalue_reports_decoded_length() -> None:
 
     raw = b"hello-world-123"  # 15 bytes -> 20 base64 chars
     payload = _span_payload(
-        attributes=[
-            {"key": "blob", "value": {"bytesValue": _b64.b64encode(raw).decode()}}
-        ]
+        attributes=[{"key": "blob", "value": {"bytesValue": _b64.b64encode(raw).decode()}}]
     )
     trace = normalize_otlp_request(payload)[0]
     assert trace.spans[0].attributes["blob"] == {"_bytes": 15}
@@ -313,13 +289,7 @@ def test_otlp_non_dict_resource_and_scope_not_500() -> None:
     for scope in ("x", 42, [1], True):
         errors = []
         payload = {
-            "resourceSpans": [
-                {
-                    "scopeSpans": [
-                        {"scope": scope, "spans": [dict(_SPAN_BASE)]}
-                    ]
-                }
-            ]
+            "resourceSpans": [{"scopeSpans": [{"scope": scope, "spans": [dict(_SPAN_BASE)]}]}]
         }
         traces = normalize_otlp_request(payload, errors=errors)
         assert traces[0].spans[0].span_id == "d" * 16
@@ -331,9 +301,7 @@ def test_otlp_non_list_containers_not_500() -> None:
     → HTTP 500. Each must leave evidence, never crash."""
     for spans_field in (None, 5, "x"):
         errors: list[str] = []
-        payload = {
-            "resourceSpans": [{"scopeSpans": [{"spans": spans_field}]}]
-        }
+        payload = {"resourceSpans": [{"scopeSpans": [{"spans": spans_field}]}]}
         traces = normalize_otlp_request(payload, errors=errors)
         if spans_field is not None:
             assert any("spans" in e for e in errors)

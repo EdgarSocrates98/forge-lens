@@ -88,9 +88,7 @@ def critical_path(graph: ExecutionGraph) -> dict[str, object]:
                     if cand is None:
                         continue  # child is in a cycle cut — contributes 0
                     if cand[0] > best_child[0] or (
-                        cand[0] == best_child[0]
-                        and cand[1]
-                        and cand[1] < (best_child[1] or ["~"])
+                        cand[0] == best_child[0] and cand[1] and cand[1] < (best_child[1] or ["~"])
                     ):
                         best_child = cand
                 memo[node] = (

@@ -41,16 +41,12 @@ def evaluate_traces(
     # repeated trace_ids evaluate once — a duplicated id inflates neither
     # results nor summary; trace_ids reports the distinct set evaluated
     ordered = sorted({t.trace_id: t for t in traces}.values(), key=lambda t: t.trace_id)
-    results = {
-        t.trace_id: run_evaluators(t, specs, now=now) for t in ordered
-    }
+    results = {t.trace_id: run_evaluators(t, specs, now=now) for t in ordered}
     acc: dict[str, dict[str, Any]] = {}
     for res_list in results.values():
         for r in res_list:
             key = f"{r.evaluator}/{r.metric}"
-            slot = acc.setdefault(
-                key, {"n": 0, "sum": 0.0, "passes": 0, "nulls": 0}
-            )
+            slot = acc.setdefault(key, {"n": 0, "sum": 0.0, "passes": 0, "nulls": 0})
             if r.score is None:
                 slot["nulls"] += 1
                 continue

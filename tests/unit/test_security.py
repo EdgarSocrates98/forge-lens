@@ -20,9 +20,7 @@ def test_key_lifecycle(tmp_store: SQLiteTraceStore) -> None:
     key_id, secret, hashed = generate_key()
     assert secret.startswith("flk_sk_")
     assert len(hashed) == 64
-    tmp_store.create_api_key(
-        key_id, name="ci", key_hash=hashed, role="writer", projects=["p1"]
-    )
+    tmp_store.create_api_key(key_id, name="ci", key_hash=hashed, role="writer", projects=["p1"])
     rec = tmp_store.api_key_by_hash(hash_secret(secret))
     assert rec is not None
     assert rec["key_id"] == key_id
@@ -51,8 +49,12 @@ def test_role_and_scope_rules() -> None:
 def test_audit_and_prune(tmp_store: SQLiteTraceStore, synthetic_trace) -> None:
     tmp_store.upsert_trace(synthetic_trace)
     tmp_store.record_audit(
-        actor="cli", action="traces.prune", resource="*",
-        outcome="ok", detail={"n": 1}, ts_ns=123,
+        actor="cli",
+        action="traces.prune",
+        resource="*",
+        outcome="ok",
+        detail={"n": 1},
+        ts_ns=123,
     )
     events = tmp_store.list_audit()
     assert len(events) == 1
@@ -71,9 +73,12 @@ def test_mcp_inspect_flags_and_stays_an_observer(
 ) -> None:
     t0 = datetime(2026, 1, 1, tzinfo=UTC)
     span = Span(
-        trace_id="a" * 32, span_id="9" * 16,
-        name="tool os.system", kind=SpanKind.TOOL,
-        start_time=t0, end_time=t0 + timedelta(milliseconds=1),
+        trace_id="a" * 32,
+        span_id="9" * 16,
+        name="tool os.system",
+        kind=SpanKind.TOOL,
+        start_time=t0,
+        end_time=t0 + timedelta(milliseconds=1),
         status=Status(code=StatusCode.OK),
         attributes={
             "tool.name": "os.system",
@@ -120,16 +125,19 @@ def test_incident_export_resanitizes(tmp_store: SQLiteTraceStore) -> None:
             "request.headers.api_key": secret,
         },
     )
-    tmp_store.upsert_trace(Trace(
-        trace_id="e" * 32, project_id="p1", started_at=t0,
-        ended_at=t0 + timedelta(milliseconds=50),
-        status=Status(code=StatusCode.ERROR), spans=[span],
-    ))
-    cfg = LensConfig(data_dir=tmp_store.path.parent,
-                     db_path=tmp_store.path)
+    tmp_store.upsert_trace(
+        Trace(
+            trace_id="e" * 32,
+            project_id="p1",
+            started_at=t0,
+            ended_at=t0 + timedelta(milliseconds=50),
+            status=Status(code=StatusCode.ERROR),
+            spans=[span],
+        )
+    )
+    cfg = LensConfig(data_dir=tmp_store.path.parent, db_path=tmp_store.path)
     with TestClient(create_app(store=tmp_store, config=cfg)) as c:
-        r = c.get(f"/v1/traces/{'e' * 32}/incident",
-                  params={"project_id": "p1"})
+        r = c.get(f"/v1/traces/{'e' * 32}/incident", params={"project_id": "p1"})
     assert r.status_code == 200
     body = json.dumps(r.json())
     assert secret not in body

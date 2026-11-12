@@ -81,45 +81,38 @@ _MISSING: dict[FailureCategory, tuple[str, ...]] = {
         "declared output schema/response_format not recorded",
     ),
     FailureCategory.RETRY_EXHAUSTION: (
-        "configured retry maximum absent (retry.max attr) — threshold "
-        "assumed, not verified",
+        "configured retry maximum absent (retry.max attr) — threshold assumed, not verified",
         "retry policy config (backoff/jitter) not recorded",
     ),
     FailureCategory.AGENT_CANCELLED: (
-        "cancellation source not recorded (user action, parent task, "
-        "or an external deadline)",
+        "cancellation source not recorded (user action, parent task, or an external deadline)",
     ),
     FailureCategory.BUDGET_EXCEEDED: (
         "configured budget not recorded (budget.limit / provider quota) "
         "— observed usage cannot be compared to a limit",
     ),
     FailureCategory.RATE_LIMIT: (
-        "retry-after / quota headers not captured — throttle window and "
-        "scope unknown",
+        "retry-after / quota headers not captured — throttle window and scope unknown",
     ),
     FailureCategory.TIMEOUT: (
         "configured deadline not recorded — span duration cannot be "
         "compared to the limit that fired",
     ),
     FailureCategory.TOOL_ERROR: (
-        "tool input/output not captured — set capture=full to replay "
-        "the failing call",
+        "tool input/output not captured — set capture=full to replay the failing call",
     ),
     FailureCategory.LLM_ERROR: (
-        "provider error payload not captured — model/region outage vs "
-        "request defect undecidable",
+        "provider error payload not captured — model/region outage vs request defect undecidable",
     ),
     FailureCategory.GUARDRAIL: (
-        "guardrail rule/verdict detail not recorded — which rule fired "
-        "is unverifiable",
+        "guardrail rule/verdict detail not recorded — which rule fired is unverifiable",
     ),
     FailureCategory.CYCLE: (
         "producer-side span context not captured — which parent pointer "
         "was corrupted upstream is unverifiable",
     ),
     FailureCategory.INCOMPLETE: (
-        "no host-process telemetry (exit code, OOM, heartbeat) — crash "
-        "vs hang undetermined",
+        "no host-process telemetry (exit code, OOM, heartbeat) — crash vs hang undetermined",
     ),
     FailureCategory.UNKNOWN: (
         "no recognizable failure signature captured — widen capture "
@@ -130,13 +123,11 @@ _MISSING: dict[FailureCategory, tuple[str, ...]] = {
 
 _VERIFICATION: dict[FailureCategory, tuple[str, ...]] = {
     FailureCategory.AUTH_ERROR: (
-        "re-run with a known-good credential; check expiry/rotation on "
-        "the failing key",
+        "re-run with a known-good credential; check expiry/rotation on the failing key",
         "verify the provider endpoint + auth scheme expected by the call",
     ),
     FailureCategory.MISSING_PERMISSIONS: (
-        "diff required scopes/ACLs of the call against the granted set "
-        "on the service account",
+        "diff required scopes/ACLs of the call against the granted set on the service account",
         "inspect the provider 403 response body for the missing scope",
     ),
     FailureCategory.INVALID_ARGUMENTS: (
@@ -160,34 +151,26 @@ _VERIFICATION: dict[FailureCategory, tuple[str, ...]] = {
         "budget; raise the limit or shrink context",
     ),
     FailureCategory.RATE_LIMIT: (
-        "check provider quota/rpm and the retry-after window; confirm "
-        "backoff is applied",
+        "check provider quota/rpm and the retry-after window; confirm backoff is applied",
     ),
     FailureCategory.TIMEOUT: (
         "compare span duration_ms against the configured deadline; "
         "check downstream latency at the same wall-clock window",
     ),
     FailureCategory.TOOL_ERROR: (
-        "re-run the tool with the captured args outside the agent to "
-        "isolate tool vs orchestration",
+        "re-run the tool with the captured args outside the agent to isolate tool vs orchestration",
     ),
     FailureCategory.LLM_ERROR: (
-        "check provider status for the failing model+region; retry the "
-        "same request payload",
+        "check provider status for the failing model+region; retry the same request payload",
     ),
-    FailureCategory.GUARDRAIL: (
-        "inspect which guardrail rule fired and its recorded verdict",
-    ),
+    FailureCategory.GUARDRAIL: ("inspect which guardrail rule fired and its recorded verdict",),
     FailureCategory.CYCLE: (
         "audit the producer's parent propagation — the stored parent "
         "pointers form an impossible loop",
     ),
-    FailureCategory.INCOMPLETE: (
-        "check host logs around ended_at for crash/OOM/kill evidence",
-    ),
+    FailureCategory.INCOMPLETE: ("check host logs around ended_at for crash/OOM/kill evidence",),
     FailureCategory.UNKNOWN: (
-        "widen capture (events, exception types, http status codes) "
-        "and re-classify",
+        "widen capture (events, exception types, http status codes) and re-classify",
     ),
 }
 
@@ -195,11 +178,7 @@ _CONTRADICTION_CAP = 10
 
 
 def _support(hits: list[tuple[Span, list[Signal]]]) -> list[str]:
-    return sorted(
-        f"{s.span_id}: {label}"
-        for s, sigs in hits
-        for label, _strong in sigs
-    )
+    return sorted(f"{s.span_id}: {label}" for s, sigs in hits for label, _strong in sigs)
 
 
 def _contradictions(
@@ -217,9 +196,7 @@ def _contradictions(
         for other, other_sigs in scan.signals[s.span_id].items():
             if other is cat:
                 continue
-            rivals.extend(
-                label for label, strong in other_sigs if strong
-            )
+            rivals.extend(label for label, strong in other_sigs if strong)
         for label in sorted(rivals):
             out.append(f"{s.span_id}: {label} — argues against {cat.value}")
         if not rivals:
@@ -235,29 +212,19 @@ def _contradictions(
                 continue
             for label, strong in osigs:
                 if strong:
-                    out.append(
-                        f"{os_.span_id}: {label} — suggests "
-                        f"{other.value} instead"
-                    )
+                    out.append(f"{os_.span_id}: {label} — suggests {other.value} instead")
     return sorted(set(out))[:_CONTRADICTION_CAP], all_outcompeted
 
 
 def _missing(cat: FailureCategory, hits: list[tuple[Span, list[Signal]]]) -> list[str]:
     out = list(_MISSING.get(cat, ()))
-    all_weak = all(
-        not strong for _s, sigs in hits for _label, strong in sigs
-    )
+    all_weak = all(not strong for _s, sigs in hits for _label, strong in sigs)
     if all_weak:
         out.append(
-            "only free-text mention — no status code, exception type, "
-            "counter or flag recorded"
+            "only free-text mention — no status code, exception type, counter or flag recorded"
         )
     no_types = all(
-        not any(
-            label.startswith("exception_type:")
-            for label, _ in sigs
-        )
-        for _s, sigs in hits
+        not any(label.startswith("exception_type:") for label, _ in sigs) for _s, sigs in hits
     )
     if no_types:
         out.append(
@@ -301,9 +268,7 @@ def _signal_hypothesis(
     )
 
 
-def _structural_hypothesis(
-    trace: Trace, report: FailureReport
-) -> Hypothesis:
+def _structural_hypothesis(trace: Trace, report: FailureReport) -> Hypothesis:
     """Hypothesis for categories without signal scans — cycle, kind
     buckets, incomplete. Evidence comes from the report itself."""
     cat = report.category
@@ -314,8 +279,7 @@ def _structural_hypothesis(
     missing = list(_MISSING.get(cat, ()))
     if cat is FailureCategory.INCOMPLETE:
         missing.append(
-            "host exit telemetry absent — structural inference, not a "
-            "recorded error signature"
+            "host exit telemetry absent — structural inference, not a recorded error signature"
         )
     return Hypothesis(
         hypothesis_id=f"{trace.trace_id}:{cat.value}",
@@ -326,11 +290,7 @@ def _structural_hypothesis(
         missing_evidence=missing,
         suggested_verification=list(_VERIFICATION.get(cat, ())),
         confidence="inferred" if report.confidence == "inferred" else "observed",
-        status=(
-            HypothesisStatus.SUPPORTED
-            if len(supporting) >= 2
-            else HypothesisStatus.PROPOSED
-        ),
+        status=(HypothesisStatus.SUPPORTED if len(supporting) >= 2 else HypothesisStatus.PROPOSED),
     )
 
 
@@ -361,15 +321,11 @@ def build_hypotheses(
             hits.extend(scan.cancelled)
         if not hits:
             continue
-        out.append(
-            _signal_hypothesis(trace, cat, hits, scan, report.category is cat)
-        )
+        out.append(_signal_hypothesis(trace, cat, hits, scan, report.category is cat))
         emitted.add(cat)
 
     # structural / kind-bucket primary that signals did not cover
-    if report.category not in emitted and report.category not in (
-        FailureCategory.UNKNOWN,
-    ):
+    if report.category not in emitted and report.category not in (FailureCategory.UNKNOWN,):
         out.append(_structural_hypothesis(trace, report))
 
     if not out:
@@ -377,20 +333,13 @@ def build_hypotheses(
             Hypothesis(
                 hypothesis_id=f"{trace.trace_id}:unknown",
                 label=FailureCategory.UNKNOWN.value,
-                symptom=(
-                    "trace failed but spans carry no recognizable "
-                    "failure signature"
-                ),
+                symptom=("trace failed but spans carry no recognizable failure signature"),
                 supporting_evidence=[
                     f"span {sid}: ended in error without a known signature"
-                    for sid in sorted(
-                        s.span_id for s in scan.errs
-                    )
+                    for sid in sorted(s.span_id for s in scan.errs)
                 ],
                 missing_evidence=list(_MISSING[FailureCategory.UNKNOWN]),
-                suggested_verification=list(
-                    _VERIFICATION[FailureCategory.UNKNOWN]
-                ),
+                suggested_verification=list(_VERIFICATION[FailureCategory.UNKNOWN]),
                 confidence="inferred",
                 status=HypothesisStatus.UNVERIFIABLE,
             )

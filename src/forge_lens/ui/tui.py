@@ -43,11 +43,15 @@ def run_tui(*, ctx: UIContext | None = None) -> int:
     while True:
         dashboard(
             "FORGE LENS  command centre",
-            [("Workspace", [("root", str(Path.cwd()))]),
-             ("Actions", [(label, "open") for label, _ in actions])],
+            [
+                ("Workspace", [("root", str(Path.cwd()))]),
+                ("Actions", [(label, "open") for label, _ in actions]),
+            ],
             ctx=ctx,
         )
-        idx = select("What do you want to inspect?", [label for label, _ in actions] + ["quit"], ctx=ctx)
+        idx = select(
+            "What do you want to inspect?", [label for label, _ in actions] + ["quit"], ctx=ctx
+        )
         if idx is None or idx == len(actions):
             return 0
         result = actions[idx][1]()

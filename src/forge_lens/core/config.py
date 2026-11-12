@@ -101,9 +101,7 @@ def _toml_to_config(data: dict[str, object], base: LensConfig) -> LensConfig:
         if not isinstance(v, str) or v not in {"none", "key", "keys"}:
             raise ValueError(f"invalid auth_mode {v!r}")
         kwargs["auth_mode"] = v
-    if isinstance(v := section.get("retention_days"), int) and not isinstance(
-        v, bool
-    ):
+    if isinstance(v := section.get("retention_days"), int) and not isinstance(v, bool):
         kwargs["retention_days"] = v
     if isinstance(v := section.get("endpoint"), str):
         kwargs["endpoint"] = v
@@ -198,9 +196,9 @@ def init_project(project_dir: Path, project_id: str) -> Path:
             f"project_id = {json.dumps(project_id)}\n"
             'capture = "metadata"\n'
             'endpoint = "http://127.0.0.1:7777"\n'
-            "# api_key = \"change-me\"  # set to require X-Forge-Lens-Key on ingest\n"
+            '# api_key = "change-me"  # set to require X-Forge-Lens-Key on ingest\n'
             "# auth_reads = true  # also require the key on GET query endpoints\n"
-            "# auth_mode = \"keys\"  # managed per-key RBAC + project scope\n"
+            '# auth_mode = "keys"  # managed per-key RBAC + project scope\n'
             "# retention_days = 30  # auto-prune horizon for `archive`/`prune`\n"
             "# rate_limit_per_minute = 600\n",
             encoding="utf-8",

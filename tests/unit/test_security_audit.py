@@ -68,9 +68,7 @@ def _mk_app(
     tmp_path: Path, name: str = "audit.db", **cfg_over: Any
 ) -> tuple[Any, SQLiteTraceStore]:
     store = SQLiteTraceStore(tmp_path / name)
-    cfg = LensConfig(
-        data_dir=tmp_path, db_path=tmp_path / name, **cfg_over
-    )
+    cfg = LensConfig(data_dir=tmp_path, db_path=tmp_path / name, **cfg_over)
     return create_app(store=store, config=cfg), store
 
 
@@ -91,15 +89,12 @@ def _secret_trace() -> Trace:
         kind=SpanKind.LLM,
         start_time=_T0,
         end_time=_T0 + timedelta(milliseconds=100),
-        status=Status(
-            code=StatusCode.ERROR, message=f"401 unauthorized for {ANTHROPIC_KEY}"
-        ),
+        status=Status(code=StatusCode.ERROR, message=f"401 unauthorized for {ANTHROPIC_KEY}"),
         attributes={
             "http.url": f"https://user:{USERINFO_PW}@api.corp.io/v1/x",
             "db.url": f"postgres://admin:{USERINFO_PW}@db.internal:5432/app",
             "request.headers.dump": (
-                f"Authorization: Basic {BASIC_BLOB}; "
-                f"X-Api-Key: {X_API_KEY_VALUE}"
+                f"Authorization: Basic {BASIC_BLOB}; X-Api-Key: {X_API_KEY_VALUE}"
             ),
             "connect.note": f"retry with password={KV_PASSWORD} then quit",
             "vendor.key": ANTHROPIC_KEY,
@@ -138,9 +133,7 @@ def _keys_app(
     return app, store, {"X-Forge-Lens-Key": secret}
 
 
-def _mint(
-    client: TestClient, admin: dict[str, str], **kwargs: Any
-) -> dict[str, str]:
+def _mint(client: TestClient, admin: dict[str, str], **kwargs: Any) -> dict[str, str]:
     r = client.post("/v1/admin/keys", headers=admin, json=kwargs)
     assert r.status_code == 200, r.text
     return {"X-Forge-Lens-Key": r.json()["secret"]}
@@ -200,9 +193,7 @@ class TestIngestionBattery:
             with TestClient(app) as c:
                 for url in ("/v1/traces", "/v1/otlp/traces"):
                     # 513 levels: the lexical guard fires before parsing
-                    over = json.dumps(
-                        {"a": json.loads("[" * 512 + "]" * 512)}
-                    ).encode()
+                    over = json.dumps({"a": json.loads("[" * 512 + "]" * 512)}).encode()
                     r = c.post(url, content=over)
                     assert r.status_code == 400, url
                     assert "nesting" in r.text
@@ -210,36 +201,27 @@ class TestIngestionBattery:
                     # specific (400 jiter / 200-422 contract) but never
                     # a server fault
                     for depth in (128, 256, 400, 511):
-                        at = json.dumps(
-                            {"a": json.loads("[" * depth + "]" * depth)}
-                        ).encode()
+                        at = json.dumps({"a": json.loads("[" * depth + "]" * depth)}).encode()
                         r = c.post(url, content=at)
                         assert r.status_code < 500, (url, depth)
         finally:
             store.close()
 
-    def test_json_depth_ignores_braces_inside_strings(
-        self, tmp_path: Path
-    ) -> None:
+    def test_json_depth_ignores_braces_inside_strings(self, tmp_path: Path) -> None:
         """The lexical counter must not trip on ``{``/``[`` literals
         inside string values — a false positive would be a silent
         availability regression, a false negative a crash."""
         app, store = _mk_app(tmp_path)
         try:
             with TestClient(app) as c:
-                body = json.dumps(
-                    {"traces": "[" * 6000 + "]" * 6000}
-                ).encode()
+                body = json.dumps({"traces": "[" * 6000 + "]" * 6000}).encode()
                 # 'traces' as a string is a contract violation (422)
                 # on the native route; OTLP ignores the unknown key
                 # and normalizes to an empty batch (200). Either way
                 # it is NOT a 400 depth verdict — proof the braces
                 # were lexed as string content, not structure.
                 assert c.post("/v1/traces", content=body).status_code == 422
-                assert (
-                    c.post("/v1/otlp/traces", content=body).status_code
-                    in (200, 422)
-                )
+                assert c.post("/v1/otlp/traces", content=body).status_code in (200, 422)
         finally:
             store.close()
 
@@ -253,9 +235,7 @@ class TestIngestionBattery:
                 assert len(wide) < 8 * 1024 * 1024  # under the byte cap
                 r = c.post("/v1/traces", content=wide)
                 assert r.status_code == 422
-                obj = json.dumps(
-                    {"traces": None, **{f"k{i}": i for i in range(50_000)}}
-                ).encode()
+                obj = json.dumps({"traces": None, **{f"k{i}": i for i in range(50_000)}}).encode()
                 r = c.post("/v1/traces", content=obj)
                 assert r.status_code == 422
         finally:
@@ -302,15 +282,11 @@ class TestIngestionBattery:
                 p2 = json.loads(json.dumps(otlp_payload))
                 s = p2["resourceSpans"][0]["scopeSpans"][0]["spans"]
                 s[0]["startTimeUnixNano"] = good_start
-                s[0]["attributes"] = [
-                    {"key": "big.int", "value": {"intValue": "9" * 30}}
-                ]
+                s[0]["attributes"] = [{"key": "big.int", "value": {"intValue": "9" * 30}}]
                 r = c.post("/v1/otlp/traces", json=p2)
                 assert r.status_code == 200, r.text
                 got = c.get(f"/v1/traces/{'b' * 32}").json()
-                root = next(
-                    s_ for s_ in got["spans"] if s_["name"] == "root-op"
-                )
+                root = next(s_ for s_ in got["spans"] if s_["name"] == "root-op")
                 assert "big.int" in root["attributes"]
 
                 # doubleValue 1e400 → inf on the wire is legal JSON
@@ -323,16 +299,13 @@ class TestIngestionBattery:
                 s3[0]["spanId"] = "f" * 16  # fresh span — no dedupe merge
                 s3[0]["attributes"].insert(
                     0,
-                    {"key": "big.float",
-                     "value": {"doubleValue": "@@BIG@@"}},
+                    {"key": "big.float", "value": {"doubleValue": "@@BIG@@"}},
                 )
                 raw3 = json.dumps(p3).replace('"@@BIG@@"', "1e400")
                 r = c.post("/v1/otlp/traces", content=raw3.encode())
                 assert r.status_code == 200, r.text
                 got3 = c.get(f"/v1/traces/{'b' * 32}").json()
-                float_span = next(
-                    s_ for s_ in got3["spans"] if s_["span_id"] == "f" * 16
-                )
+                float_span = next(s_ for s_ in got3["spans"] if s_["span_id"] == "f" * 16)
                 assert float_span["attributes"]["big.float"] is None
         finally:
             store.close()
@@ -351,9 +324,7 @@ class TestIngestionBattery:
         finally:
             store.close()
 
-    def test_lone_surrogate_rejected_both_paths(
-        self, tmp_path: Path
-    ) -> None:
+    def test_lone_surrogate_rejected_both_paths(self, tmp_path: Path) -> None:
         """``\\ud800`` escapes are valid JSON (json.loads materializes
         the surrogate) but unbindable in SQLite — the strict jiter
         parser catches them at 400 on the native route while the
@@ -363,7 +334,8 @@ class TestIngestionBattery:
             with TestClient(app) as c:
                 # native — jiter refuses the unpaired escape → 400
                 raw = (
-                    b'{"traces": [{"trace_id": "' + b"c" * 32
+                    b'{"traces": [{"trace_id": "'
+                    + b"c" * 32
                     + b'", "spans": [], "status": {"code": "ok",'
                     b' "message": "bad \\ud800 x"},'
                     b' "source": {"system": "t"},'
@@ -374,8 +346,11 @@ class TestIngestionBattery:
                 # OTLP — json.loads keeps the surrogate → 422
                 otlp = (
                     '{"resourceSpans": [{"scopeSpans": [{"spans": [{'
-                    '"traceId": "' + "ab" * 16 + '", "spanId": "'
-                    + "cd" * 8 + '", "name": "x\\ud800",'
+                    '"traceId": "'
+                    + "ab" * 16
+                    + '", "spanId": "'
+                    + "cd" * 8
+                    + '", "name": "x\\ud800",'
                     ' "startTimeUnixNano": "1",'
                     ' "endTimeUnixNano": "2"}]}]}]}'
                 )
@@ -384,10 +359,7 @@ class TestIngestionBattery:
                 # _eval_body route — same lenient-parse guard → 422
                 r = c.post(
                     "/v1/intel/efficiency",
-                    content=(
-                        b'{"trace_ids": ["\\ud800"],'
-                        b' "project_id": "p1"}'
-                    ),
+                    content=(b'{"trace_ids": ["\\ud800"], "project_id": "p1"}'),
                 )
                 assert r.status_code == 422, r.text
         finally:
@@ -406,7 +378,8 @@ class TestIngestionBattery:
                     "application/octet-stream",
                 ):
                     r = c.post(
-                        "/v1/otlp/traces", content=body,
+                        "/v1/otlp/traces",
+                        content=body,
                         headers={"Content-Type": ct},
                     )
                     assert r.status_code == 415, ct
@@ -414,7 +387,8 @@ class TestIngestionBattery:
                 r = c.post("/v1/otlp/traces", content=body)
                 assert r.status_code == 200
                 r = c.post(
-                    "/v1/otlp/traces", content=body,
+                    "/v1/otlp/traces",
+                    content=body,
                     headers={"Content-Type": "text/plain"},
                 )
                 assert r.status_code == 200
@@ -430,10 +404,7 @@ class TestIngestionBattery:
         try:
             with TestClient(app) as c:
                 env = _native_envelope(synthetic_trace)
-                codes = [
-                    c.post("/v1/traces", json=env).status_code
-                    for _ in range(4)
-                ]
+                codes = [c.post("/v1/traces", json=env).status_code for _ in range(4)]
                 assert codes[:2] == [200, 200]
                 assert codes[2:] == [429, 429]
         finally:
@@ -445,18 +416,10 @@ class TestIngestionBattery:
         app, store = _mk_app(tmp_path)
         try:
             with TestClient(app) as c:
-                assert c.get(
-                    "/v1/traces", params={"offset": 2**63}
-                ).status_code == 422
-                assert c.get(
-                    "/v1/traces", params={"min_total_tokens": 2**63}
-                ).status_code == 422
-                assert c.get(
-                    "/v1/traces", params={"min_duration_ms": 1e400}
-                ).status_code == 422
-                assert c.get(
-                    "/v1/traces", params={"status": "bogus"}
-                ).status_code == 422
+                assert c.get("/v1/traces", params={"offset": 2**63}).status_code == 422
+                assert c.get("/v1/traces", params={"min_total_tokens": 2**63}).status_code == 422
+                assert c.get("/v1/traces", params={"min_duration_ms": 1e400}).status_code == 422
+                assert c.get("/v1/traces", params={"status": "bogus"}).status_code == 422
         finally:
             store.close()
 
@@ -542,8 +505,7 @@ class TestSanitizationBattery:
         for extra in ([], ["--json"]):
             r = runner.invoke(
                 cli_app,
-                ["traces", "show", t.trace_id, "--db", str(db),
-                 "--project", "default", *extra],
+                ["traces", "show", t.trace_id, "--db", str(db), "--project", "default", *extra],
             )
             assert r.exit_code == 0, r.output
             _assert_no_secrets(r.output, f"cli show {extra}")
@@ -565,9 +527,7 @@ class TestSanitizationBattery:
         _assert_no_secrets(blob, "mcp tools")
         assert t.trace_id in blob
 
-    def test_capture_full_still_value_scrubs(
-        self, tmp_path: Path
-    ) -> None:
+    def test_capture_full_still_value_scrubs(self, tmp_path: Path) -> None:
         """Opt-in ``capture=full`` keeps content attrs but the value
         scrub still applies INSIDE them — a credential shape in a
         captured body must not survive verbatim."""
@@ -581,8 +541,7 @@ class TestSanitizationBattery:
                 r = c.post("/v1/traces", json=_native_envelope(t))
                 assert r.status_code == 200, r.text
                 body = json.dumps(c.get(f"/v1/traces/{t.trace_id}").json())
-                for raw in (ANTHROPIC_KEY, USERINFO_PW, KV_PASSWORD,
-                            BASIC_BLOB, X_API_KEY_VALUE):
+                for raw in (ANTHROPIC_KEY, USERINFO_PW, KV_PASSWORD, BASIC_BLOB, X_API_KEY_VALUE):
                     assert raw not in body
                 # accepted residual at full: e-mail + free-text stays
                 assert EMAIL in body
@@ -621,8 +580,15 @@ class TestSanitizationBattery:
             capture=CaptureLevel.METADATA,
             max_chars=4096,
         )
-        for leak in ("pw@", "u:p@", "hunter2", "abcdef0123456789",
-                     "dXNlcg==", "tok_abc123", "s3cret"):
+        for leak in (
+            "pw@",
+            "u:p@",
+            "hunter2",
+            "abcdef0123456789",
+            "dXNlcg==",
+            "tok_abc123",
+            "s3cret",
+        ):
             assert leak not in json.dumps(out), leak
         # correlation structure kept
         assert "h.example:8443" in out["a"]
@@ -657,50 +623,49 @@ class TestAuthorizationBattery:
         app, store, admin = _keys_app(tmp_path)
         try:
             with TestClient(app) as c:
-                reader = _mint(c, admin, name="ro", role="reader",
-                               projects=["p1"])
-                writer = _mint(c, admin, name="rw", role="writer",
-                               projects=["p1"])
+                reader = _mint(c, admin, name="ro", role="reader", projects=["p1"])
+                writer = _mint(c, admin, name="rw", role="writer", projects=["p1"])
                 # envelope project_id fills default traces → in-scope
                 env = json.dumps(
-                    TraceIngest(
-                        traces=[synthetic_trace], project_id="p1"
-                    ).model_dump(mode="json")
+                    TraceIngest(traces=[synthetic_trace], project_id="p1").model_dump(mode="json")
                 )
 
                 # reader: reads ok in scope, writes 403
-                assert c.get("/v1/traces?project_id=p1",
-                             headers=reader).status_code == 200
-                assert c.post("/v1/traces", content=env,
-                              headers=reader).status_code == 403
-                assert c.put(
-                    "/v1/datasets/ds/versions/v1",
-                    json={"project_id": "p1", "cases": []},
-                    headers=reader,
-                ).status_code == 403
-                assert c.post("/v1/experiments/x/run", json={
-                    "project_id": "p1", "gate": {}},
-                    headers=reader).status_code == 403
+                assert c.get("/v1/traces?project_id=p1", headers=reader).status_code == 200
+                assert c.post("/v1/traces", content=env, headers=reader).status_code == 403
+                assert (
+                    c.put(
+                        "/v1/datasets/ds/versions/v1",
+                        json={"project_id": "p1", "cases": []},
+                        headers=reader,
+                    ).status_code
+                    == 403
+                )
+                assert (
+                    c.post(
+                        "/v1/experiments/x/run",
+                        json={"project_id": "p1", "gate": {}},
+                        headers=reader,
+                    ).status_code
+                    == 403
+                )
 
                 # writer: writes ok in scope, admin surface 403
                 r = c.post("/v1/traces", content=env, headers=writer)
                 assert r.status_code == 200, r.text
                 for url in (
-                    "/v1/admin/keys", "/v1/admin/audit",
-                    "/v1/admin/prune", "/v1/alerts/rules",
+                    "/v1/admin/keys",
+                    "/v1/admin/audit",
+                    "/v1/admin/prune",
+                    "/v1/alerts/rules",
                 ):
                     for method in (c.get, c.post):
                         r = method(url, headers=writer)
                         # 403 = role check fired; 405 = method doesn't
                         # exist at all — both are safe non-access
-                        assert r.status_code in (403, 405), (
-                            url, r.status_code)
-                assert c.delete(
-                    "/v1/admin/keys/flk_x", headers=writer
-                ).status_code == 403
-                assert c.delete(
-                    "/v1/alerts/rules/r1", headers=writer
-                ).status_code == 403
+                        assert r.status_code in (403, 405), (url, r.status_code)
+                assert c.delete("/v1/admin/keys/flk_x", headers=writer).status_code == 403
+                assert c.delete("/v1/alerts/rules/r1", headers=writer).status_code == 403
         finally:
             store.close()
 
@@ -713,10 +678,8 @@ class TestAuthorizationBattery:
         store.upsert_dataset("ds-p2", project_id="p2", name="victim-ds")
         try:
             with TestClient(app) as c:
-                scoped_r = _mint(c, admin, name="r", role="reader",
-                                 projects=["p1"])
-                scoped_w = _mint(c, admin, name="w", role="writer",
-                                 projects=["p1"])
+                scoped_r = _mint(c, admin, name="r", role="reader", projects=["p1"])
+                scoped_w = _mint(c, admin, name="w", role="writer", projects=["p1"])
                 tid = synthetic_trace.trace_id
                 for url in (
                     "/v1/traces?project_id=p2",
@@ -731,20 +694,14 @@ class TestAuthorizationBattery:
                     r = c.get(url, headers=scoped_r)
                     assert r.status_code == 403, (url, r.status_code)
                 # cross-project write denied; own-project ok
-                env_p2 = json.dumps(
-                    TraceIngest(traces=[victim]).model_dump(mode="json")
-                )
-                assert c.post("/v1/traces", content=env_p2,
-                              headers=scoped_w).status_code == 403
+                env_p2 = json.dumps(TraceIngest(traces=[victim]).model_dump(mode="json"))
+                assert c.post("/v1/traces", content=env_p2, headers=scoped_w).status_code == 403
                 # omitted project_id resolves to 'default' → still 403
-                assert c.get("/v1/traces",
-                             headers=scoped_r).status_code == 403
+                assert c.get("/v1/traces", headers=scoped_r).status_code == 403
         finally:
             store.close()
 
-    def test_invalid_revoked_and_crafted_keys(
-        self, tmp_path: Path
-    ) -> None:
+    def test_invalid_revoked_and_crafted_keys(self, tmp_path: Path) -> None:
         app, store, admin = _keys_app(tmp_path)
         try:
             with TestClient(app) as c:
@@ -755,49 +712,52 @@ class TestAuthorizationBattery:
                     "admin",
                     "0" * 64,  # a bare sha256 hex is not a usable secret
                 ):
-                    assert c.get(
-                        "/v1/health", headers={"X-Forge-Lens-Key": bad}
-                    ).status_code == 401, bad
+                    assert (
+                        c.get("/v1/health", headers={"X-Forge-Lens-Key": bad}).status_code == 401
+                    ), bad
                 # the stored key_id presented as the secret → 401
                 rec = c.get("/v1/admin/keys", headers=admin).json()[0]
-                assert c.get(
-                    "/v1/health",
-                    headers={"X-Forge-Lens-Key": rec["key_id"]},
-                ).status_code == 401
+                assert (
+                    c.get(
+                        "/v1/health",
+                        headers={"X-Forge-Lens-Key": rec["key_id"]},
+                    ).status_code
+                    == 401
+                )
                 # revoked key → 401
                 minted = _mint(c, admin, name="tmp", role="reader")
                 kid = c.get("/v1/admin/keys", headers=admin).json()
                 tmp_id = next(k["key_id"] for k in kid if k["name"] == "tmp")
-                assert c.delete(f"/v1/admin/keys/{tmp_id}",
-                                headers=admin).status_code == 200
+                assert c.delete(f"/v1/admin/keys/{tmp_id}", headers=admin).status_code == 200
                 assert c.get("/v1/health", headers=minted).status_code == 401
                 # key with an out-of-band bogus role fails CLOSED (403)
                 bogus_secret = "flk_sk_bogus-role"
                 store.create_api_key(
-                    "flk_bogus", name="planted",
-                    key_hash=hash_secret(bogus_secret), role="superuser",
+                    "flk_bogus",
+                    name="planted",
+                    key_hash=hash_secret(bogus_secret),
+                    role="superuser",
                 )
-                assert c.get(
-                    "/v1/health",
-                    headers={"X-Forge-Lens-Key": bogus_secret},
-                ).status_code == 403
+                assert (
+                    c.get(
+                        "/v1/health",
+                        headers={"X-Forge-Lens-Key": bogus_secret},
+                    ).status_code
+                    == 403
+                )
         finally:
             store.close()
 
-    def test_reader_cannot_escalate_via_mint(
-        self, tmp_path: Path
-    ) -> None:
+    def test_reader_cannot_escalate_via_mint(self, tmp_path: Path) -> None:
         app, store, admin = _keys_app(tmp_path)
         try:
             with TestClient(app) as c:
                 reader = _mint(c, admin, name="ro", role="reader")
                 # mint attempts as reader — 403 before body eval
-                r = c.post("/v1/admin/keys", headers=reader,
-                           json={"name": "x", "role": "admin"})
+                r = c.post("/v1/admin/keys", headers=reader, json={"name": "x", "role": "admin"})
                 assert r.status_code == 403
                 # a reader's own key must never gain a new role
-                assert c.get("/v1/admin/keys",
-                             headers=reader).status_code == 403
+                assert c.get("/v1/admin/keys", headers=reader).status_code == 403
         finally:
             store.close()
 
@@ -809,15 +769,17 @@ class TestAuthorizationBattery:
             with TestClient(app) as c:
                 reader = _mint(c, admin, name="r", role="reader")
                 calls: list[tuple[str, Any, str, Any]] = [
-                    ("post", c.post, "/v1/admin/keys",
-                     {"name": "x", "role": "reader"}),
+                    ("post", c.post, "/v1/admin/keys", {"name": "x", "role": "reader"}),
                     ("get", c.get, "/v1/admin/keys", None),
                     ("delete", c.delete, "/v1/admin/keys/flk_x", None),
                     ("get", c.get, "/v1/admin/audit", None),
-                    ("post", c.post, "/v1/admin/prune",
-                     {"older_than_days": 0}),
-                    ("post", c.post, "/v1/alerts/rules",
-                     {"rule_id": "r", "metric": "m", "threshold": 1}),
+                    ("post", c.post, "/v1/admin/prune", {"older_than_days": 0}),
+                    (
+                        "post",
+                        c.post,
+                        "/v1/alerts/rules",
+                        {"rule_id": "r", "metric": "m", "threshold": 1},
+                    ),
                     ("delete", c.delete, "/v1/alerts/rules/r", None),
                 ]
                 for name, fn, url, payload in calls:
@@ -827,11 +789,7 @@ class TestAuthorizationBattery:
                         else fn(url, headers=reader)
                     )
                     assert r.status_code == 403, (name, url, r.status_code)
-                    r = (
-                        fn(url, json=payload)
-                        if payload is not None and name != "get"
-                        else fn(url)
-                    )
+                    r = fn(url, json=payload) if payload is not None and name != "get" else fn(url)
                     assert r.status_code == 401, (name, url, r.status_code)
         finally:
             store.close()
@@ -842,8 +800,11 @@ class TestAuthorizationBattery:
             with TestClient(app) as c:
                 reader = _mint(c, admin, name="ro", role="reader")
                 c.get("/v1/admin/keys", headers=reader)  # denied → auth event
-                c.post("/v1/admin/prune", headers=admin,
-                       json={"older_than_days": 36500, "all_projects": True})
+                c.post(
+                    "/v1/admin/prune",
+                    headers=admin,
+                    json={"older_than_days": 36500, "all_projects": True},
+                )
                 events = c.get("/v1/admin/audit", headers=admin).json()
                 actions = {e["action"] for e in events}
                 assert {"key.create", "auth", "traces.prune"} <= actions
@@ -875,7 +836,8 @@ class TestAuthorizationBattery:
         store = SQLiteTraceStore(tmp_path / "b.db")
         try:
             cfg = LensConfig(
-                data_dir=tmp_path, db_path=tmp_path / "b.db",
+                data_dir=tmp_path,
+                db_path=tmp_path / "b.db",
                 auth_mode="keyz",
             )
             with pytest.raises(ValueError, match="auth_mode"):
@@ -911,20 +873,14 @@ def _mcp_tools_call(
         }
         for i, (name, args) in enumerate(calls)
     ]
-    stdin = io.StringIO(
-        "".join(json.dumps(m) + "\n" for m in [init, *msgs])
-    )
+    stdin = io.StringIO("".join(json.dumps(m) + "\n" for m in [init, *msgs]))
     old = sys.stdin
     sys.stdin = stdin
     try:
         mcp_serve(str(db))
     finally:
         sys.stdin = old
-    out = [
-        json.loads(line)
-        for line in capsys.readouterr().out.splitlines()
-        if line
-    ]
+    out = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
     return {o["id"]: o for o in out}
 
 
@@ -940,7 +896,9 @@ class TestMcpSurface:
         store.close()
         # call before initialize → protocol error, no tool dispatch
         early = {
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
             "params": {"name": "lens.stats", "arguments": {}},
         }
         stdin = io.StringIO(json.dumps(early) + "\n")
@@ -950,11 +908,7 @@ class TestMcpSurface:
             mcp_serve(str(db))
         finally:
             sys.stdin = old
-        out = [
-            json.loads(line)
-            for line in capsys.readouterr().out.splitlines()
-            if line
-        ]
+        out = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
         assert out[0]["id"] == 1
         assert "error" in out[0]
 

@@ -222,9 +222,7 @@ class TraceStore(Protocol):
         offset: int = 0,
     ) -> list[dict[str, Any]]: ...
 
-    def prune_traces(
-        self, *, before_ns: int, project_id: str | None = None
-    ) -> dict[str, int]: ...
+    def prune_traces(self, *, before_ns: int, project_id: str | None = None) -> dict[str, int]: ...
 
     def delete_trace_ids(
         self, trace_ids: list[str], *, project_id: str | None = None

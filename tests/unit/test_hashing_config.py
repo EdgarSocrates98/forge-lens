@@ -17,10 +17,7 @@ def test_canonical_json_is_stable() -> None:
 
 
 def test_sha256_known_value() -> None:
-    assert (
-        sha256_bytes(b"")
-        == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    )
+    assert sha256_bytes(b"") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     h = sha256_json({"x": 1})
     assert len(h) == 64
     assert h == sha256_json({"x": 1})
@@ -110,11 +107,11 @@ def test_toml_invalid_auth_mode_fails_closed(tmp_path: Path) -> None:
     cfg_path = tmp_path / ".forge-lens" / "config.toml"
 
     for line in (
-        'auth_mode = "keyz"',   # typo of "keys" → was silently dropped
-        'auth_mode = "KEYS"',   # case-sensitive enum, not normalized
-        "auth_mode = 5",        # non-string enum value
-        "api_key = 123",        # non-string key would disable auth
-        'auth_reads = "yes"',   # non-bool flag
+        'auth_mode = "keyz"',  # typo of "keys" → was silently dropped
+        'auth_mode = "KEYS"',  # case-sensitive enum, not normalized
+        "auth_mode = 5",  # non-string enum value
+        "api_key = 123",  # non-string key would disable auth
+        'auth_reads = "yes"',  # non-bool flag
     ):
         cfg_path.write_text(f"[lens]\n{line}\n")
         with pytest.raises(ValueError, match=r"config\.toml") as exc:

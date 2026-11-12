@@ -58,8 +58,9 @@ def main() -> None:
         with tracer.llm_call("claude-demo", provider="anthropic") as llm:
             llm.attributes["input.preview"] = "summarize observability"
             tracer.record_usage(llm, input_tokens=120, output_tokens=40)
-        with tracer.tool_call("web_search", capture_args=True,
-                              arguments={"q": "otel genai semconv"}):
+        with tracer.tool_call(
+            "web_search", capture_args=True, arguments={"q": "otel genai semconv"}
+        ):
             pass  # imagine a real search here
         agent_span.attributes["demo"] = True
 
@@ -70,8 +71,7 @@ def main() -> None:
     assert traces, "no traces stored"
     trace = store.get_trace(traces[0]["trace_id"])
     assert trace is not None
-    print(f"trace {trace.trace_id}  status={trace.status.code.value}  "
-          f"spans={len(trace.spans)}")
+    print(f"trace {trace.trace_id}  status={trace.status.code.value}  spans={len(trace.spans)}")
     for s in sorted(trace.spans, key=lambda x: x.start_time):
         dur = f"{s.duration_ms:.1f}ms" if s.duration_ms is not None else "running"
         print(f"  {s.name:<28} [{s.kind.value:<8}] {dur}")

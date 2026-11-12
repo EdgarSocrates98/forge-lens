@@ -183,9 +183,7 @@ _OFFLINE_DIRS = {"unit", "contract"}
 
 
 @pytest.fixture(autouse=True)
-def _no_network(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Any network egress inside unit/contract tests is a hard failure.
 
     ``connect``/``connect_ex``/``bind``/``sendto`` and every DNS/connect
@@ -221,7 +219,10 @@ def _no_network(
 
     class _GuardedSocket(real_socket):  # type: ignore[misc]
         def __init__(
-            self, family: int = -1, type: int = -1, proto: int = -1,
+            self,
+            family: int = -1,
+            type: int = -1,
+            proto: int = -1,
             fileno: int | None = None,
         ) -> None:
             super().__init__(family, type, proto, fileno)
@@ -229,32 +230,28 @@ def _no_network(
         def connect(self, address: object) -> None:
             if not _is_loopback(address):
                 raise AssertionError(
-                    f"network access attempted during test: "
-                    f"connect({_host(address)!r})"
+                    f"network access attempted during test: connect({_host(address)!r})"
                 )
             super().connect(address)
 
         def connect_ex(self, address: object) -> int:
             if not _is_loopback(address):
                 raise AssertionError(
-                    f"network access attempted during test: "
-                    f"connect_ex({_host(address)!r})"
+                    f"network access attempted during test: connect_ex({_host(address)!r})"
                 )
             return super().connect_ex(address)
 
         def bind(self, address: object) -> None:
             if not _is_loopback(address):
                 raise AssertionError(
-                    f"network access attempted during test: "
-                    f"bind({_host(address)!r})"
+                    f"network access attempted during test: bind({_host(address)!r})"
                 )
             super().bind(address)
 
         def sendto(self, data: object, *args: object) -> int:
             if args and not _is_loopback(args[-1]):
                 raise AssertionError(
-                    f"network access attempted during test: "
-                    f"sendto({_host(args[-1])!r})"
+                    f"network access attempted during test: sendto({_host(args[-1])!r})"
                 )
             return super().sendto(data, *args)
 
@@ -268,9 +265,7 @@ def _no_network(
 
     def _guarded_getaddrinfo(host: object, *args: object, **kwargs: object) -> object:
         if host not in _LOOPBACK and host is not None:
-            raise AssertionError(
-                f"network access attempted during test: getaddrinfo({host!r})"
-            )
+            raise AssertionError(f"network access attempted during test: getaddrinfo({host!r})")
         return real_getaddrinfo(host, *args, **kwargs)  # type: ignore[arg-type]
 
     # name-resolution helpers take a bare host string (gethostbyname/
@@ -279,10 +274,9 @@ def _no_network(
     def _loopback_name_only(name: str, real: object) -> object:
         def _guarded(host: object, *args: object, **kwargs: object) -> object:
             if host not in _LOOPBACK:
-                raise AssertionError(
-                    f"network access attempted during test: {name}({host!r})"
-                )
+                raise AssertionError(f"network access attempted during test: {name}({host!r})")
             return real(host, *args, **kwargs)  # type: ignore[operator, call-arg]
+
         return _guarded
 
     real_getnameinfo = socket.getnameinfo
@@ -291,8 +285,7 @@ def _no_network(
     def _guarded_getnameinfo(sockaddr: object, *args: object, **kwargs: object) -> object:
         if not _is_loopback(sockaddr):
             raise AssertionError(
-                f"network access attempted during test: "
-                f"getnameinfo({_host(sockaddr)!r})"
+                f"network access attempted during test: getnameinfo({_host(sockaddr)!r})"
             )
         return real_getnameinfo(sockaddr, *args, **kwargs)  # type: ignore[call-overload]
 
@@ -300,9 +293,9 @@ def _no_network(
     monkeypatch.setattr(socket, "create_connection", _guarded_create_connection)
     monkeypatch.setattr(socket, "getaddrinfo", _guarded_getaddrinfo)
     monkeypatch.setattr(
-        socket, "gethostbyname",
-        _loopback_name_only("gethostbyname", socket.gethostbyname))
+        socket, "gethostbyname", _loopback_name_only("gethostbyname", socket.gethostbyname)
+    )
     monkeypatch.setattr(
-        socket, "gethostbyaddr",
-        _loopback_name_only("gethostbyaddr", socket.gethostbyaddr))
+        socket, "gethostbyaddr", _loopback_name_only("gethostbyaddr", socket.gethostbyaddr)
+    )
     monkeypatch.setattr(socket, "getnameinfo", _guarded_getnameinfo)

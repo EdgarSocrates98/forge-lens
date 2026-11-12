@@ -38,4 +38,3 @@ def test_unauthorized_pack_is_rejected() -> None:
         attach_context_pack_provenance(
             _trace(), {"schema": "theforge/KnowledgeContextPack/v1"}, authorized=False
         )
-

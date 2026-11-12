@@ -87,8 +87,7 @@ def _bounded_validation_detail(exc: PydanticValidationError) -> str:
         inp = _BRIEF_REPR.repr(e.get("input", ""))
         if len(inp) > _MAX_VALIDATION_INPUT:
             inp = inp[:_MAX_VALIDATION_INPUT] + "…"
-        parts.append(
-            f"{loc}: {msg} (input={inp})" if loc else f"{msg} (input={inp})")
+        parts.append(f"{loc}: {msg} (input={inp})" if loc else f"{msg} (input={inp})")
     detail = f"{len(errors)} validation error(s): " + "; ".join(parts)
     if len(errors) > _MAX_VALIDATION_ERRORS:
         detail += f"; … and {len(errors) - _MAX_VALIDATION_ERRORS} more"
@@ -162,9 +161,7 @@ def create_app(
     from forge_lens.intel.pricing import PricingRegistry
 
     _pricing = (
-        PricingRegistry.from_file(cfg.pricing_file)
-        if cfg.pricing_file
-        else PricingRegistry()
+        PricingRegistry.from_file(cfg.pricing_file) if cfg.pricing_file else PricingRegistry()
     )
 
     def get_store() -> TraceStore:
@@ -172,9 +169,7 @@ def create_app(
             with _init_lock:
                 if "db" not in _store_holder:
                     _store_holder["db"] = (
-                        store
-                        if store is not None
-                        else SQLiteTraceStore(cfg.resolved_db_path)
+                        store if store is not None else SQLiteTraceStore(cfg.resolved_db_path)
                     )
         return _store_holder["db"]
 
@@ -214,8 +209,7 @@ def create_app(
         )
     if _mode == "key" and not cfg.api_key:
         raise ValueError(
-            "auth_mode='key' requires api_key — every write would be a "
-            "permanent 401 otherwise"
+            "auth_mode='key' requires api_key — every write would be a permanent 401 otherwise"
         )
 
     def _audit(
@@ -250,8 +244,10 @@ def create_app(
         if _mode == "key":
             # compare as bytes: compare_digest raises TypeError on
             # non-ASCII str input — attacker input must get 401, not 500
-            if cfg.api_key and x_key and secrets.compare_digest(
-                x_key.encode(), cfg.api_key.encode()
+            if (
+                cfg.api_key
+                and x_key
+                and secrets.compare_digest(x_key.encode(), cfg.api_key.encode())
             ):
                 return KeyIdentity(actor="config-key", role="admin", projects=())
             return None
@@ -277,12 +273,22 @@ def create_app(
         ) -> KeyIdentity:
             ident = _resolve(x_forge_lens_key)
             if ident is None:
-                _audit("unknown", "auth", request.url.path, "denied",
-                       {"reason": "invalid_or_missing_key"})
+                _audit(
+                    "unknown",
+                    "auth",
+                    request.url.path,
+                    "denied",
+                    {"reason": "invalid_or_missing_key"},
+                )
                 raise _reject_request(401, "invalid or missing API key")
             if not role_at_least(ident.role, required):
-                _audit(ident.actor, "auth", request.url.path, "denied",
-                       {"reason": f"role {required} required", "role": ident.role})
+                _audit(
+                    ident.actor,
+                    "auth",
+                    request.url.path,
+                    "denied",
+                    {"reason": f"role {required} required", "role": ident.role},
+                )
                 raise _reject_request(403, f"role {required!r} required")
             request.state.lens_identity = ident
             return ident
@@ -297,12 +303,14 @@ def create_app(
         ``writer``-level action when keys are managed."""
         ident = _resolve(x_forge_lens_key)
         if ident is None:
-            _audit("unknown", "auth", request.url.path, "denied",
-                   {"reason": "invalid_or_missing_key"})
+            _audit(
+                "unknown", "auth", request.url.path, "denied", {"reason": "invalid_or_missing_key"}
+            )
             raise _reject_ingest(401, "invalid or missing API key")
         if not role_at_least(ident.role, "writer"):
-            _audit(ident.actor, "auth", request.url.path, "denied",
-                   {"reason": "writer role required"})
+            _audit(
+                ident.actor, "auth", request.url.path, "denied", {"reason": "writer role required"}
+            )
             raise _reject_ingest(403, "writer role required")
         request.state.lens_identity = ident
 
@@ -320,11 +328,8 @@ def create_app(
         projects. Reads AND writes — the rule is uniform."""
         ident = getattr(request.state, "lens_identity", None)
         if ident is not None and not project_allowed(ident, project_id):
-            _audit(ident.actor, "scope", request.url.path, "denied",
-                   {"project_id": project_id})
-            raise _reject_request(
-                403, f"project {project_id!r} outside key scope"
-            )
+            _audit(ident.actor, "scope", request.url.path, "denied", {"project_id": project_id})
+            raise _reject_request(403, f"project {project_id!r} outside key scope")
 
     @app.middleware("http")
     async def count_requests(
@@ -342,19 +347,14 @@ def create_app(
         _check_declared_size(request, cfg.max_payload_bytes)
         raw = await _read_capped_body(request, cfg.max_payload_bytes)
         if _json_depth(raw) > _MAX_JSON_DEPTH:
-            raise _reject_ingest(
-                400, f"JSON nesting exceeds {_MAX_JSON_DEPTH} levels")
+            raise _reject_ingest(400, f"JSON nesting exceeds {_MAX_JSON_DEPTH} levels")
         try:
             body = TraceIngest.model_validate_json(raw)
         except PydanticValidationError as exc:
             # json_invalid = malformed JSON or the parser's own recursion
             # cap → 400 (bad body); contract violations → 422.
-            code = (
-                400 if any(e["type"] == "json_invalid" for e in exc.errors())
-                else 422
-            )
-            raise _reject_ingest(
-                code, _bounded_validation_detail(exc)) from exc
+            code = 400 if any(e["type"] == "json_invalid" for e in exc.errors()) else 422
+            raise _reject_ingest(code, _bounded_validation_detail(exc)) from exc
         _require_scope(request, body.project_id or cfg.project_id)
         for trace in body.traces:
             # The envelope project fills traces that didn't name one;
@@ -399,31 +399,23 @@ def create_app(
         """
         content_type = request.headers.get("content-type", "")
         if "protobuf" in content_type or "application/octet-stream" in content_type:
-            raise _reject_ingest(
-                415, "OTLP/protobuf is not supported — POST application/json"
-            )
+            raise _reject_ingest(415, "OTLP/protobuf is not supported — POST application/json")
         _check_declared_size(request, cfg.max_payload_bytes)
         body = await _read_capped_body(request, cfg.max_payload_bytes)
         if _json_depth(body) > _MAX_JSON_DEPTH:
-            raise _reject_ingest(
-                400, f"JSON nesting exceeds {_MAX_JSON_DEPTH} levels")
+            raise _reject_ingest(400, f"JSON nesting exceeds {_MAX_JSON_DEPTH} levels")
         try:
             payload = json.loads(body)
         except Exception as exc:
             raise _reject_ingest(400, f"invalid JSON: {exc}") from exc
         if not isinstance(payload, dict):
-            raise _reject_ingest(
-                422, "OTLP body must be a JSON object (ExportTraceServiceRequest)"
-            )
+            raise _reject_ingest(422, "OTLP body must be a JSON object (ExportTraceServiceRequest)")
         _reject_unencodable(payload)
         quarantine: list[str] = []
         try:
-            traces = normalize_otlp_request(
-                payload, project_id=cfg.project_id, errors=quarantine
-            )
+            traces = normalize_otlp_request(payload, project_id=cfg.project_id, errors=quarantine)
         except PydanticValidationError as exc:
-            raise _reject_ingest(
-                422, _bounded_validation_detail(exc)) from exc
+            raise _reject_ingest(422, _bounded_validation_detail(exc)) from exc
         except ValidationError as exc:
             raise _reject_ingest(422, str(exc)) from exc
         _require_scope(request, cfg.project_id)
@@ -448,11 +440,7 @@ def create_app(
     # auth_reads=true (with api_key configured) extends the same key check
     # to reads; in `keys` mode reads ALWAYS require a reader identity —
     # tenant isolation is meaningless if unauthenticated reads stay open
-    read_deps = (
-        [Depends(_require_role("reader"))]
-        if (cfg.auth_reads or _mode == "keys")
-        else []
-    )
+    read_deps = [Depends(_require_role("reader"))] if (cfg.auth_reads or _mode == "keys") else []
 
     _TRACE_STATUSES = ("error", "ok", "unset")
 
@@ -465,9 +453,7 @@ def create_app(
         try:
             value.encode("utf-8")
         except UnicodeEncodeError:
-            raise _reject_request(
-                422, f"{field}: unencodable string (lone surrogate)"
-            ) from None
+            raise _reject_request(422, f"{field}: unencodable string (lone surrogate)") from None
         return value
 
     def _query_dt_ns(value: str | None, field: str) -> int | None:
@@ -485,9 +471,7 @@ def create_app(
         if value is None:
             return None
         if not math.isfinite(value) or value < 0:
-            raise _reject_request(
-                422, f"{field}: non-negative finite number required"
-            )
+            raise _reject_request(422, f"{field}: non-negative finite number required")
         ns = int(value * 1_000_000)
         if ns > _I64_MAX:  # finite floats can still overflow the bind
             raise _reject_request(422, f"{field}: out of int64 range")
@@ -510,9 +494,7 @@ def create_app(
         if limit < 1:
             raise _reject_request(422, "limit: positive integer required")
         if offset < 0:
-            raise _reject_request(
-                422, "offset: non-negative integer required"
-            )
+            raise _reject_request(422, "offset: non-negative integer required")
         return min(limit, 500), _query_i64(offset, "offset")
 
     @app.get(f"/{API_VERSION}/traces", dependencies=read_deps)
@@ -538,9 +520,7 @@ def create_app(
         # here, never a sqlite bind or an unhandled driver error
         limit, offset = _page_params(limit, offset)
         if status is not None and status not in _TRACE_STATUSES:
-            raise _reject_request(
-                422, f"status: one of {list(_TRACE_STATUSES)}"
-            )
+            raise _reject_request(422, f"status: one of {list(_TRACE_STATUSES)}")
         session_id = _query_str(session_id, "session_id")
         q = _query_str(q, "q")
         tool = _query_str(tool, "tool")
@@ -552,12 +532,9 @@ def create_app(
             or isinstance(min_total_tokens, bool)
             or min_total_tokens < 0
         ):
-            raise _reject_request(
-                422, "min_total_tokens: non-negative integer required"
-            )
+            raise _reject_request(422, "min_total_tokens: non-negative integer required")
         if min_total_tokens is not None:
-            min_total_tokens = _query_i64(
-                min_total_tokens, "min_total_tokens")
+            min_total_tokens = _query_i64(min_total_tokens, "min_total_tokens")
         since_ns = _query_dt_ns(since, "since")
         until_ns = _query_dt_ns(until, "until")
         min_ns = _query_duration_ns(min_duration_ms, "min_duration_ms")
@@ -626,15 +603,11 @@ def create_app(
 
     # -- intelligence (Cycles 03/04): graph + cost -----------------------
 
-    def _get_trace_or_404(
-        trace_id: str, project_id: str | None, request: Request
-    ) -> Any:
+    def _get_trace_or_404(trace_id: str, project_id: str | None, request: Request) -> Any:
         """Scope first — a route that forgets _require_scope still can't
         leak cross-tenant data through this choke point."""
         _require_scope(request, project_id or cfg.project_id)
-        trace = get_store().get_trace(
-            trace_id, project_id=project_id or cfg.project_id
-        )
+        trace = get_store().get_trace(trace_id, project_id=project_id or cfg.project_id)
         if trace is None:
             raise HTTPException(status_code=404, detail="trace not found")
         return trace
@@ -659,8 +632,8 @@ def create_app(
         return _pricing
 
     @app.get(f"/{API_VERSION}/graph/traces/{{trace_id}}", dependencies=read_deps)
-    async def trace_graph(request: Request,
-        trace_id: str, project_id: str | None = None
+    async def trace_graph(
+        request: Request, trace_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
         from forge_lens.graph import build_trace_graph
 
@@ -671,8 +644,8 @@ def create_app(
         f"/{API_VERSION}/graph/traces/{{trace_id}}/critical-path",
         dependencies=read_deps,
     )
-    async def trace_critical_path(request: Request,
-        trace_id: str, project_id: str | None = None
+    async def trace_critical_path(
+        request: Request, trace_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
         from forge_lens.graph import build_trace_graph, critical_path
 
@@ -683,8 +656,8 @@ def create_app(
         f"/{API_VERSION}/graph/traces/{{trace_id}}/bottlenecks",
         dependencies=read_deps,
     )
-    async def trace_bottlenecks(request: Request,
-        trace_id: str, project_id: str | None = None, top: int = 5
+    async def trace_bottlenecks(
+        request: Request, trace_id: str, project_id: str | None = None, top: int = 5
     ) -> dict[str, Any]:
         from forge_lens.graph import build_trace_graph, self_time_ranking
 
@@ -710,26 +683,22 @@ def create_app(
             raise _reject_request(422, "limit: positive integer required")
         lim = min(limit, 500)
         # fetch one extra row — its existence is the truncation evidence
-        rows = get_store().list_traces(
-            project_id=pid, session_id=session_id, limit=lim + 1
-        )
+        rows = get_store().list_traces(project_id=pid, session_id=session_id, limit=lim + 1)
         truncated = len(rows) > lim
         store = get_store()
         page = rows[:lim]
         got = store.get_traces(pid, [r["trace_id"] for r in page])
         # rows deleted between list and fetch resolve to None — skipped,
         # never invented
-        traces = [
-            t for r in page if (t := got.get(r["trace_id"])) is not None
-        ]
+        traces = [t for r in page if (t := got.get(r["trace_id"])) is not None]
         graph = build_session_graph(session_id, pid, traces)
         out = graph.model_dump(mode="json")
         out["stats"]["truncated"] = truncated
         return out
 
     @app.get(f"/{API_VERSION}/traces/{{trace_id}}/cost", dependencies=read_deps)
-    async def trace_cost_report(request: Request,
-        trace_id: str, project_id: str | None = None
+    async def trace_cost_report(
+        request: Request, trace_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
         from forge_lens.intel import detect_waste, trace_cost
 
@@ -738,9 +707,7 @@ def create_app(
         report = trace_cost(trace, registry)
         out = report.model_dump(mode="json")
         out["pricing_source"] = registry.source
-        out["waste"] = [
-            w.model_dump(mode="json") for w in detect_waste(trace, registry)
-        ]
+        out["waste"] = [w.model_dump(mode="json") for w in detect_waste(trace, registry)]
         return out
 
     @app.get(f"/{API_VERSION}/analytics/pricing", dependencies=read_deps)
@@ -751,8 +718,8 @@ def create_app(
     # -- investigation (Cycle 05): failure + replay + incident -----------
 
     @app.get(f"/{API_VERSION}/traces/{{trace_id}}/failure", dependencies=read_deps)
-    async def trace_failure(request: Request,
-        trace_id: str, project_id: str | None = None
+    async def trace_failure(
+        request: Request, trace_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
         from forge_lens.investigate import classify_failure
 
@@ -760,8 +727,8 @@ def create_app(
         return classify_failure(trace).model_dump(mode="json")
 
     @app.get(f"/{API_VERSION}/traces/{{trace_id}}/replay", dependencies=read_deps)
-    async def trace_replay(request: Request,
-        trace_id: str, project_id: str | None = None
+    async def trace_replay(
+        request: Request, trace_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
         from forge_lens.investigate import replay_timeline
 
@@ -769,8 +736,8 @@ def create_app(
         return replay_timeline(trace)
 
     @app.get(f"/{API_VERSION}/traces/{{trace_id}}/incident", dependencies=read_deps)
-    async def trace_incident(request: Request,
-        trace_id: str, project_id: str | None = None
+    async def trace_incident(
+        request: Request, trace_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
         from forge_lens.investigate import incident_bundle
         from forge_lens.sanitize.redact import SanitizeReport, redact_export
@@ -780,8 +747,7 @@ def create_app(
         # echo captured bodies verbatim under capture=full — scrub at
         # the export boundary and disclose what was touched.
         rep = SanitizeReport()
-        bundle: dict[str, Any] = redact_export(
-            incident_bundle(trace, _registry()), rep)
+        bundle: dict[str, Any] = redact_export(incident_bundle(trace, _registry()), rep)
         bundle["export_sanitize"] = {
             "redacted_keys": rep.redacted_keys,
             "redacted_values": rep.redacted_values,
@@ -790,11 +756,9 @@ def create_app(
         }
         return bundle
 
-    @app.get(
-        f"/{API_VERSION}/traces/{{trace_id}}/security", dependencies=read_deps
-    )
-    async def trace_security(request: Request,
-        trace_id: str, project_id: str | None = None
+    @app.get(f"/{API_VERSION}/traces/{{trace_id}}/security", dependencies=read_deps)
+    async def trace_security(
+        request: Request, trace_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
         """MCP/tool-call security observations — observer mode, evidence only."""
         from forge_lens.security.mcp_inspect import inspect_trace
@@ -803,9 +767,7 @@ def create_app(
         return inspect_trace(trace)
 
     @app.get(f"/{API_VERSION}/traces/{{trace_id}}/stream", dependencies=read_deps)
-    async def trace_stream(request: Request,
-        trace_id: str, project_id: str | None = None
-    ) -> Any:
+    async def trace_stream(request: Request, trace_id: str, project_id: str | None = None) -> Any:
         """SSE replay of a stored trace — one event per span, ordered.
 
         Justified by need: a UI renders the waterfall progressively
@@ -820,15 +782,17 @@ def create_app(
         trace = _get_trace_or_404(trace_id, project_id, request)
 
         def _events() -> Any:
-            yield "event: meta\ndata: " + _json.dumps(
-                {"trace_id": trace.trace_id, "spans": len(trace.spans)}
-            ) + "\n\n"
-            for sp in sorted(
-                trace.spans, key=lambda x: (x.start_time, x.span_id)
-            ):
-                yield "event: span\ndata: " + _json.dumps(
-                    sp.model_dump(mode="json"), default=str
-                ) + "\n\n"
+            yield (
+                "event: meta\ndata: "
+                + _json.dumps({"trace_id": trace.trace_id, "spans": len(trace.spans)})
+                + "\n\n"
+            )
+            for sp in sorted(trace.spans, key=lambda x: (x.start_time, x.span_id)):
+                yield (
+                    "event: span\ndata: "
+                    + _json.dumps(sp.model_dump(mode="json"), default=str)
+                    + "\n\n"
+                )
             yield "event: done\ndata: {}\n\n"
 
         return StreamingResponse(_events(), media_type="text/event-stream")
@@ -836,8 +800,8 @@ def create_app(
     # -- evaluation (Cycle 06): deterministic evidence-based scores ------
 
     @app.get(f"/{API_VERSION}/traces/{{trace_id}}/eval", dependencies=read_deps)
-    async def trace_eval(request: Request,
-        trace_id: str, project_id: str | None = None
+    async def trace_eval(
+        request: Request, trace_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
         """Default battery (no-param evaluators) for one trace."""
         from forge_lens.eval import run_evaluators
@@ -864,9 +828,7 @@ def create_app(
         try:
             value.encode("utf-8")
         except UnicodeEncodeError:
-            raise _reject_request(
-                422, f"{field}: unencodable string (lone surrogate)"
-            ) from None
+            raise _reject_request(422, f"{field}: unencodable string (lone surrogate)") from None
         return value
 
     def _reject_unencodable(obj: Any) -> None:
@@ -881,9 +843,7 @@ def create_app(
                 try:
                     cur.encode("utf-8")
                 except UnicodeEncodeError:
-                    raise _reject_ingest(
-                        422, "unencodable string (lone surrogate)"
-                    ) from None
+                    raise _reject_ingest(422, "unencodable string (lone surrogate)") from None
             elif isinstance(cur, dict):
                 stack.extend(cur.keys())
                 stack.extend(cur.values())
@@ -892,14 +852,8 @@ def create_app(
 
     def _eval_specs(body: dict[str, Any]) -> list[Any]:
         specs = body.get("evaluators")
-        if (
-            not isinstance(specs, list)
-            or not specs
-            or len(specs) > _MAX_EVAL_SPECS
-        ):
-            raise _reject_request(
-                422, f"evaluators: 1..{_MAX_EVAL_SPECS} specs required"
-            )
+        if not isinstance(specs, list) or not specs or len(specs) > _MAX_EVAL_SPECS:
+            raise _reject_request(422, f"evaluators: 1..{_MAX_EVAL_SPECS} specs required")
         return specs
 
     def _eval_project_id(body: dict[str, Any], field: str = "project_id") -> str | None:
@@ -917,30 +871,19 @@ def create_app(
     def _eval_trace_ids(body: dict[str, Any], field: str = "trace_ids") -> list[str]:
         """Shape validation only — no store access."""
         trace_ids = body.get("trace_ids")
-        if (
-            not isinstance(trace_ids, list)
-            or not trace_ids
-            or len(trace_ids) > _MAX_EVAL_TRACES
-        ):
-            raise _reject_request(
-                422, f"{field}: 1..{_MAX_EVAL_TRACES} strings required"
-            )
+        if not isinstance(trace_ids, list) or not trace_ids or len(trace_ids) > _MAX_EVAL_TRACES:
+            raise _reject_request(422, f"{field}: 1..{_MAX_EVAL_TRACES} strings required")
         return [_eval_str(t, f"{field}[]") for t in trace_ids]
 
-    def _eval_traces(
-        body: dict[str, Any], request: Request, pid: str | None
-    ) -> list[Any]:
+    def _eval_traces(body: dict[str, Any], request: Request, pid: str | None) -> list[Any]:
         ids = _eval_trace_ids(body)
         return _get_traces_or_404(ids, pid, request)
 
     async def _eval_body(request: Request) -> dict[str, Any]:
         _check_declared_size(request, cfg.max_payload_bytes, _reject_request)
-        raw = await _read_capped_body(
-            request, cfg.max_payload_bytes, _reject_request
-        )
+        raw = await _read_capped_body(request, cfg.max_payload_bytes, _reject_request)
         if _json_depth(raw) > _MAX_JSON_DEPTH:
-            raise _reject_request(
-                400, f"JSON nesting exceeds {_MAX_JSON_DEPTH} levels")
+            raise _reject_request(400, f"JSON nesting exceeds {_MAX_JSON_DEPTH} levels")
         try:
             body = json.loads(raw)
         except (ValueError, RecursionError) as exc:
@@ -964,9 +907,7 @@ def create_app(
         specs = _eval_specs(body)
         dataset = _eval_dataset(body)
         pid = _resolve_pid(request, _eval_project_id(body))
-        report = evaluate_traces(
-            _eval_traces(body, request, pid), specs, dataset=dataset
-        )
+        report = evaluate_traces(_eval_traces(body, request, pid), specs, dataset=dataset)
         return report.model_dump(mode="json")
 
     @app.post(f"/{API_VERSION}/eval/compare", dependencies=read_deps)
@@ -1005,11 +946,13 @@ def create_app(
         result = compare_runs(
             evaluate_traces(
                 _get_traces_or_404(a_ids, a_pid, request),
-                specs, dataset=a_dataset,
+                specs,
+                dataset=a_dataset,
             ),
             evaluate_traces(
                 _get_traces_or_404(b_ids, b_pid, request),
-                specs, dataset=b_dataset,
+                specs,
+                dataset=b_dataset,
             ),
         )
         gate = body.get("gate")
@@ -1024,11 +967,9 @@ def create_app(
                 raise _reject_request(422, f"gate: {exc}") from exc
         return result
 
-    @app.get(
-        f"/{API_VERSION}/traces/{{trace_id}}/efficiency", dependencies=read_deps
-    )
-    async def trace_efficiency_route(request: Request,
-        trace_id: str, project_id: str | None = None
+    @app.get(f"/{API_VERSION}/traces/{{trace_id}}/efficiency", dependencies=read_deps)
+    async def trace_efficiency_route(
+        request: Request, trace_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
         """Cycle 12 — per-trace efficiency roll-up (tokens/tools/retries)."""
         from forge_lens.intel.efficiency import trace_efficiency
@@ -1039,8 +980,8 @@ def create_app(
         f"/{API_VERSION}/traces/{{trace_id}}/recommendations",
         dependencies=read_deps,
     )
-    async def trace_recommendations(request: Request,
-        trace_id: str, project_id: str | None = None
+    async def trace_recommendations(
+        request: Request, trace_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
         """Candidate recommendations with evidence — gains unclaimed."""
         from forge_lens.intel.recommendations import recommend
@@ -1066,19 +1007,16 @@ def create_app(
         else:
             rows = store.list_traces(project_id=pid, limit=_MAX_EVAL_TRACES)
             got = store.get_traces(pid, [r["trace_id"] for r in rows])
-            traces = [t for r in rows
-                      if (t := got.get(r["trace_id"])) is not None]
+            traces = [t for r in rows if (t := got.get(r["trace_id"])) is not None]
             missing = []
         out = fleet_efficiency(traces)
         if missing:
             out["missing_trace_ids"] = missing
         return out
 
-    @app.get(
-        f"/{API_VERSION}/traces/{{trace_id}}/correlate", dependencies=read_deps
-    )
-    async def trace_correlate_route(request: Request,
-        trace_id: str, project_id: str | None = None
+    @app.get(f"/{API_VERSION}/traces/{{trace_id}}/correlate", dependencies=read_deps)
+    async def trace_correlate_route(
+        request: Request, trace_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
         """§05.5 — temporal co-occurrence signals within one trace.
 
@@ -1087,8 +1025,7 @@ def create_app(
         """
         from forge_lens.intel.correlation import correlate_trace
 
-        return correlate_trace(
-            _get_trace_or_404(trace_id, project_id, request))
+        return correlate_trace(_get_trace_or_404(trace_id, project_id, request))
 
     @app.post(f"/{API_VERSION}/intel/correlate", dependencies=read_deps)
     async def fleet_correlate_route(request: Request) -> dict[str, Any]:
@@ -1105,8 +1042,7 @@ def create_app(
         limit = body.get("limit", 200)
         if not isinstance(limit, int) or isinstance(limit, bool):
             raise _reject_request(422, "limit: integer expected")
-        return correlate_fleet(get_store(), pid,
-                               limit=max(0, min(limit, 500)))
+        return correlate_fleet(get_store(), pid, limit=max(0, min(limit, 500)))
 
     @app.post(f"/{API_VERSION}/intel/regress", dependencies=read_deps)
     async def regress_route(request: Request) -> dict[str, Any]:
@@ -1137,9 +1073,7 @@ def create_app(
         b_pid = _resolve_pid(request, b_pid)
         store = get_store()
 
-        def _cohort(
-            ids: list[str], pid: str | None
-        ) -> tuple[list[Any], list[str]]:
+        def _cohort(ids: list[str], pid: str | None) -> tuple[list[Any], list[str]]:
             # one batch fetch per side; per-id verdicts preserved —
             # a duplicated missing id still lists twice
             got = store.get_traces(pid, ids)
@@ -1155,9 +1089,7 @@ def create_app(
 
         a_traces, a_missing = _cohort(a_ids, a_pid)
         b_traces, b_missing = _cohort(b_ids, b_pid)
-        out = compare_cohorts(
-            a_traces, b_traces, label="cohort"
-        )
+        out = compare_cohorts(a_traces, b_traces, label="cohort")
         if a_missing or b_missing:
             out["missing_trace_ids"] = {"a": a_missing, "b": b_missing}
         return out
@@ -1166,8 +1098,8 @@ def create_app(
         f"/{API_VERSION}/graph/traces/{{trace_id}}/analysis",
         dependencies=read_deps,
     )
-    async def graph_analysis(request: Request,
-        trace_id: str, project_id: str | None = None
+    async def graph_analysis(
+        request: Request, trace_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
         """Centrality/concentration/handoff analysis over the graph."""
         from forge_lens.graph import build_trace_graph
@@ -1248,24 +1180,20 @@ def create_app(
         body = await _eval_body(request)
         pid = _resolve_pid(request, _eval_project_id(body))
         if get_store().get_dataset(dataset_id, pid) is None:
-            raise _reject_request(
-                404, f"dataset {dataset_id!r} not found — create it first"
-            )
+            raise _reject_request(404, f"dataset {dataset_id!r} not found — create it first")
         if get_store().get_dataset_version(dataset_id, version, pid) is not None:
             raise _reject_request(
-                409, f"dataset version {dataset_id!r}@{version!r} exists — "
-                     "versions are append-only, never mutated in place"
+                409,
+                f"dataset version {dataset_id!r}@{version!r} exists — "
+                "versions are append-only, never mutated in place",
             )
         # the fast-path check above is cosmetic — the store's atomic
         # INSERT DO NOTHING is the real guarantee against races
         cases = body.get("cases")
         if not isinstance(cases, list) or any(
-            not isinstance(c, dict) or not str(c.get("case_id") or "").strip()
-            for c in cases
+            not isinstance(c, dict) or not str(c.get("case_id") or "").strip() for c in cases
         ):
-            raise _reject_request(
-                422, "cases: list of objects each with a non-empty case_id"
-            )
+            raise _reject_request(422, "cases: list of objects each with a non-empty case_id")
         for c in cases:
             _eval_str(c["case_id"], "cases[].case_id")
         description = body.get("description")
@@ -1279,8 +1207,8 @@ def create_app(
                 dataset_id,
                 version,
                 project_id=pid,
-            description=description,
-            cases=cases,
+                description=description,
+                cases=cases,
                 metadata=metadata,
                 now_ns=_optional_body_datetime_ns(body, "created_at"),
             )
@@ -1305,15 +1233,15 @@ def create_app(
         dependencies=read_deps,
     )
     async def get_dataset_version(
-        request: Request, dataset_id: str, version: str,
+        request: Request,
+        dataset_id: str,
+        version: str,
         project_id: str | None = None,
     ) -> dict[str, Any]:
         pid = _resolve_pid(request, project_id)
         v = get_store().get_dataset_version(dataset_id, version, pid)
         if v is None:
-            raise _reject_request(
-                404, f"dataset version {dataset_id!r}@{version!r} not found"
-            )
+            raise _reject_request(404, f"dataset version {dataset_id!r}@{version!r} not found")
         return v
 
     # -- experiments (Cycle 13): persisted A/B eval specs ---------------
@@ -1331,9 +1259,7 @@ def create_app(
         while stack:
             cur = stack.pop()
             if isinstance(cur, float) and not math.isfinite(cur):
-                raise _reject_request(
-                    422, "non-finite number in experiment spec"
-                ) from None
+                raise _reject_request(422, "non-finite number in experiment spec") from None
             if isinstance(cur, dict):
                 stack.extend(cur.values())
             elif isinstance(cur, list):
@@ -1345,9 +1271,7 @@ def create_app(
         re-run through the identical compare path."""
         cohorts = body.get("cohorts")
         if not isinstance(cohorts, dict):
-            raise _reject_request(
-                422, "cohorts: object with 'a' and 'b' required"
-            )
+            raise _reject_request(422, "cohorts: object with 'a' and 'b' required")
         side = cohorts.get(key)
         if not isinstance(side, dict):
             raise _reject_request(422, f"cohorts.{key}: object required")
@@ -1397,17 +1321,13 @@ def create_app(
         if dataset_version is not None:
             dataset_version = _eval_str(dataset_version, "dataset_version")
         if dataset_version is not None and dataset_id is None:
-            raise _reject_request(
-                422, "dataset_version requires dataset_id"
-            )
+            raise _reject_request(422, "dataset_version requires dataset_id")
         metadata = body.get("metadata")
         if metadata is not None and not isinstance(metadata, dict):
             raise _reject_request(422, "metadata: object required")
         status = body.get("status")
         if status is not None and status not in _EXPERIMENT_STATUSES:
-            raise _reject_request(
-                422, f"status: one of {list(_EXPERIMENT_STATUSES)}"
-            )
+            raise _reject_request(422, f"status: one of {list(_EXPERIMENT_STATUSES)}")
         created_ns = _optional_body_datetime_ns(body, "created_at")
         pid = _resolve_pid(request, _eval_project_id(body))
         get_store().upsert_experiment(
@@ -1425,9 +1345,7 @@ def create_app(
         if status is not None:
             # explicit lifecycle move (e.g. reopen after a run) —
             # recording a run sets 'completed' on its own
-            get_store().set_experiment_status(
-                experiment_id, str(status), project_id=pid
-            )
+            get_store().set_experiment_status(experiment_id, str(status), project_id=pid)
         return {
             "experiment_id": experiment_id,
             "project_id": pid,
@@ -1444,9 +1362,7 @@ def create_app(
         limit, offset = _page_params(limit, offset)
         pid = _resolve_pid(request, project_id)
         with METRICS.timer(M_QUERY_LATENCY):
-            items = get_store().list_experiments(
-                pid, limit=limit, offset=offset
-            )
+            items = get_store().list_experiments(pid, limit=limit, offset=offset)
         return {"items": items, "limit": limit, "offset": offset}
 
     @app.get(
@@ -1469,12 +1385,8 @@ def create_app(
         store = get_store()
         exp = store.get_experiment(experiment_id, pid)
         if exp is None:
-            raise _reject_request(
-                404, f"experiment {experiment_id!r} not found"
-            )
-        runs = store.list_experiment_results(
-            experiment_id, pid, limit=limit, offset=offset
-        )
+            raise _reject_request(404, f"experiment {experiment_id!r} not found")
+        runs = store.list_experiment_results(experiment_id, pid, limit=limit, offset=offset)
         return {
             **exp,
             "runs": runs,
@@ -1486,9 +1398,7 @@ def create_app(
         f"/{API_VERSION}/experiments/{{experiment_id}}/run",
         dependencies=[Depends(check_auth)],
     )
-    async def run_experiment(
-        experiment_id: str, request: Request
-    ) -> dict[str, Any]:
+    async def run_experiment(experiment_id: str, request: Request) -> dict[str, Any]:
         """Execute the stored spec through the SAME compare path as
         ``/v1/eval/compare`` (resolve cohorts → evaluate_traces →
         compare_runs → optional gate), then append the report to
@@ -1507,16 +1417,12 @@ def create_app(
         store = get_store()
         exp = store.get_experiment(experiment_id, pid)
         if exp is None:
-            raise _reject_request(
-                404, f"experiment {experiment_id!r} not found"
-            )
+            raise _reject_request(404, f"experiment {experiment_id!r} not found")
         specs = exp["evaluators"]
         if not specs:
             # unreachable via the API (PUT enforces 1..100) but a spec
             # written outside it must fail loudly, not run a null eval
-            raise _reject_request(
-                422, f"experiment {experiment_id!r} has no evaluators spec"
-            )
+            raise _reject_request(422, f"experiment {experiment_id!r} has no evaluators spec")
         cohorts = exp["cohorts"]
         label = _experiment_dataset_label(exp)
         a_ids = (cohorts.get("a") or {}).get("trace_ids") or []
@@ -1524,11 +1430,13 @@ def create_app(
         result = compare_runs(
             evaluate_traces(
                 _get_traces_or_404(a_ids, pid, request),
-                specs, dataset=label,
+                specs,
+                dataset=label,
             ),
             evaluate_traces(
                 _get_traces_or_404(b_ids, pid, request),
-                specs, dataset=label,
+                specs,
+                dataset=label,
             ),
         )
         gate = body.get("gate")
@@ -1575,8 +1483,7 @@ def create_app(
         if not isinstance(role, str) or role not in ROLES:
             raise _reject_request(422, f"role: one of {ROLES}")
         if projects is not None and (
-            not isinstance(projects, list)
-            or any(not isinstance(p, str) for p in projects)
+            not isinstance(projects, list) or any(not isinstance(p, str) for p in projects)
         ):
             raise _reject_request(422, "projects: list of strings required")
         ident = getattr(request.state, "lens_identity", None)
@@ -1584,13 +1491,11 @@ def create_app(
         # never unscoped (projects=None/[]) and never a foreign
         # project; otherwise key creation is a tenant escape hatch
         if (
-            ident is not None and ident.projects
-            and (not projects
-                 or any(p not in ident.projects for p in projects))
+            ident is not None
+            and ident.projects
+            and (not projects or any(p not in ident.projects for p in projects))
         ):
-            raise _reject_request(
-                403, "requested projects outside caller scope"
-            )
+            raise _reject_request(403, "requested projects outside caller scope")
         key_id, secret, hashed = generate_key()
         get_store().create_api_key(
             key_id,
@@ -1621,9 +1526,9 @@ def create_app(
         ident = getattr(request.state, "lens_identity", None)
         if ident is not None and ident.projects:
             # scoped admins see only keys fully inside their scope
-            keys = [k for k in keys
-                    if k["projects"]
-                    and all(p in ident.projects for p in k["projects"])]
+            keys = [
+                k for k in keys if k["projects"] and all(p in ident.projects for p in k["projects"])
+            ]
         return keys
 
     @app.delete(f"/{API_VERSION}/admin/keys/{{key_id}}", dependencies=admin_deps)
@@ -1631,23 +1536,21 @@ def create_app(
         ident = getattr(request.state, "lens_identity", None)
         if ident is not None and ident.projects:
             target = next(
-                (k for k in get_store().list_api_keys()
-                 if k["key_id"] == key_id), None,
+                (k for k in get_store().list_api_keys() if k["key_id"] == key_id),
+                None,
             )
             if target is None:
-                raise _reject_request(
-                    404, f"key {key_id!r} not found or already revoked")
-            if (not target["projects"]
-                    or any(p not in ident.projects
-                           for p in target["projects"])):
-                raise _reject_request(
-                    403, "key outside caller scope")
+                raise _reject_request(404, f"key {key_id!r} not found or already revoked")
+            if not target["projects"] or any(p not in ident.projects for p in target["projects"]):
+                raise _reject_request(403, "key outside caller scope")
         if not get_store().revoke_api_key(key_id, now_ns=wall_clock_ns()):
             raise _reject_request(404, f"key {key_id!r} not found or already revoked")
         ident = getattr(request.state, "lens_identity", None)
         _audit(
             ident.actor if ident else "unknown",
-            "key.revoke", key_id, "ok",
+            "key.revoke",
+            key_id,
+            "ok",
         )
         return {"key_id": key_id, "revoked": True}
 
@@ -1664,18 +1567,13 @@ def create_app(
         # trail is restricted to unscoped admins entirely
         ident = getattr(request.state, "lens_identity", None)
         if ident is not None and ident.projects:
-            raise _reject_request(
-                403, "audit trail requires an unscoped admin key")
+            raise _reject_request(403, "audit trail requires an unscoped admin key")
         if limit > 500 or limit < 1:
             raise _reject_request(422, "limit: 1..500")
         if offset < 0:
-            raise _reject_request(
-                422, "offset: non-negative integer required"
-            )
+            raise _reject_request(422, "offset: non-negative integer required")
         offset = _query_i64(offset, "offset")
-        return get_store().list_audit(
-            action=action, actor=actor, limit=limit, offset=offset
-        )
+        return get_store().list_audit(action=action, actor=actor, limit=limit, offset=offset)
 
     @app.post(f"/{API_VERSION}/admin/prune", dependencies=admin_deps)
     async def admin_prune(request: Request) -> dict[str, Any]:
@@ -1713,14 +1611,11 @@ def create_app(
                 or older_days < 0
                 or older_days > 106_000  # int64 ns ceiling ≈ 106,751 days
             ):
-                raise _reject_request(
-                    422, "older_than_days: finite number 0..106000 required")
+                raise _reject_request(422, "older_than_days: finite number 0..106000 required")
             cutoff = wall_clock_ns() - int(older_days * 86_400_000_000_000)
         else:
             raise _reject_request(422, "before or older_than_days required")
-        deleted = get_store().prune_traces(
-            before_ns=cutoff, project_id=pid
-        )
+        deleted = get_store().prune_traces(before_ns=cutoff, project_id=pid)
         ident = getattr(request.state, "lens_identity", None)
         _audit(
             ident.actor if ident else "unknown",
@@ -1734,7 +1629,8 @@ def create_app(
     # -- agentic ops (Cycle 07): loops, specialists, alerts, dashboard --
 
     @app.get(f"/{API_VERSION}/traces/{{trace_id}}/loops", dependencies=read_deps)
-    async def trace_loops(request: Request,
+    async def trace_loops(
+        request: Request,
         trace_id: str,
         project_id: str | None = None,
         repeat_threshold: int = 3,
@@ -1755,9 +1651,7 @@ def create_app(
         f"/{API_VERSION}/analyze/{{specialist}}/{{trace_id}}",
         dependencies=read_deps,
     )
-    async def run_analysis(
-        specialist: str, trace_id: str, request: Request
-    ) -> dict[str, Any]:
+    async def run_analysis(specialist: str, trace_id: str, request: Request) -> dict[str, Any]:
         """Run a registered specialist under explicit budgets.
 
         Body: {"budget": {...}, "context": {...}, "project_id": "..."}
@@ -1780,15 +1674,9 @@ def create_app(
             try:
                 out = cast(v)
             except (TypeError, ValueError, OverflowError):
-                raise _reject_request(
-                    422, f"budget.{field} must be a number"
-                ) from None
-            if (
-                isinstance(out, (int, float))
-                and (not math.isfinite(out) or out <= 0)
-            ):
-                raise _reject_request(
-                    422, f"budget.{field} must be a positive finite number")
+                raise _reject_request(422, f"budget.{field} must be a number") from None
+            if isinstance(out, (int, float)) and (not math.isfinite(out) or out <= 0):
+                raise _reject_request(422, f"budget.{field} must be a positive finite number")
             return out
 
         budget = AgentBudget(
@@ -1805,25 +1693,27 @@ def create_app(
         run_id = body.get("run_id")
         if run_id is not None and not isinstance(run_id, str):
             raise _reject_request(422, "run_id must be a string")
-        trace = _get_trace_or_404(
-            trace_id, _eval_project_id(body), request
-        )
+        trace = _get_trace_or_404(trace_id, _eval_project_id(body), request)
         try:
             run = await run_in_threadpool(
                 run_specialist,
-                specialist, trace, budget=budget, context=ctx,
+                specialist,
+                trace,
+                budget=budget,
+                context=ctx,
                 run_id=run_id or f"{specialist}:{trace_id}",
             )
         except (ValueError, TypeError, KeyError, ArithmeticError) as exc:
             # a malformed context value must not 500 — the boundary owns it
-            raise _reject_request(
-                422, f"specialist rejected context: {exc}"
-            ) from None
+            raise _reject_request(422, f"specialist rejected context: {exc}") from None
         return {
-            "run_id": run.run_id, "specialist": run.specialist,
-            "stop_reason": run.stop_reason, "iterations": run.iterations,
+            "run_id": run.run_id,
+            "specialist": run.specialist,
+            "stop_reason": run.stop_reason,
+            "iterations": run.iterations,
             "tokens_observed": run.tokens_observed,
-            "cancelled": run.cancelled, "findings": run.findings,
+            "cancelled": run.cancelled,
+            "findings": run.findings,
         }
 
     @app.post(f"/{API_VERSION}/alerts/evaluate", dependencies=read_deps)
@@ -1860,10 +1750,14 @@ def create_app(
         }
         # derived metrics (durations/cost/tokens/loops) resolve over a
         # bounded recent-trace window — ops/alerts.py documents each
-        metrics.update(resolve_metrics(
-            get_store(), pid, _registry(),
-            only={str(r.get("metric")) for r in rules if isinstance(r, dict)},
-        ))
+        metrics.update(
+            resolve_metrics(
+                get_store(),
+                pid,
+                _registry(),
+                only={str(r.get("metric")) for r in rules if isinstance(r, dict)},
+            )
+        )
         out = evaluate_rules([r for r in rules if isinstance(r, dict)], metrics)
         out["project_id"] = pid
         return out
@@ -1878,55 +1772,40 @@ def create_app(
 
         ident = getattr(request.state, "lens_identity", None)
         if ident is not None and ident.projects:
-            raise _reject_request(
-                403, "alert rules are global — an unscoped admin key "
-                     "is required")
+            raise _reject_request(403, "alert rules are global — an unscoped admin key is required")
         body = await _eval_body(request)
         rule = body.get("rule")
-        if not isinstance(rule, dict) or not isinstance(
-            rule.get("rule_id"), str
-        ):
-            raise _reject_request(
-                422, "rule: object with a string rule_id required")
+        if not isinstance(rule, dict) or not isinstance(rule.get("rule_id"), str):
+            raise _reject_request(422, "rule: object with a string rule_id required")
         path = cfg.data_dir / "alert-rules.json"
         # a saved file >100 rules would 422 every use_saved evaluation
         # forever — enforce the eval cap on writes too (replace ≠ grow)
         existing = load_rules(path)
-        if (not any(r["rule_id"] == rule["rule_id"] for r in existing)
-                and len(existing) >= 100):
-            raise _reject_request(
-                422, "saved rules cap is 100 — delete one first")
+        if not any(r["rule_id"] == rule["rule_id"] for r in existing) and len(existing) >= 100:
+            raise _reject_request(422, "saved rules cap is 100 — delete one first")
         rules = save_rule(path, rule)
         ident = getattr(request.state, "lens_identity", None)
-        _audit(ident.actor if ident else "anon",
-               "alert_rule.save", str(rule["rule_id"]), "ok", {})
+        _audit(ident.actor if ident else "anon", "alert_rule.save", str(rule["rule_id"]), "ok", {})
         return {"rules": rules, "path": str(path)}
 
-    @app.delete(
-        f"/{API_VERSION}/alerts/rules/{{rule_id}}", dependencies=admin_deps
-    )
+    @app.delete(f"/{API_VERSION}/alerts/rules/{{rule_id}}", dependencies=admin_deps)
     async def alerts_delete_rule(request: Request, rule_id: str) -> dict[str, Any]:
         """Delete a persisted rule — keeps the file under the eval cap."""
         from forge_lens.ops.alerts import delete_rule, load_rules
 
         ident = getattr(request.state, "lens_identity", None)
         if ident is not None and ident.projects:
-            raise _reject_request(
-                403, "alert rules are global — an unscoped admin key "
-                     "is required")
+            raise _reject_request(403, "alert rules are global — an unscoped admin key is required")
         path = cfg.data_dir / "alert-rules.json"
         if not any(r["rule_id"] == rule_id for r in load_rules(path)):
             raise _reject_request(404, "rule not found")
         rules = delete_rule(path, rule_id)
         ident = getattr(request.state, "lens_identity", None)
-        _audit(ident.actor if ident else "anon",
-               "alert_rule.delete", rule_id, "ok", {})
+        _audit(ident.actor if ident else "anon", "alert_rule.delete", rule_id, "ok", {})
         return {"rules": rules}
 
     @app.get(f"/{API_VERSION}/ops/summary", dependencies=read_deps)
-    async def ops_summary(
-        request: Request, project_id: str | None = None
-    ) -> dict[str, Any]:
+    async def ops_summary(request: Request, project_id: str | None = None) -> dict[str, Any]:
         """Operational dashboard data: store stats + recent failures +
         cost/token roll-up over the bounded recent window."""
         store = get_store()
@@ -1937,9 +1816,7 @@ def create_app(
             "project_id": pid,
             "stats": store.stats(project_id=pid),
             "recent_traces": len(traces),
-            "recent_failures": sorted(
-                (t["trace_id"] for t in failed), reverse=True
-            )[:50],
+            "recent_failures": sorted((t["trace_id"] for t in failed), reverse=True)[:50],
             "note": "bounded window (200 traces) — not a fleet-wide total",
         }
 
@@ -1958,8 +1835,7 @@ def create_app(
         projects = getattr(ident, "projects", None)
         scoped = sorted(projects) if projects else None
         if scoped is not None and len(scoped) == 1:
-            stats: dict[str, Any] | None = get_store().stats(
-                project_id=scoped[0])
+            stats: dict[str, Any] | None = get_store().stats(project_id=scoped[0])
         elif scoped:
             stats = None  # multi-project key: no per-project fan-in here
         else:

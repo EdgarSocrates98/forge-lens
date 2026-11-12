@@ -255,16 +255,14 @@ class LensTracer:
                 # unfingerprintable args dict is evidence, recorded
                 attrs["forge_lens.tool_args_unhashable"] = True
             else:
-                attrs["forge_lens.tool_args_sha256"] = hashlib.sha256(
-                    blob.encode()
-                ).hexdigest()[:16]
+                attrs["forge_lens.tool_args_sha256"] = hashlib.sha256(blob.encode()).hexdigest()[
+                    :16
+                ]
         if capture_args and arguments is not None:
             try:
                 params_json = json.dumps(arguments, default=str)
             except (TypeError, ValueError):
-                params_json = json.dumps(
-                    {"_forge_lens.unserializable": True}
-                )
+                params_json = json.dumps({"_forge_lens.unserializable": True})
             if len(params_json) > 4096:
                 # mid-string truncation would yield unparseable JSON —
                 # emit an explicit parseable marker instead
@@ -311,14 +309,10 @@ class LensTracer:
         """Finished once the root span has an end_time — or, when no
         root was registered (e.g. a continued remote trace whose remote
         parent never lands), once every span has ended."""
-        root = next(
-            (s for s in trace.spans if s.span_id == trace.root_span_id), None
-        )
+        root = next((s for s in trace.spans if s.span_id == trace.root_span_id), None)
         if root is not None:
             return root.end_time is not None
-        return bool(trace.spans) and all(
-            s.end_time is not None for s in trace.spans
-        )
+        return bool(trace.spans) and all(s.end_time is not None for s in trace.spans)
 
     def _drop(self, trace_id: str) -> None:
         self._pending.pop(trace_id, None)
@@ -465,9 +459,7 @@ def _finalize(trace: Trace) -> None:
         trace.ended_at = max(ended) if ended else None
     if any(s.status.code == StatusCode.ERROR for s in trace.spans):
         trace.status = Status(code=StatusCode.ERROR)
-    elif trace.spans and all(
-        s.status.code == StatusCode.OK for s in trace.spans
-    ):
+    elif trace.spans and all(s.status.code == StatusCode.OK for s in trace.spans):
         # all([]) is True — an empty trace observed nothing, so it must
         # stay unset rather than flush as ok (matches the TS SDK)
         trace.status = Status(code=StatusCode.OK)
@@ -514,6 +506,7 @@ def span(
         @span(kind=SpanKind.LLM)
         def call_model(...): ...
     """
+
     def decorator(fn: Callable[P, R]) -> Callable[P, R]:
         span_name = name or fn.__qualname__
 
@@ -578,12 +571,8 @@ def instrument_tool(
             @functools.wraps(f)
             async def async_wrapper(*args: P.args, **kw: P.kwargs) -> Any:
                 t = tracer or get_tracer()
-                arguments = (
-                    {"args": list(args), "kwargs": dict(kw)} if capture_args else None
-                )
-                with t.tool_call(
-                    tool_name, arguments=arguments, capture_args=capture_args
-                ):
+                arguments = {"args": list(args), "kwargs": dict(kw)} if capture_args else None
+                with t.tool_call(tool_name, arguments=arguments, capture_args=capture_args):
                     return await f(*args, **kw)
 
             return cast("Callable[P, R]", async_wrapper)
@@ -592,12 +581,8 @@ def instrument_tool(
             @functools.wraps(f)
             async def agen_wrapper(*args: P.args, **kw: P.kwargs) -> Any:
                 t = tracer or get_tracer()
-                arguments = (
-                    {"args": list(args), "kwargs": dict(kw)} if capture_args else None
-                )
-                with t.tool_call(
-                    tool_name, arguments=arguments, capture_args=capture_args
-                ):
+                arguments = {"args": list(args), "kwargs": dict(kw)} if capture_args else None
+                with t.tool_call(tool_name, arguments=arguments, capture_args=capture_args):
                     async for item in f(*args, **kw):
                         yield item
 
@@ -607,12 +592,8 @@ def instrument_tool(
             @functools.wraps(f)
             def gen_wrapper(*args: P.args, **kw: P.kwargs) -> Any:
                 t = tracer or get_tracer()
-                arguments = (
-                    {"args": list(args), "kwargs": dict(kw)} if capture_args else None
-                )
-                with t.tool_call(
-                    tool_name, arguments=arguments, capture_args=capture_args
-                ):
+                arguments = {"args": list(args), "kwargs": dict(kw)} if capture_args else None
+                with t.tool_call(tool_name, arguments=arguments, capture_args=capture_args):
                     yield from f(*args, **kw)
 
             return cast("Callable[P, R]", gen_wrapper)
@@ -620,12 +601,8 @@ def instrument_tool(
         @functools.wraps(f)
         def wrapper(*args: P.args, **kw: P.kwargs) -> R:
             t = tracer or get_tracer()
-            arguments = (
-                {"args": list(args), "kwargs": dict(kw)} if capture_args else None
-            )
-            with t.tool_call(
-                tool_name, arguments=arguments, capture_args=capture_args
-            ):
+            arguments = {"args": list(args), "kwargs": dict(kw)} if capture_args else None
+            with t.tool_call(tool_name, arguments=arguments, capture_args=capture_args):
                 return f(*args, **kw)
 
         return wrapper

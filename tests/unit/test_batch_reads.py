@@ -74,8 +74,7 @@ def _trace(
     """A small deterministic trace; ``hex_id`` is a 0-255 int → trace_id."""
     tid = f"{hex_id:032x}"
     spans = [
-        _span(tid, i + 1, parent=(f"{i:016x}" if i else None), error=error)
-        for i in range(n_spans)
+        _span(tid, i + 1, parent=(f"{i:016x}" if i else None), error=error) for i in range(n_spans)
     ]
     started = _T0 + timedelta(minutes=minutes_late)
     return Trace(
@@ -109,9 +108,7 @@ def test_get_traces_hydration_matches_get_trace(seeded: SQLiteTraceStore) -> Non
     got = seeded.get_traces("default", ids[:2])
     got_other = seeded.get_traces("other", [ids[2]])
     for tid, t in {**got, **got_other}.items():
-        single = seeded.get_trace(
-            tid, project_id=t.project_id if t else "default"
-        )
+        single = seeded.get_trace(tid, project_id=t.project_id if t else "default")
         if t is None or single is None:
             assert t is None
             assert single is None
@@ -129,9 +126,7 @@ def test_get_traces_missing_and_edge_ids(seeded: SQLiteTraceStore) -> None:
     assert got[missing] is None
     assert got["0" * 32] is None
     # lone-surrogate input: same "absent" verdict get_trace gives
-    assert seeded.get_traces("default", ["sur\ud800rogate"]) == {
-        "sur\ud800rogate": None
-    }
+    assert seeded.get_traces("default", ["sur\ud800rogate"]) == {"sur\ud800rogate": None}
     assert seeded.get_trace("sur\ud800rogate", project_id="default") is None
     assert seeded.get_traces("default", []) == {}
     # wrong project → absent, same as get_trace
@@ -145,12 +140,8 @@ def test_get_traces_wildcard_latest_last_seen(tmp_path: Path) -> None:
     older = _trace(0xB, project_id="p1")
     newer = _trace(0xB, project_id="p2", minutes_late=60)
     older.trace_id = newer.trace_id = tid
-    older.spans = [
-        s.model_copy(update={"trace_id": tid}) for s in older.spans
-    ]
-    newer.spans = [
-        s.model_copy(update={"trace_id": tid}) for s in newer.spans
-    ]
+    older.spans = [s.model_copy(update={"trace_id": tid}) for s in older.spans]
+    newer.spans = [s.model_copy(update={"trace_id": tid}) for s in newer.spans]
     store.upsert_trace(older)
     store.upsert_trace(newer)
     single = store.get_trace(tid)
@@ -185,9 +176,7 @@ class _CountingConn:
 
     def execute(self, sql: str, parameters: object = ()) -> sqlite3.Cursor:  # type: ignore[override]
         if sql.lstrip().upper().startswith("SELECT"):
-            object.__setattr__(
-                self, "selects", object.__getattribute__(self, "selects") + 1
-            )
+            object.__setattr__(self, "selects", object.__getattribute__(self, "selects") + 1)
         return object.__getattribute__(self, "_conn").execute(sql, parameters)
 
     def __enter__(self) -> _CountingConn:
@@ -212,17 +201,13 @@ def test_get_traces_constant_query_count(tmp_path: Path) -> None:
     counter = _count(store)
     ids = [f"{i:032x}" for i in range(1, 4)]
     counter.selects = 0
-    got = store.get_traces(
-        "default", ids + [f"{i:032x}" for i in range(0x100, 0x100 + 497)]
-    )
+    got = store.get_traces("default", ids + [f"{i:032x}" for i in range(0x100, 0x100 + 497)])
     assert counter.selects == 2  # one traces query + one spans query
     assert sum(t is not None for t in got.values()) == 3
     # chunk boundary: >500 ids → one extra chunk pair, still constant;
     # an all-miss chunk may skip its spans query (fewer, never more)
     counter.selects = 0
-    got = store.get_traces(
-        "default", ids + [f"{i:032x}" for i in range(0x200, 0x200 + 700)]
-    )
+    got = store.get_traces("default", ids + [f"{i:032x}" for i in range(0x200, 0x200 + 700)])
     assert counter.selects <= 4
     assert sum(t is not None for t in got.values()) == 3
     store.close()
@@ -425,10 +410,7 @@ def test_experiment_detail_and_audit_and_session_graph_pagination(
     assert client.get("/v1/admin/audit", params={"limit": 0}).status_code == 422
     assert client.get("/v1/admin/audit", params={"limit": 501}).status_code == 422
     assert client.get("/v1/admin/audit", params={"offset": -1}).status_code == 422
-    assert (
-        client.get("/v1/graph/sessions/x", params={"limit": 0}).status_code
-        == 422
-    )
+    assert client.get("/v1/graph/sessions/x", params={"limit": 0}).status_code == 422
     # sane pagination unchanged
     assert client.get("/v1/experiments/e1", params={"limit": 1}).status_code == 200
     assert client.get("/v1/admin/audit", params={"limit": 5}).status_code == 200
@@ -443,8 +425,11 @@ def test_install_receipt_write_failure_is_clean(tmp_path: Path) -> None:
     blocker = tmp_path / "data-dir"
     blocker.write_text("not a directory")
     out = lifecycle.install(
-        blocker, profile="recommended", source="local",
-        files=[], ts_ns=1,
+        blocker,
+        profile="recommended",
+        source="local",
+        files=[],
+        ts_ns=1,
     )
     assert out["ok"] is False
     assert "receipt write failed" in out["error"]
@@ -474,8 +459,11 @@ def test_install_uninstall_happy_path_still_ok(tmp_path: Path) -> None:
     now also reports ``ok``/``failed`` for partial-removal honesty."""
     d = tmp_path / "d"
     out = lifecycle.install(
-        d, profile="recommended", source="local",
-        files=["managed/x.txt"], ts_ns=1,
+        d,
+        profile="recommended",
+        source="local",
+        files=["managed/x.txt"],
+        ts_ns=1,
     )
     assert out["ok"] is True
     managed = d / "managed" / "x.txt"

@@ -41,8 +41,7 @@ def _ts(value: Any) -> datetime | None:
     rather than letting an epoch value pose as a real observation."""
     if isinstance(value, str):
         try:
-            return ensure_aware(datetime.fromisoformat(
-                value.replace("Z", "+00:00")))
+            return ensure_aware(datetime.fromisoformat(value.replace("Z", "+00:00")))
         except ValueError:
             pass
     return None
@@ -58,7 +57,8 @@ def parse_session(path: Path, *, project_id: str = "claude-code") -> Trace | Non
     if path.stat().st_size > _MAX_SESSION_BYTES:
         raise ValueError(
             f"session file exceeds {_MAX_SESSION_BYTES // (1 << 20)} MiB — "
-            "split it or export a range")
+            "split it or export a range"
+        )
     events: list[dict[str, Any]] = []
     session_id: str | None = None
     with path.open(encoding="utf-8", errors="replace") as fh:
@@ -106,19 +106,20 @@ def parse_session(path: Path, *, project_id: str = "claude-code") -> Trace | Non
             attrs["claude.usage_scope"] = "assistant_turn"
         if call.get("model"):
             attrs["gen_ai.request.model"] = call["model"]
-        spans.append(Span(
-            trace_id=tid,
-            span_id=f"{n:016x}",
-            name=f"tool {name}",
-            kind=SpanKind.TOOL,
-            # unparseable ts falls back to epoch AND is flagged —
-            # the marker distinguishes it from a real 1970 event
-            start_time=ts or _EPOCH, end_time=end_ts or ts or _EPOCH,
-            status=Status(code=(
-                StatusCode.ERROR if is_error else StatusCode.OK
-            )),
-            attributes=attrs,
-        ))
+        spans.append(
+            Span(
+                trace_id=tid,
+                span_id=f"{n:016x}",
+                name=f"tool {name}",
+                kind=SpanKind.TOOL,
+                # unparseable ts falls back to epoch AND is flagged —
+                # the marker distinguishes it from a real 1970 event
+                start_time=ts or _EPOCH,
+                end_time=end_ts or ts or _EPOCH,
+                status=Status(code=(StatusCode.ERROR if is_error else StatusCode.OK)),
+                attributes=attrs,
+            )
+        )
     if not spans:
         return None
     return Trace(
@@ -127,11 +128,13 @@ def parse_session(path: Path, *, project_id: str = "claude-code") -> Trace | Non
         spans=spans,
         started_at=spans[0].start_time,
         ended_at=spans[-1].end_time,
-        status=Status(code=(
-            StatusCode.ERROR
-            if any(s.status.code is StatusCode.ERROR for s in spans)
-            else StatusCode.OK
-        )),
+        status=Status(
+            code=(
+                StatusCode.ERROR
+                if any(s.status.code is StatusCode.ERROR for s in spans)
+                else StatusCode.OK
+            )
+        ),
         source=TraceSource(system="claude_code", sdk_name="jsonl-adapter"),
         session_id=session_id,
         project_id=project_id,
@@ -170,41 +173,40 @@ def _extract_tool_calls(
             if isinstance(content, list):
                 first = True
                 for c in content:
-                    if (isinstance(c, dict)
-                            and c.get("type") == "tool_use"):
-                        calls.append({
-                            "id": c.get("id")
-                            if isinstance(c.get("id"), str) else None,
-                            "name": c.get("name")
-                            if isinstance(c.get("name"), str) else None,
-                            "input": c.get("input"),
-                            "ts": ts,
-                            "usage": usage if first and isinstance(
-                                usage, dict) else None,
-                            "model": model if first and isinstance(
-                                model, str) else None,
-                        })
+                    if isinstance(c, dict) and c.get("type") == "tool_use":
+                        calls.append(
+                            {
+                                "id": c.get("id") if isinstance(c.get("id"), str) else None,
+                                "name": c.get("name") if isinstance(c.get("name"), str) else None,
+                                "input": c.get("input"),
+                                "ts": ts,
+                                "usage": usage if first and isinstance(usage, dict) else None,
+                                "model": model if first and isinstance(model, str) else None,
+                            }
+                        )
                         first = False
         elif t == "user":
             msg = ev.get("message")
             content = msg.get("content") if isinstance(msg, dict) else None
             if isinstance(content, list):
                 for c in content:
-                    if (isinstance(c, dict)
-                            and c.get("type") == "tool_result"
-                            and isinstance(c.get("tool_use_id"), str)):
-                        results[c["tool_use_id"]] = (
-                            bool(c.get("is_error")), ts)
+                    if (
+                        isinstance(c, dict)
+                        and c.get("type") == "tool_result"
+                        and isinstance(c.get("tool_use_id"), str)
+                    ):
+                        results[c["tool_use_id"]] = (bool(c.get("is_error")), ts)
         # flat shape: top-level tool_use / tool_name (hook exports)
         if t == "tool_use" or isinstance(ev.get("tool_name"), str):
-            calls.append({
-                "id": ev.get("id") if isinstance(ev.get("id"), str)
-                else None,
-                "name": ev.get("tool_name") or ev.get("name"),
-                "input": ev.get("input"),
-                "ts": ts,
-                "usage": None,
-                "model": None,
-                "is_error": bool(ev.get("is_error")),
-            })
+            calls.append(
+                {
+                    "id": ev.get("id") if isinstance(ev.get("id"), str) else None,
+                    "name": ev.get("tool_name") or ev.get("name"),
+                    "input": ev.get("input"),
+                    "ts": ts,
+                    "usage": None,
+                    "model": None,
+                    "is_error": bool(ev.get("is_error")),
+                }
+            )
     return calls, results

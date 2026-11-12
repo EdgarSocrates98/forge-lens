@@ -130,7 +130,7 @@ TRACE_CMDS = [
 # not-found contract, exercised only by that sweep
 NOT_FOUND_EXTRA = [
     ["analyze", "trace_investigator"],  # analyze <specialist> <trace_id>
-    ["eval-suggest"],                    # eval-suggest <trace_id>...
+    ["eval-suggest"],  # eval-suggest <trace_id>...
 ]
 
 # --db-bearing commands for the unopenable-store sweep
@@ -151,8 +151,11 @@ DB_CMDS: list[list[str]] = [
     ["experiments", "show", "x"],
     ["experiments", "run", "x"],
     [
-        "experiments", "create", "x",
-        "--evaluators-json", '[{"name": "error_free"}]',
+        "experiments",
+        "create",
+        "x",
+        "--evaluators-json",
+        '[{"name": "error_free"}]',
         "--cohorts-json",
         '{"a": {"trace_ids": ["t"]}, "b": {"trace_ids": ["t"]}}',
     ],
@@ -215,9 +218,7 @@ def _risky_trace() -> Trace:
 
 
 @pytest.fixture
-def seeded_db(
-    tmp_path: Path, synthetic_trace: Trace, monkeypatch: pytest.MonkeyPatch
-) -> Path:
+def seeded_db(tmp_path: Path, synthetic_trace: Trace, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Closed on-disk store — commands reopen it via ``--db``.
 
     chdir + env scrub keeps repo-root ``.forge-lens/`` and ambient
@@ -231,11 +232,18 @@ def seeded_db(
     store.upsert_trace(_loop_trace())
     store.upsert_trace(_risky_trace())
     store.upsert_dataset(
-        "ds-1", project_id="default", name="demo", task="answer questions",
-        metadata={"owner": "evals"}, now_ns=1_000,
+        "ds-1",
+        project_id="default",
+        name="demo",
+        task="answer questions",
+        metadata={"owner": "evals"},
+        now_ns=1_000,
     )
     store.upsert_dataset_version(
-        "ds-1", "v1", project_id="default", description="first",
+        "ds-1",
+        "v1",
+        project_id="default",
+        description="first",
         cases=[{"case_id": "c1"}],
     )
     store.close()
@@ -263,21 +271,55 @@ def _assert_invalid(res: Any, needle: str | None = None) -> None:
 # -- meta: help/version/usage -------------------------------------------------
 
 _ALL_PATHS = [
-    ["init"], ["serve"], ["ingest"], ["import-claude"], ["import-otel"],
-    ["traces", "list"], ["traces", "show"], ["sessions"], ["tools"],
-    ["graph"], ["cost"], ["capabilities"], ["stats"], ["failure"],
-    ["loops"], ["efficiency"], ["recommendations"], ["correlate"],
-    ["security"], ["replay"], ["incident"], ["eval"], ["doctor"],
-    ["analyze"], ["eval-suggest"], ["audit"],
-    ["datasets", "list"], ["datasets", "show"],
-    ["keys", "create"], ["keys", "list"], ["keys", "revoke"],
-    ["experiments", "create"], ["experiments", "list"],
-    ["experiments", "show"], ["experiments", "run"],
-    ["alerts", "list"], ["alerts", "save"], ["alerts", "delete"],
+    ["init"],
+    ["serve"],
+    ["ingest"],
+    ["import-claude"],
+    ["import-otel"],
+    ["traces", "list"],
+    ["traces", "show"],
+    ["sessions"],
+    ["tools"],
+    ["graph"],
+    ["cost"],
+    ["capabilities"],
+    ["stats"],
+    ["failure"],
+    ["loops"],
+    ["efficiency"],
+    ["recommendations"],
+    ["correlate"],
+    ["security"],
+    ["replay"],
+    ["incident"],
+    ["eval"],
+    ["doctor"],
+    ["analyze"],
+    ["eval-suggest"],
+    ["audit"],
+    ["datasets", "list"],
+    ["datasets", "show"],
+    ["keys", "create"],
+    ["keys", "list"],
+    ["keys", "revoke"],
+    ["experiments", "create"],
+    ["experiments", "list"],
+    ["experiments", "show"],
+    ["experiments", "run"],
+    ["alerts", "list"],
+    ["alerts", "save"],
+    ["alerts", "delete"],
     ["alerts", "evaluate"],
-    ["intel", "efficiency"], ["intel", "correlate"], ["intel", "regress"],
-    ["prune"], ["archive"], ["mcp-serve"], ["install-status"],
-    ["install"], ["install", "status"], ["install", "doctor"],
+    ["intel", "efficiency"],
+    ["intel", "correlate"],
+    ["intel", "regress"],
+    ["prune"],
+    ["archive"],
+    ["mcp-serve"],
+    ["install-status"],
+    ["install"],
+    ["install", "status"],
+    ["install", "doctor"],
     ["install", "uninstall"],
 ]
 
@@ -293,8 +335,19 @@ def test_every_command_help_exits_0(cmd: list[str]) -> None:
 def test_root_help_and_version() -> None:
     r = runner.invoke(app, ["--help"])
     assert r.exit_code == 0
-    for name in ("init", "serve", "ingest", "traces", "keys", "datasets",
-                 "prune", "archive", "mcp-serve", "install", "doctor"):
+    for name in (
+        "init",
+        "serve",
+        "ingest",
+        "traces",
+        "keys",
+        "datasets",
+        "prune",
+        "archive",
+        "mcp-serve",
+        "install",
+        "doctor",
+    ):
         assert name in r.output
     r = runner.invoke(app, ["--version"])
     assert r.exit_code == 0
@@ -303,8 +356,7 @@ def test_root_help_and_version() -> None:
 
 @pytest.mark.parametrize(
     "cmd",
-    [[], ["traces"], ["keys"], ["datasets"], ["experiments"],
-     ["alerts"], ["intel"]],
+    [[], ["traces"], ["keys"], ["datasets"], ["experiments"], ["alerts"], ["intel"]],
 )
 def test_bare_group_shows_help_exit_2(cmd: list[str]) -> None:
     """no_args_is_help prints usage — observed contract is exit 2."""
@@ -316,8 +368,7 @@ def test_bare_group_shows_help_exit_2(cmd: list[str]) -> None:
 def test_unknown_command_and_flag_exit_2(empty_db: Path) -> None:
     r = runner.invoke(app, ["nonsense-cmd"])
     assert r.exit_code == 2
-    r = runner.invoke(app, ["traces", "list", "--db", str(empty_db),
-                            "--bogus"])
+    r = runner.invoke(app, ["traces", "list", "--db", str(empty_db), "--bogus"])
     assert r.exit_code == 2
     r = runner.invoke(app, ["traces", "list", "--db"])  # missing value
     assert r.exit_code == 2
@@ -373,9 +424,7 @@ def test_doctor_malformed_config_reports_fail_not_crash(tmp_path: Path) -> None:
 # -- serve (never binds — uvicorn.run always mocked or unreached) ----------------
 
 
-def test_serve_missing_uvicorn_exits_2(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_serve_missing_uvicorn_exits_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setitem(sys.modules, "uvicorn", None)
     r = runner.invoke(app, ["serve", "--db", str(tmp_path / "x.db")])
@@ -383,43 +432,32 @@ def test_serve_missing_uvicorn_exits_2(
     assert "uvicorn not installed" in r.stderr
 
 
-def test_serve_port_range_validated(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_serve_port_range_validated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Out-of-range --port is rejected before uvicorn ever runs."""
     import uvicorn
 
     monkeypatch.chdir(tmp_path)
     called: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        uvicorn, "run", lambda *a, **kw: called.append(kw))
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: called.append(kw))
     for bad in ("-1", "65536", "70000"):
-        r = runner.invoke(
-            app, ["serve", "--db", str(tmp_path / "x.db"), "--port", bad]
-        )
+        r = runner.invoke(app, ["serve", "--db", str(tmp_path / "x.db"), "--port", bad])
         assert r.exit_code == 2, bad
         assert "invalid --port" in r.stderr
     assert called == []  # never reached the bind
 
     # port 0 = ephemeral bind is a legitimate value
-    r = runner.invoke(
-        app, ["serve", "--db", str(tmp_path / "x.db"), "--port", "0"]
-    )
+    r = runner.invoke(app, ["serve", "--db", str(tmp_path / "x.db"), "--port", "0"])
     assert r.exit_code == 0, r.output
     assert "ephemeral" in r.output
     assert called[0]["port"] == 0  # uvicorn.run(app, host=…, port=0)
 
 
-def test_serve_happy_path_echoes_banner(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_serve_happy_path_echoes_banner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import uvicorn
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: None)
-    r = runner.invoke(
-        app, ["serve", "--db", str(tmp_path / "x.db"), "--port", "7777"]
-    )
+    r = runner.invoke(app, ["serve", "--db", str(tmp_path / "x.db"), "--port", "7777"])
     assert r.exit_code == 0, r.output
     assert "listening on http://127.0.0.1:7777" in r.output
     assert "POST /v1/otlp/traces" in r.output
@@ -436,17 +474,12 @@ def test_ingest_native_envelope(tmp_path: Path) -> None:
     # envelope project_id="fixture" rehomes the default-projected trace
     r = runner.invoke(app, ["traces", "list", "--db", str(db)])
     assert "no traces stored" in r.output
-    r = runner.invoke(
-        app, ["traces", "list", "--db", str(db), "--project", "fixture"]
-    )
+    r = runner.invoke(app, ["traces", "list", "--db", str(db), "--project", "fixture"])
     assert "c" * 32 in r.output
 
 
 def test_ingest_file_errors_stay_formatted(tmp_path: Path) -> None:
-    r = runner.invoke(
-        app, ["ingest", str(tmp_path / "nope.json"),
-              "--db", str(tmp_path / "x.db")]
-    )
+    r = runner.invoke(app, ["ingest", str(tmp_path / "nope.json"), "--db", str(tmp_path / "x.db")])
     assert r.exit_code == 1
     assert "ingest failed" in r.stderr
     assert "Traceback" not in r.output
@@ -459,8 +492,7 @@ def test_ingest_file_errors_stay_formatted(tmp_path: Path) -> None:
 
     r = runner.invoke(
         app,
-        ["ingest", str(FIXTURE_NATIVE), "--db", str(tmp_path / "x.db"),
-         "--format", "yaml"],
+        ["ingest", str(FIXTURE_NATIVE), "--db", str(tmp_path / "x.db"), "--format", "yaml"],
     )
     _assert_invalid(r, "unknown --format")
 
@@ -483,9 +515,7 @@ def test_import_claude_round_trip_and_failures(tmp_path: Path) -> None:
     assert r.exit_code == 0, r.output
     assert "imported 1 span(s)" in r.output
 
-    r = runner.invoke(
-        app, ["import-claude", str(tmp_path / "nope.jsonl"), "--db", str(db)]
-    )
+    r = runner.invoke(app, ["import-claude", str(tmp_path / "nope.jsonl"), "--db", str(db)])
     _assert_invalid(r, "file not found")
 
     empty = tmp_path / "empty.jsonl"
@@ -494,9 +524,7 @@ def test_import_claude_round_trip_and_failures(tmp_path: Path) -> None:
     assert r.exit_code == 1  # nothing usable — operational, not invalid
     assert "nothing imported" in r.stderr
 
-    r = runner.invoke(
-        app, ["import-claude", str(tmp_path), "--db", str(db)]
-    )
+    r = runner.invoke(app, ["import-claude", str(tmp_path), "--db", str(db)])
     _assert_invalid(r, "cannot read")
 
 
@@ -506,19 +534,14 @@ def test_import_otel_repo_example(tmp_path: Path) -> None:
     r = runner.invoke(app, ["import-otel", str(EXAMPLE_OTLP), "--db", str(db)])
     assert r.exit_code == 0, r.output
     assert "imported 1 trace(s), 3 span(s)" in r.output
-    r = runner.invoke(
-        app, ["traces", "show", "aaaabbbbccccddddeeeeffff00001111",
-              "--db", str(db)]
-    )
+    r = runner.invoke(app, ["traces", "show", "aaaabbbbccccddddeeeeffff00001111", "--db", str(db)])
     assert r.exit_code == 0
     assert "agent-run" in r.output
 
 
 def test_import_otel_input_errors(tmp_path: Path) -> None:
     db = tmp_path / "x.db"
-    r = runner.invoke(
-        app, ["import-otel", str(tmp_path / "nope.json"), "--db", str(db)]
-    )
+    r = runner.invoke(app, ["import-otel", str(tmp_path / "nope.json"), "--db", str(db)])
     _assert_invalid(r, "file not found")
 
     f = tmp_path / "bad.json"
@@ -540,31 +563,22 @@ def test_traces_list_success_paths(seeded_db: Path, synthetic_trace: Trace) -> N
     assert synthetic_trace.trace_id in r.output
     assert "errors=1" in r.output
 
-    r = runner.invoke(
-        app, ["traces", "list", "--db", str(seeded_db), "--json"]
-    )
+    r = runner.invoke(app, ["traces", "list", "--db", str(seeded_db), "--json"])
     items = json.loads(r.stdout)
     assert isinstance(items, list)
     assert len(items) == 3
-    assert {i["trace_id"] for i in items} == {
-        synthetic_trace.trace_id, LOOP_TID, RISKY_TID}
+    assert {i["trace_id"] for i in items} == {synthetic_trace.trace_id, LOOP_TID, RISKY_TID}
 
     # filters compose cleanly
     r = runner.invoke(
-        app, ["traces", "list", "--db", str(seeded_db),
-              "--status", "error", "--json"]
+        app, ["traces", "list", "--db", str(seeded_db), "--status", "error", "--json"]
     )
-    assert [i["trace_id"] for i in json.loads(r.stdout)] == [
-        synthetic_trace.trace_id]
+    assert [i["trace_id"] for i in json.loads(r.stdout)] == [synthetic_trace.trace_id]
     r = runner.invoke(
-        app, ["traces", "list", "--db", str(seeded_db),
-              "--session", "sess-homo", "--json"]
+        app, ["traces", "list", "--db", str(seeded_db), "--session", "sess-homo", "--json"]
     )
     assert [i["trace_id"] for i in json.loads(r.stdout)] == [LOOP_TID]
-    r = runner.invoke(
-        app, ["traces", "list", "--db", str(seeded_db),
-              "--project", "other"]
-    )
+    r = runner.invoke(app, ["traces", "list", "--db", str(seeded_db), "--project", "other"])
     assert "no traces stored" in r.output
 
 
@@ -582,39 +596,30 @@ def test_traces_list_success_paths(seeded_db: Path, synthetic_trace: Trace) -> N
         ["--min-tokens", str(2**63)],
     ],
 )
-def test_traces_list_rejects_out_of_range(
-    seeded_db: Path, args: list[str]
-) -> None:
+def test_traces_list_rejects_out_of_range(seeded_db: Path, args: list[str]) -> None:
     r = runner.invoke(app, ["traces", "list", "--db", str(seeded_db), *args])
     _assert_invalid(r, "invalid")
 
 
 def test_traces_list_limit_zero_and_huge_ok(seeded_db: Path) -> None:
-    r = runner.invoke(
-        app, ["traces", "list", "--db", str(seeded_db), "--limit", "0"]
-    )
+    r = runner.invoke(app, ["traces", "list", "--db", str(seeded_db), "--limit", "0"])
     assert r.exit_code == 0
     assert "no traces stored" in r.output  # limit 0 = list nothing
 
     r = runner.invoke(
-        app, ["traces", "list", "--db", str(seeded_db),
-              "--limit", str(2**63 - 1), "--json"]
+        app, ["traces", "list", "--db", str(seeded_db), "--limit", str(2**63 - 1), "--json"]
     )
     assert r.exit_code == 0
     assert len(json.loads(r.stdout)) == 3
 
 
 def test_traces_show(seeded_db: Path, synthetic_trace: Trace) -> None:
-    r = runner.invoke(
-        app, ["traces", "show", synthetic_trace.trace_id,
-              "--db", str(seeded_db)]
-    )
+    r = runner.invoke(app, ["traces", "show", synthetic_trace.trace_id, "--db", str(seeded_db)])
     assert r.exit_code == 0, r.output
     assert "llm gpt-test" in r.output
     assert "!tool web_search" in r.output or "tool web_search" in r.output
     r = runner.invoke(
-        app, ["traces", "show", synthetic_trace.trace_id,
-              "--db", str(seeded_db), "--json"]
+        app, ["traces", "show", synthetic_trace.trace_id, "--db", str(seeded_db), "--json"]
     )
     out = json.loads(r.stdout)
     assert out["trace_id"] == synthetic_trace.trace_id
@@ -647,8 +652,7 @@ def test_sessions_and_tools(seeded_db: Path) -> None:
     assert items[0]["session_id"] == "sess-homo"
     # negative --limit clamps (API parity) — divergent from traces list,
     # recorded in the module docstring
-    r = runner.invoke(
-        app, ["sessions", "--db", str(seeded_db), "--limit", "-5"])
+    r = runner.invoke(app, ["sessions", "--db", str(seeded_db), "--limit", "-5"])
     assert r.exit_code == 0
     assert "no sessions recorded" in r.output
 
@@ -690,10 +694,7 @@ def test_capabilities_no_store_needed(tmp_path: Path, monkeypatch) -> None:
 def test_analysis_commands_json_parse(
     seeded_db: Path, synthetic_trace: Trace, cmd: list[str]
 ) -> None:
-    r = runner.invoke(
-        app, [*cmd, synthetic_trace.trace_id, "--db", str(seeded_db),
-              "--json"]
-    )
+    r = runner.invoke(app, [*cmd, synthetic_trace.trace_id, "--db", str(seeded_db), "--json"])
     assert r.exit_code == 0, (cmd, r.output)
     out = json.loads(r.stdout)
     # every per-trace payload names the subject trace — graph calls it
@@ -708,39 +709,34 @@ def test_analysis_commands_json_parse(
 def test_analysis_commands_human_render(
     seeded_db: Path, synthetic_trace: Trace, cmd: list[str]
 ) -> None:
-    r = runner.invoke(
-        app, [*cmd, synthetic_trace.trace_id, "--db", str(seeded_db)]
-    )
+    r = runner.invoke(app, [*cmd, synthetic_trace.trace_id, "--db", str(seeded_db)])
     assert r.exit_code == 0, (cmd, r.output)
     assert r.output.strip()
     assert "Traceback" not in r.output
 
 
 def test_failure_and_loops_semantics(seeded_db: Path) -> None:
-    r = runner.invoke(
-        app, ["loops", LOOP_TID, "--db", str(seeded_db), "--json"])
+    r = runner.invoke(app, ["loops", LOOP_TID, "--db", str(seeded_db), "--json"])
     assert r.exit_code == 0
     kinds = {f["kind"] for f in json.loads(r.stdout)["findings"]}
     assert "repeated_identical_tool" in kinds
 
-    r = runner.invoke(
-        app, ["security", RISKY_TID, "--db", str(seeded_db)])
+    r = runner.invoke(app, ["security", RISKY_TID, "--db", str(seeded_db)])
     assert r.exit_code == 0
     assert "risky_tool" in r.output
 
 
 def test_eval_budget_flag(seeded_db: Path, synthetic_trace: Trace) -> None:
     r = runner.invoke(
-        app, ["eval", synthetic_trace.trace_id, "--db", str(seeded_db),
-              "--budget-ms", "1000", "--json"]
+        app,
+        ["eval", synthetic_trace.trace_id, "--db", str(seeded_db), "--budget-ms", "1000", "--json"],
     )
     assert r.exit_code == 0, r.output
     names = {e["evaluator"] for e in json.loads(r.stdout)}
     assert {"error_free", "tool_success", "latency_budget"} <= names
     # a nonsense budget degrades to n/a, never a crash
     r = runner.invoke(
-        app, ["eval", synthetic_trace.trace_id, "--db", str(seeded_db),
-              "--budget-ms", "-5"]
+        app, ["eval", synthetic_trace.trace_id, "--db", str(seeded_db), "--budget-ms", "-5"]
     )
     assert r.exit_code == 0
     assert "n/a" in r.output
@@ -753,13 +749,11 @@ def test_datasets_list_show(seeded_db: Path) -> None:
     r = runner.invoke(app, ["datasets", "list", "--db", str(seeded_db)])
     assert r.exit_code == 0
     assert "ds-1" in r.output
-    r = runner.invoke(
-        app, ["datasets", "show", "ds-1", "--db", str(seeded_db), "--json"])
+    r = runner.invoke(app, ["datasets", "show", "ds-1", "--db", str(seeded_db), "--json"])
     out = json.loads(r.stdout)
     assert out["dataset_id"] == "ds-1"
     assert out["versions"][0]["version"] == "v1"
-    r = runner.invoke(
-        app, ["datasets", "show", "nope", "--db", str(seeded_db)])
+    r = runner.invoke(app, ["datasets", "show", "nope", "--db", str(seeded_db)])
     _assert_invalid(r, "not found")
 
 
@@ -767,23 +761,18 @@ def test_datasets_list_empty(empty_db: Path) -> None:
     r = runner.invoke(app, ["datasets", "list", "--db", str(empty_db)])
     assert r.exit_code == 0
     assert "no datasets recorded" in r.output
-    assert json.loads(
-        runner.invoke(
-            app, ["datasets", "list", "--db", str(empty_db), "--json"]
-        ).stdout
-    ) == []
+    assert (
+        json.loads(runner.invoke(app, ["datasets", "list", "--db", str(empty_db), "--json"]).stdout)
+        == []
+    )
 
 
 def test_keys_lifecycle(tmp_path: Path) -> None:
     db = tmp_path / "k.db"
-    r = runner.invoke(app, ["keys", "create", "--name", "ci",
-                            "--db", str(db)])
+    r = runner.invoke(app, ["keys", "create", "--name", "ci", "--db", str(db)])
     assert r.exit_code == 0, r.output
     assert "secret:" in r.output  # shown once — only the hash persists
-    key_id = next(
-        ln.split()[-1] for ln in r.output.splitlines()
-        if ln.startswith("key_id:")
-    )
+    key_id = next(ln.split()[-1] for ln in r.output.splitlines() if ln.startswith("key_id:"))
 
     r = runner.invoke(app, ["keys", "list", "--db", str(db)])
     assert r.exit_code == 0
@@ -804,10 +793,7 @@ def test_keys_input_validation(tmp_path: Path) -> None:
     db = tmp_path / "k.db"
     r = runner.invoke(app, ["keys", "create", "--db", str(db)])
     assert r.exit_code == 2  # required --name missing → usage error
-    r = runner.invoke(
-        app, ["keys", "create", "--name", "x", "--role", "root",
-              "--db", str(db)]
-    )
+    r = runner.invoke(app, ["keys", "create", "--name", "x", "--role", "root", "--db", str(db)])
     _assert_invalid(r, "invalid role")
     r = runner.invoke(app, ["keys", "revoke", "--db", str(db)])
     assert r.exit_code == 2  # missing positional arg
@@ -827,9 +813,7 @@ def test_db_pointing_at_directory_clean_error(
     _assert_invalid(r, "cannot open store")
 
 
-def test_db_pointing_at_non_sqlite_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_db_pointing_at_non_sqlite_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     bogus = tmp_path / "notadb.db"
     bogus.write_text("hello")
@@ -837,9 +821,7 @@ def test_db_pointing_at_non_sqlite_file(
     _assert_invalid(r, "cannot open store")
 
 
-def test_malformed_env_is_invalid_input(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_malformed_env_is_invalid_input(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("FORGE_LENS_MAX_PAYLOAD_BYTES", "abc")
     r = runner.invoke(app, ["traces", "list", "--db", str(tmp_path / "x.db")])
@@ -852,41 +834,32 @@ def test_malformed_env_is_invalid_input(
 
 def test_prune_argument_validation(tmp_path: Path) -> None:
     db = tmp_path / "x.db"
+    _assert_invalid(runner.invoke(app, ["prune", "--db", str(db)]), "no cutoff")
     _assert_invalid(
-        runner.invoke(app, ["prune", "--db", str(db)]), "no cutoff")
+        runner.invoke(app, ["prune", "--db", str(db), "--before", "2030-01-01", "--days", "1"]),
+        "exclusive",
+    )
+    _assert_invalid(runner.invoke(app, ["prune", "--db", str(db), "--days", "-1"]), "non-negative")
     _assert_invalid(
-        runner.invoke(app, ["prune", "--db", str(db), "--before",
-                            "2030-01-01", "--days", "1"]),
-        "exclusive")
-    _assert_invalid(
-        runner.invoke(app, ["prune", "--db", str(db), "--days", "-1"]),
-        "non-negative")
-    _assert_invalid(
-        runner.invoke(app, ["prune", "--db", str(db), "--before", "nope"]),
-        "invalid --before")
+        runner.invoke(app, ["prune", "--db", str(db), "--before", "nope"]), "invalid --before"
+    )
 
 
 def test_prune_empty_and_confirm_abort(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, empty_db: Path
 ) -> None:
-    r = runner.invoke(
-        app, ["prune", "--db", str(empty_db), "--days", "0", "--yes"])
+    r = runner.invoke(app, ["prune", "--db", str(empty_db), "--days", "0", "--yes"])
     assert r.exit_code == 0
     assert "pruned 0 trace(s)" in r.output
 
     # declining the confirmation aborts (exit 1), deletes nothing
-    r = runner.invoke(
-        app, ["prune", "--db", str(empty_db), "--days", "0"], input="n\n")
+    r = runner.invoke(app, ["prune", "--db", str(empty_db), "--days", "0"], input="n\n")
     assert r.exit_code == 1
     assert "Aborted" in r.output
 
 
-def test_prune_deletes_old_traces(
-    seeded_db: Path, synthetic_trace: Trace
-) -> None:
-    r = runner.invoke(
-        app, ["prune", "--db", str(seeded_db), "--before", "2030-01-01",
-              "--yes"])
+def test_prune_deletes_old_traces(seeded_db: Path, synthetic_trace: Trace) -> None:
+    r = runner.invoke(app, ["prune", "--db", str(seeded_db), "--before", "2030-01-01", "--yes"])
     assert r.exit_code == 0, r.output
     assert "pruned 3 trace(s)" in r.output
     r = runner.invoke(app, ["traces", "list", "--db", str(seeded_db)])
@@ -898,13 +871,11 @@ def test_archive_requires_before_and_out(tmp_path: Path) -> None:
     assert r.exit_code == 2  # missing required options → usage error
 
 
-def test_archive_empty_store_and_overwrite_guard(
-    tmp_path: Path, empty_db: Path
-) -> None:
+def test_archive_empty_store_and_overwrite_guard(tmp_path: Path, empty_db: Path) -> None:
     out = tmp_path / "archive.ndjson"
     r = runner.invoke(
-        app, ["archive", "--db", str(empty_db), "--before", "2030-01-01",
-              "--out", str(out)])
+        app, ["archive", "--db", str(empty_db), "--before", "2030-01-01", "--out", str(out)]
+    )
     assert r.exit_code == 0, r.output
     assert "archived 0 trace(s)" in r.output
     assert out.exists()
@@ -912,20 +883,21 @@ def test_archive_empty_store_and_overwrite_guard(
 
     # refusing to clobber a prior archive without --append
     r = runner.invoke(
-        app, ["archive", "--db", str(empty_db), "--before", "2030-01-01",
-              "--out", str(out)])
+        app, ["archive", "--db", str(empty_db), "--before", "2030-01-01", "--out", str(out)]
+    )
     _assert_invalid(r, "refusing to truncate")
     r = runner.invoke(
-        app, ["archive", "--db", str(empty_db), "--before", "2030-01-01",
-              "--out", str(out), "--append"])
+        app,
+        ["archive", "--db", str(empty_db), "--before", "2030-01-01", "--out", str(out), "--append"],
+    )
     assert r.exit_code == 0
 
 
 def test_archive_exports_then_deletes(seeded_db: Path, tmp_path: Path) -> None:
     out = tmp_path / "a.ndjson"
     r = runner.invoke(
-        app, ["archive", "--db", str(seeded_db), "--before", "2030-01-01",
-              "--out", str(out)])
+        app, ["archive", "--db", str(seeded_db), "--before", "2030-01-01", "--out", str(out)]
+    )
     assert r.exit_code == 0
     assert "archived 3 trace(s)" in r.output
     lines = out.read_text().splitlines()
@@ -934,18 +906,49 @@ def test_archive_exports_then_deletes(seeded_db: Path, tmp_path: Path) -> None:
 
     # nothing older than a past cutoff → idempotent no-op
     r = runner.invoke(
-        app, ["archive", "--db", str(seeded_db), "--before", "2020-01-01",
-              "--out", str(tmp_path / "b.ndjson")])
+        app,
+        [
+            "archive",
+            "--db",
+            str(seeded_db),
+            "--before",
+            "2020-01-01",
+            "--out",
+            str(tmp_path / "b.ndjson"),
+        ],
+    )
     assert "archived 0 trace(s)" in r.output
 
     # --delete without --yes aborts; with --yes prunes only exported ids
     r = runner.invoke(
-        app, ["archive", "--db", str(seeded_db), "--before", "2030-01-01",
-              "--out", str(tmp_path / "c.ndjson"), "--delete"], input="n\n")
+        app,
+        [
+            "archive",
+            "--db",
+            str(seeded_db),
+            "--before",
+            "2030-01-01",
+            "--out",
+            str(tmp_path / "c.ndjson"),
+            "--delete",
+        ],
+        input="n\n",
+    )
     assert r.exit_code == 1
     r = runner.invoke(
-        app, ["archive", "--db", str(seeded_db), "--before", "2030-01-01",
-              "--out", str(tmp_path / "d.ndjson"), "--delete", "--yes"])
+        app,
+        [
+            "archive",
+            "--db",
+            str(seeded_db),
+            "--before",
+            "2030-01-01",
+            "--out",
+            str(tmp_path / "d.ndjson"),
+            "--delete",
+            "--yes",
+        ],
+    )
     assert r.exit_code == 0
     assert "pruned 3 trace(s)" in r.output
     r = runner.invoke(app, ["traces", "list", "--db", str(seeded_db)])
@@ -974,8 +977,7 @@ def test_mcp_serve_eof_exits_cleanly(seeded_db: Path) -> None:
 
 def test_install_verbs_smoke(tmp_path: Path) -> None:
     d = tmp_path / "data"
-    r = runner.invoke(
-        app, ["install", "--data-dir", str(d), "--dry-run"])
+    r = runner.invoke(app, ["install", "--data-dir", str(d), "--dry-run"])
     assert r.exit_code == 0
     assert json.loads(r.stdout)["dry_run"] is True
     assert not d.exists()
@@ -989,8 +991,7 @@ def test_install_verbs_smoke(tmp_path: Path) -> None:
     assert r.exit_code == 1
     assert json.loads(r.stdout)["ok"] is False
 
-    r = runner.invoke(
-        app, ["install", "--data-dir", str(d), "--profile", "minimal"])
+    r = runner.invoke(app, ["install", "--data-dir", str(d), "--profile", "minimal"])
     assert r.exit_code == 0
     r = runner.invoke(app, ["install", "status", "--data-dir", str(d)])
     assert json.loads(r.stdout)["installed"] is True

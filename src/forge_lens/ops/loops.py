@@ -51,14 +51,16 @@ def detect_loops(trace: Trace, *, repeat_threshold: int = 3) -> dict[str, Any]:
     if len(cur) >= repeat_threshold:
         runs.append(cur)
     for run in sorted(runs, key=lambda r: (-len(r), r[0])):
-        findings.append({
-            "kind": "repeated_identical_tool",
-            "classification": "heuristic",
-            "span_ids": run,
-            "count": len(run),
-            "detail": "same tool called with identical arguments — a loop"
-                      " unless the repetition is intentional polling",
-        })
+        findings.append(
+            {
+                "kind": "repeated_identical_tool",
+                "classification": "heuristic",
+                "span_ids": run,
+                "count": len(run),
+                "detail": "same tool called with identical arguments — a loop"
+                " unless the repetition is intentional polling",
+            }
+        )
 
     # 2. retry loops: same tool name, changing args, all error
     by_name: dict[str, list[Span]] = {}
@@ -66,16 +68,16 @@ def detect_loops(trace: Trace, *, repeat_threshold: int = 3) -> dict[str, Any]:
         by_name.setdefault(s.name, []).append(s)
     for name in sorted(by_name):
         group = by_name[name]
-        if len(group) >= repeat_threshold and all(
-            s.status.code.value == "error" for s in group
-        ):
-            findings.append({
-                "kind": "retry_loop",
-                "classification": "heuristic",
-                "span_ids": [s.span_id for s in group],
-                "count": len(group),
-                "detail": f"tool {name!r} failed {len(group)}x in one trace",
-            })
+        if len(group) >= repeat_threshold and all(s.status.code.value == "error" for s in group):
+            findings.append(
+                {
+                    "kind": "retry_loop",
+                    "classification": "heuristic",
+                    "span_ids": [s.span_id for s in group],
+                    "count": len(group),
+                    "detail": f"tool {name!r} failed {len(group)}x in one trace",
+                }
+            )
 
     # 3. cyclic delegation: agent spans re-entering the same name
     agents = [s for s in trace.spans if s.kind is SpanKind.AGENT]
@@ -85,29 +87,36 @@ def detect_loops(trace: Trace, *, repeat_threshold: int = 3) -> dict[str, Any]:
     for name in sorted(agent_names):
         ids = agent_names[name]
         if len(ids) >= repeat_threshold:
-            findings.append({
-                "kind": "repeated_agent_span",
-                "classification": "heuristic",
-                "span_ids": ids,
-                "count": len(ids),
-                "detail": f"agent span {name!r} re-entered {len(ids)}x —"
-                          " possible cyclic delegation",
-            })
+            findings.append(
+                {
+                    "kind": "repeated_agent_span",
+                    "classification": "heuristic",
+                    "span_ids": ids,
+                    "count": len(ids),
+                    "detail": f"agent span {name!r} re-entered {len(ids)}x —"
+                    " possible cyclic delegation",
+                }
+            )
 
     # 4. no-progress: repetition + errors — only when errored spans
     # actually exist; an empty evidence list is not a finding
     errored = [s for s in tools if s.status.code.value == "error"]
     if findings and errored:
-        findings.append({
-            "kind": "no_progress_signal",
-            "classification": "heuristic",
-            "span_ids": [s.span_id for s in errored],
-            "count": len(errored),
-            "detail": "repetition co-occurs with failures — progress is"
-                      " unproven, not disproven",
-        })
+        findings.append(
+            {
+                "kind": "no_progress_signal",
+                "classification": "heuristic",
+                "span_ids": [s.span_id for s in errored],
+                "count": len(errored),
+                "detail": "repetition co-occurs with failures — progress is"
+                " unproven, not disproven",
+            }
+        )
     findings.sort(key=lambda f: (f["kind"], f["span_ids"][0] if f["span_ids"] else ""))
-    return {"trace_id": trace.trace_id, "findings": findings,
-            "classification": "heuristic",
-            "note": "repetition is evidence, not a verdict — legitimate"
-                    " polling/batching looks identical"}
+    return {
+        "trace_id": trace.trace_id,
+        "findings": findings,
+        "classification": "heuristic",
+        "note": "repetition is evidence, not a verdict — legitimate"
+        " polling/batching looks identical",
+    }

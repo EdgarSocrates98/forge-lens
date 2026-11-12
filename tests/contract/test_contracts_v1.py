@@ -42,11 +42,9 @@ def test_span_id_format_enforced() -> None:
     from datetime import UTC, datetime
 
     with pytest.raises(ValidationError):
-        Span(trace_id="not-hex", span_id="x" * 16, name="s",
-             start_time=datetime.now(UTC))
+        Span(trace_id="not-hex", span_id="x" * 16, name="s", start_time=datetime.now(UTC))
     with pytest.raises(ValidationError):
-        Span(trace_id="a" * 32, span_id="short", name="s",
-             start_time=datetime.now(UTC))
+        Span(trace_id="a" * 32, span_id="short", name="s", start_time=datetime.now(UTC))
 
 
 def test_unknown_fields_preserved() -> None:
@@ -54,8 +52,11 @@ def test_unknown_fields_preserved() -> None:
     from datetime import UTC, datetime
 
     s = Span(
-        trace_id="a" * 32, span_id="b" * 16, name="s",
-        start_time=datetime.now(UTC), future_field_v2={"x": 1},
+        trace_id="a" * 32,
+        span_id="b" * 16,
+        name="s",
+        start_time=datetime.now(UTC),
+        future_field_v2={"x": 1},
     )
     dumped = s.model_dump()
     assert dumped["future_field_v2"] == {"x": 1}

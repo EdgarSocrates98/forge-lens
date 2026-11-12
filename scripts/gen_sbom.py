@@ -5,6 +5,7 @@ Reads installed distributions (importlib.metadata) so the SBOM is
 generated from what's *installed*, not a hand-maintained list.
 Usage: python scripts/gen_sbom.py > sbom.json
 """
+
 from __future__ import annotations
 
 import json
@@ -27,21 +28,33 @@ def main() -> None:
         if not name:
             continue
         purl = _purl(name, d.version)
-        comps.append({
-            "type": "library",
-            "bom-ref": purl,
-            "name": name,
-            "version": d.version,
-            "purl": purl,
-        })
-    print(json.dumps({
-        "bomFormat": "CycloneDX", "specVersion": "1.5",
-        "version": 1,
-        "metadata": {"component": {
-            "type": "application", "name": "forge-lens-fl",
-            "version": version("forge-lens-fl")}},
-        "components": comps,
-    }, indent=2))
+        comps.append(
+            {
+                "type": "library",
+                "bom-ref": purl,
+                "name": name,
+                "version": d.version,
+                "purl": purl,
+            }
+        )
+    print(
+        json.dumps(
+            {
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.5",
+                "version": 1,
+                "metadata": {
+                    "component": {
+                        "type": "application",
+                        "name": "forge-lens-fl",
+                        "version": version("forge-lens-fl"),
+                    }
+                },
+                "components": comps,
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

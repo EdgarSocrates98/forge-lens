@@ -28,8 +28,7 @@ def trace_efficiency(trace: Trace) -> dict[str, Any]:
             out_toks += u.output_tokens or 0
     retries = 0
     for s in trace.spans:
-        r = s.attributes.get("gen_ai.tool.call.retry_count") or \
-            s.attributes.get("retry.count") or 0
+        r = s.attributes.get("gen_ai.tool.call.retry_count") or s.attributes.get("retry.count") or 0
         try:
             retries += int(r)
         except (TypeError, ValueError):
@@ -67,8 +66,10 @@ def fleet_efficiency(traces: list[Trace]) -> dict[str, Any]:
         "tool_calls_per_success": tool_calls / len(ok) if ok else None,
         "retry_overhead": retries / n if n else None,
         "error_rate": (
-            sum(r["error_spans"] for r in rows) /
-            max(1, sum(r["tool_calls"] + r["llm_calls"] for r in rows))
-        ) if n else None,
+            sum(r["error_spans"] for r in rows)
+            / max(1, sum(r["tool_calls"] + r["llm_calls"] for r in rows))
+        )
+        if n
+        else None,
         "note": "None = signal absent, not zero",
     }

@@ -25,9 +25,7 @@ def _attrs() -> dict:
 
 def test_sensitive_keys_redacted() -> None:
     report = SanitizeReport()
-    out = sanitize_attributes(
-        _attrs(), report, capture=CaptureLevel.FULL, max_chars=4096
-    )
+    out = sanitize_attributes(_attrs(), report, capture=CaptureLevel.FULL, max_chars=4096)
     assert out["openai.api_key"] == "[REDACTED:key]"
     assert out["auth"]["access_token"] == "[REDACTED:key]"
     assert report.redacted_keys == 2
@@ -57,9 +55,7 @@ def test_metric_token_keys_are_not_redacted() -> None:
 
 def test_metadata_capture_drops_content_and_masks_email() -> None:
     report = SanitizeReport()
-    out = sanitize_attributes(
-        _attrs(), report, capture=CaptureLevel.METADATA, max_chars=4096
-    )
+    out = sanitize_attributes(_attrs(), report, capture=CaptureLevel.METADATA, max_chars=4096)
     assert out["input.value"]["_forge_lens.dropped"] is True
     assert report.dropped_content == 1
     assert out["prompt"] == "call me at [MASKED:email] please"
@@ -224,9 +220,7 @@ def test_status_message_and_names_scrubbed(synthetic_trace: Trace) -> None:
     key = "sk-ant-" + "a" * 30
     trace.spans[0].status.message = f"auth failed: key {key} rejected"
     trace.spans[0].name = f"call {key}"
-    trace.spans[0].events = [
-        SpanEvent(name=f"failed with {key}", time=datetime.now(tz=UTC))
-    ]
+    trace.spans[0].events = [SpanEvent(name=f"failed with {key}", time=datetime.now(tz=UTC))]
     trace.status.message = f"top-level: {key}"
     trace.session_id = f"sess-{key}"
     trace.source.system = f"svc-{key}"
@@ -264,9 +258,7 @@ def test_depth_limit_drop_is_counted() -> None:
     deep: dict = {"a": 1}
     for _ in range(12):
         deep = {"n": deep}
-    out = sanitize_attributes(
-        {"deep": deep}, report, capture=CaptureLevel.FULL, max_chars=4096
-    )
+    out = sanitize_attributes({"deep": deep}, report, capture=CaptureLevel.FULL, max_chars=4096)
     assert "[DROPPED:depth-limit]" in repr(out)
     assert report.dropped_content > 0
 
@@ -275,43 +267,128 @@ def test_sensitive_key_denylist_covers_credential_families() -> None:
     """Credential attribute names must redact at the default metadata
     capture — anchored so lookalike words are never collateral."""
     sensitive = [
-        "signing_key", "ssh_key", "session_key", "hmac_key",
-        "encryption_key", "master_key", "db.signing.key", "license_key",
-        "auth_key", "client_key", "service_account_key", "pgp.key",
-        "passphrase", "my_passphrase", "wallet.pass-phrase",
-        "pin", "user_pin", "card.pin", "pin_code", "pin.code",
-        "pinCode", "pinNumber", "pinHash", "cardPin", "user.pinCode",
-        "otp", "login_otp", "otp.code", "otp_code", "otp.secret",
-        "otp_number", "otp.number", "otpCode", "otpValue",
+        "signing_key",
+        "ssh_key",
+        "session_key",
+        "hmac_key",
+        "encryption_key",
+        "master_key",
+        "db.signing.key",
+        "license_key",
+        "auth_key",
+        "client_key",
+        "service_account_key",
+        "pgp.key",
+        "passphrase",
+        "my_passphrase",
+        "wallet.pass-phrase",
+        "pin",
+        "user_pin",
+        "card.pin",
+        "pin_code",
+        "pin.code",
+        "pinCode",
+        "pinNumber",
+        "pinHash",
+        "cardPin",
+        "user.pinCode",
+        "otp",
+        "login_otp",
+        "otp.code",
+        "otp_code",
+        "otp.secret",
+        "otp_number",
+        "otp.number",
+        "otpCode",
+        "otpValue",
         # canonical RFC 6238/4226 field names + prefixed forms
-        "totp", "hotp", "totp_code", "loginOtp", "myOtp", "deviceOtp",
-        "cvv", "cvv2", "card_cvc", "payment.cvc", "cvc3",
-        "cvv22", "cvc123", "cvv_code", "cvc_number",
-        "cvvNumber", "cvvCode", "cvcNo", "cvvValue", "cvcHash",
-        "card_number", "cardNumber", "card.num", "card_numbers",
+        "totp",
+        "hotp",
+        "totp_code",
+        "loginOtp",
+        "myOtp",
+        "deviceOtp",
+        "cvv",
+        "cvv2",
+        "card_cvc",
+        "payment.cvc",
+        "cvc3",
+        "cvv22",
+        "cvc123",
+        "cvv_code",
+        "cvc_number",
+        "cvvNumber",
+        "cvvCode",
+        "cvcNo",
+        "cvvValue",
+        "cvcHash",
+        "card_number",
+        "cardNumber",
+        "card.num",
+        "card_numbers",
         "card_no",
-        "security_code", "security.code",
-        "social_security_number", "social_security",
-        "socialSecurityNumber", "socialSecurityNo",
-        "aws_key", "aws_keys", "kms_key", "signing_keys",
-        "wallet_key", "wallet.keys",
+        "security_code",
+        "security.code",
+        "social_security_number",
+        "social_security",
+        "socialSecurityNumber",
+        "socialSecurityNo",
+        "aws_key",
+        "aws_keys",
+        "kms_key",
+        "signing_keys",
+        "wallet_key",
+        "wallet.keys",
         # auth/verification code family
-        "auth_code", "authCode", "mfa_code", "passcode", "pass_code",
-        "verification_code", "recovery_code", "backup_code",
-        "activation_code", "access_code", "login_code",
-        "confirm_code", "confirmation_code", "reset_code",
+        "auth_code",
+        "authCode",
+        "mfa_code",
+        "passcode",
+        "pass_code",
+        "verification_code",
+        "recovery_code",
+        "backup_code",
+        "activation_code",
+        "access_code",
+        "login_code",
+        "confirm_code",
+        "confirmation_code",
+        "reset_code",
         "one_time_code",
         # seed/recovery phrases + bare mnemonic
-        "seed_phrase", "seedphrase", "recovery_phrase",
-        "mnemonic_phrase", "mnemonic", "mnemonics",
-        "access_tokens", "refresh.tokens", "id_tokens",
-        "accessTokens", "refreshTokens", "idTokens",
-        "session_tokens", "sessionTokens", "auth_tokens", "authTokens",
-        "api_tokens", "apiTokens", "bearer_tokens", "bearerTokens",
-        "csrf_tokens", "jwt.tokens", "oauth_tokens", "oauthTokens",
+        "seed_phrase",
+        "seedphrase",
+        "recovery_phrase",
+        "mnemonic_phrase",
+        "mnemonic",
+        "mnemonics",
+        "access_tokens",
+        "refresh.tokens",
+        "id_tokens",
+        "accessTokens",
+        "refreshTokens",
+        "idTokens",
+        "session_tokens",
+        "sessionTokens",
+        "auth_tokens",
+        "authTokens",
+        "api_tokens",
+        "apiTokens",
+        "bearer_tokens",
+        "bearerTokens",
+        "csrf_tokens",
+        "jwt.tokens",
+        "oauth_tokens",
+        "oauthTokens",
         # plural token sets mirror the *key credential namespaces
-        "privateTokens", "clientTokens", "masterTokens", "signingTokens",
-        "ssh_tokens", "hmacTokens", "encryption_tokens", "secretTokens",
+        "privateTokens",
+        "clientTokens",
+        "masterTokens",
+        "signingTokens",
+        "ssh_tokens",
+        "hmacTokens",
+        "encryption_tokens",
+        "secretTokens",
     ]
     for key in sensitive:
         assert _is_sensitive_key(key), f"{key!r} must redact"
@@ -319,48 +396,115 @@ def test_sensitive_key_denylist_covers_credential_families() -> None:
 
 def test_sensitive_key_denylist_false_positives_stay_clear() -> None:
     harmless = [
-        "monkey", "donkey", "turkey", "keyboard",
-        "spinner", "shipping", "spin", "pinned.version", "keepin",
-        "stop", "topic", "worktop",
-        "service", "device", "invoice",
-        "input_tokens", "output_tokens", "total_tokens",
-        "llm.usage.prompt_tokens", "cardinality", "standard",
+        "monkey",
+        "donkey",
+        "turkey",
+        "keyboard",
+        "spinner",
+        "shipping",
+        "spin",
+        "pinned.version",
+        "keepin",
+        "stop",
+        "topic",
+        "worktop",
+        "service",
+        "device",
+        "invoice",
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "llm.usage.prompt_tokens",
+        "cardinality",
+        "standard",
         # metric-counter lookalikes of the plural-token pair pattern
-        "valid_tokens", "invalid_tokens", "paid_tokens", "rapid_tokens",
-        "xaccess_tokens", "reaccess.tokens",
+        "valid_tokens",
+        "invalid_tokens",
+        "paid_tokens",
+        "rapid_tokens",
+        "xaccess_tokens",
+        "reaccess.tokens",
         # camelCase lookalikes — the left anchor still applies
-        "validTokens", "paidTokens", "xaccessTokens",
-        "rapidTokens", "capitalTokens", "xauthTokens",
-        "invalidSessionTokens", "validSessionTokens",
-        "authenticTokens", "xjwt_tokens", "oauth_tokens_count",
-        "xprivateTokens", "invalidClientTokens",
+        "validTokens",
+        "paidTokens",
+        "xaccessTokens",
+        "rapidTokens",
+        "capitalTokens",
+        "xauthTokens",
+        "invalidSessionTokens",
+        "validSessionTokens",
+        "authenticTokens",
+        "xjwt_tokens",
+        "oauth_tokens_count",
+        "xprivateTokens",
+        "invalidClientTokens",
         # non-credential `*_code` telemetry/domains — the enumeration
         # exists precisely to spare these
-        "error_code", "status_code", "http.status_code", "exit_code",
-        "response_code", "discount_code", "discountCode", "promoCode",
-        "promo_code", "barcode", "unicode", "zip_code", "postal_code",
-        "country_code", "currency_code", "area_code", "morse_code",
-        "qr_code", "product_code", "region_code", "bypass_code",
+        "error_code",
+        "status_code",
+        "http.status_code",
+        "exit_code",
+        "response_code",
+        "discount_code",
+        "discountCode",
+        "promoCode",
+        "promo_code",
+        "barcode",
+        "unicode",
+        "zip_code",
+        "postal_code",
+        "country_code",
+        "currency_code",
+        "area_code",
+        "morse_code",
+        "qr_code",
+        "product_code",
+        "region_code",
+        "bypass_code",
         "compass.code",
         # phrase-family lookalikes
-        "catchphrase", "paraphrase", "mnemonicDevices",
+        "catchphrase",
+        "paraphrase",
+        "mnemonicDevices",
         # otp stop-words + embedded-substring lookalikes
-        "terrapin", "coupon", "myotic", "stotp", "xwallet.key",
+        "terrapin",
+        "coupon",
+        "myotic",
+        "stotp",
+        "xwallet.key",
         # legitimate telemetry `*key` names — OTel semconv included
         "messaging.kafka.message.key",
         "messaging.rabbitmq.message.routing_key",
-        "partition_key", "primary_key", "sort_key", "hash_key",
-        "lookup_key", "cache_key", "correlation_key", "message_key",
-        "idempotency_key", "public_key", "wireguard.key",
+        "partition_key",
+        "primary_key",
+        "sort_key",
+        "hash_key",
+        "lookup_key",
+        "cache_key",
+        "correlation_key",
+        "message_key",
+        "idempotency_key",
+        "public_key",
+        "wireguard.key",
         # pin/otp counters, not credentials
-        "pin_count", "pin_retries", "login.pin_retries",
-        "otp_count", "auth.otp_attempts", "cvv_count",
+        "pin_count",
+        "pin_retries",
+        "login.pin_retries",
+        "otp_count",
+        "auth.otp_attempts",
+        "cvv_count",
         # card/security lookalikes
-        "discard_number", "wildcard.number", "card_number_count",
-        "security_code_review", "mysecurity_code", "cardano",
+        "discard_number",
+        "wildcard.number",
+        "card_number_count",
+        "security_code_review",
+        "mysecurity_code",
+        "cardano",
         "social_security_reform",
         # `aws`/`kms` inside a longer word, or non-credential `*key`
-        "xaws.key", "awaken", "monkeys",
+        "xaws.key",
+        "awaken",
+        "monkeys",
     ]
     for key in harmless:
         assert not _is_sensitive_key(key), f"{key!r} must stay clear"
@@ -423,8 +567,6 @@ def test_redact_export_depth_cap_and_identity_values() -> None:
 
     # an identity KEY holding a credential still loses it — the
     # exemption covers e-mail masking only, not the value patterns
-    out = redact_export(
-        {"request_id": "req sk-ant-oat01-SECRET-VALUE-9f8e7d6c5b4a"}
-    )
+    out = redact_export({"request_id": "req sk-ant-oat01-SECRET-VALUE-9f8e7d6c5b4a"})
     assert "sk-ant" not in out["request_id"]
     assert "[REDACTED:anthropic-key]" in out["request_id"]

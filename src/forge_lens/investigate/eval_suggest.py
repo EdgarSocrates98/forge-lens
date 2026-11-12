@@ -126,10 +126,7 @@ _TEMPLATES: dict[FailureCategory, tuple[dict[str, Any], ...]] = {
             "kind": "evaluator_spec",
             "name": "task_completion",
             "params": {},
-            "rationale": (
-                "cancelled runs never complete — task_completion fails "
-                "them directly"
-            ),
+            "rationale": ("cancelled runs never complete — task_completion fails them directly"),
         },
         {
             "kind": "evaluator_spec",
@@ -168,10 +165,7 @@ _TEMPLATES: dict[FailureCategory, tuple[dict[str, Any], ...]] = {
             "kind": "dataset_case",
             "name": "provider_throttle",
             "params": {},
-            "rationale": (
-                "replay a 429 — assert backoff/degrade behavior instead "
-                "of hard failure"
-            ),
+            "rationale": ("replay a 429 — assert backoff/degrade behavior instead of hard failure"),
         },
         {
             "kind": "evaluator_spec",
@@ -187,16 +181,14 @@ _TEMPLATES: dict[FailureCategory, tuple[dict[str, Any], ...]] = {
             "params": {},
             "params_required": ("max_duration_ms",),
             "rationale": (
-                "timeout failure — a latency budget codifies the "
-                "deadline as an eval gate"
+                "timeout failure — a latency budget codifies the deadline as an eval gate"
             ),
         },
         {
             "kind": "evaluator_spec",
             "name": "task_completion",
             "params": {},
-            "rationale": "timed-out runs must still be counted complete "
-            "or failed — never silent",
+            "rationale": "timed-out runs must still be counted complete or failed — never silent",
         },
     ),
     FailureCategory.TOOL_ERROR: (
@@ -204,8 +196,7 @@ _TEMPLATES: dict[FailureCategory, tuple[dict[str, Any], ...]] = {
             "kind": "evaluator_spec",
             "name": "tool_success",
             "params": {},
-            "rationale": "tool errors — tool_success tracks the failing "
-            "fraction directly",
+            "rationale": "tool errors — tool_success tracks the failing fraction directly",
         },
         {
             "kind": "evaluator_spec",
@@ -231,8 +222,7 @@ _TEMPLATES: dict[FailureCategory, tuple[dict[str, Any], ...]] = {
             "params": {},
             "params_required": ("max_total_tokens",),
             "rationale": (
-                "when the error is context-size driven, a token budget "
-                "fails oversized prompts"
+                "when the error is context-size driven, a token budget fails oversized prompts"
             ),
         },
     ),
@@ -253,20 +243,14 @@ _TEMPLATES: dict[FailureCategory, tuple[dict[str, Any], ...]] = {
             "kind": "evaluator_spec",
             "name": "task_completion",
             "params": {},
-            "rationale": (
-                "truncated runs never end — task_completion fails them "
-                "directly"
-            ),
+            "rationale": ("truncated runs never end — task_completion fails them directly"),
         },
         {
             "kind": "evaluator_spec",
             "name": "latency_budget",
             "params": {},
             "params_required": ("max_duration_ms",),
-            "rationale": (
-                "if truncation was a host deadline, a latency budget "
-                "codifies it"
-            ),
+            "rationale": ("if truncation was a host deadline, a latency budget codifies it"),
         },
     ),
     FailureCategory.CYCLE: (
@@ -328,13 +312,9 @@ def suggest_evaluators(
             )
             if key in merged:
                 prev = merged[key]
-                prev["evidence"]["traces"] = sorted(
-                    set(prev["evidence"]["traces"]) | set(traces)
-                )
+                prev["evidence"]["traces"] = sorted(set(prev["evidence"]["traces"]) | set(traces))
                 prev["evidence"]["count"] = len(prev["evidence"]["traces"])
-                prev["evidence"]["recurring"] = (
-                    prev["evidence"]["count"] >= 2
-                )
+                prev["evidence"]["recurring"] = prev["evidence"]["count"] >= 2
                 if cat.value not in prev["evidence"]["categories"]:
                     prev["evidence"]["categories"].append(cat.value)
                     prev["evidence"]["categories"].sort()
@@ -349,9 +329,7 @@ def suggest_evaluators(
                 "classification": "candidate",
             }
 
-    suggestions = sorted(
-        merged.values(), key=lambda s: (s["kind"], s["name"])
-    )
+    suggestions = sorted(merged.values(), key=lambda s: (s["kind"], s["name"]))
     return {
         "suggestions": suggestions,
         "note": (

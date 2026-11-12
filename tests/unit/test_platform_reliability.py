@@ -139,9 +139,7 @@ class TestFilesystemPaths:
         assert ro.stats()["traces"] == 1
         ro.close()
 
-    @pytest.mark.skipif(
-        os.name == "nt", reason="symlink creation needs privilege on Windows"
-    )
+    @pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privilege on Windows")
     def test_symlinked_data_dir(self, tmp_path: Path) -> None:
         real = tmp_path / "real"
         real.mkdir()
@@ -183,9 +181,7 @@ class TestFilesystemPaths:
         assert store.get_trace("a" * 32) is not None
         store.close()
 
-    def test_tilde_db_path_expands(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_tilde_db_path_expands(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("USERPROFILE", str(tmp_path))  # nt expansion
         monkeypatch.chdir(tmp_path)
@@ -221,9 +217,7 @@ class TestFilesystemPaths:
             json.dumps(
                 {
                     "project_id": "cli-rel",
-                    "traces": [
-                        _mk_trace("e" * 32).model_dump(mode="json")
-                    ],
+                    "traces": [_mk_trace("e" * 32).model_dump(mode="json")],
                 }
             )
         )
@@ -263,9 +257,7 @@ _RTL = "ٱلْعَرَبِيَّة עִבְרִית"
 
 
 class TestEncodingUnicode:
-    def test_unicode_roundtrip_everywhere(
-        self, tmp_path: Path
-    ) -> None:
+    def test_unicode_roundtrip_everywhere(self, tmp_path: Path) -> None:
         session = f"{_ACCENTS} {_EMOJI}"
         name = f"{_CJK} {_RTL}"
         attrs = {
@@ -296,9 +288,7 @@ class TestEncodingUnicode:
         assert sessions[0]["session_id"] == session
         store.close()
 
-    def test_nfc_nfd_are_distinct_identities(
-        self, tmp_path: Path
-    ) -> None:
+    def test_nfc_nfd_are_distinct_identities(self, tmp_path: Path) -> None:
         """Documented: no normalization — sqlite TEXT compares byte-wise,
         so 'café' (NFC) and 'café' (NFD) are different ids. Producers
         needing dedupe must normalize upstream."""
@@ -306,12 +296,8 @@ class TestEncodingUnicode:
         nfd = unicodedata.normalize("NFD", nfc)
         assert nfc != nfd
         store = SQLiteTraceStore(tmp_path / "nf.db")
-        store.upsert_trace(
-            _mk_trace("a" * 32, project_id=nfc, session_id="s", name=nfc)
-        )
-        store.upsert_trace(
-            _mk_trace("b" * 32, project_id=nfd, session_id="s", name=nfd)
-        )
+        store.upsert_trace(_mk_trace("a" * 32, project_id=nfc, session_id="s", name=nfc))
+        store.upsert_trace(_mk_trace("b" * 32, project_id=nfd, session_id="s", name=nfd))
         # same trace_id query under the other normalization is absent
         assert store.get_trace("a" * 32, project_id=nfc) is not None
         assert store.get_trace("a" * 32, project_id=nfd) is None
@@ -322,9 +308,7 @@ class TestEncodingUnicode:
         assert {i["project_id"] for i in hits} == {nfc}
         store.close()
 
-    def test_lone_surrogate_rejected_on_upsert(
-        self, tmp_path: Path
-    ) -> None:
+    def test_lone_surrogate_rejected_on_upsert(self, tmp_path: Path) -> None:
         store = SQLiteTraceStore(tmp_path / "s.db")
         for kw in (
             {"session_id": "sess\ud800"},
@@ -337,9 +321,7 @@ class TestEncodingUnicode:
         assert store.stats()["traces"] == 0  # nothing half-written
         store.close()
 
-    def test_lone_surrogate_reads_are_absent_not_tracebacks(
-        self, tmp_path: Path
-    ) -> None:
+    def test_lone_surrogate_reads_are_absent_not_tracebacks(self, tmp_path: Path) -> None:
         store = SQLiteTraceStore(tmp_path / "s2.db")
         store.upsert_trace(_mk_trace())
         bad = "x\ud800"
@@ -355,17 +337,13 @@ class TestEncodingUnicode:
         assert store.span_trace_id("default", bad) is None
         store.close()
 
-    def test_lone_surrogate_writes_raise_typed_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_lone_surrogate_writes_raise_typed_error(self, tmp_path: Path) -> None:
         store = SQLiteTraceStore(tmp_path / "s3.db")
         bad = "x\ud800"
         with pytest.raises(ValidationError):
             store.upsert_dataset(bad, name="n")
         with pytest.raises(ValidationError):
-            store.upsert_dataset_version(
-                "d", "v1", cases=[{"case_id": bad}]
-            )
+            store.upsert_dataset_version("d", "v1", cases=[{"case_id": bad}])
         with pytest.raises(ValidationError):
             store.upsert_experiment(bad)
         with pytest.raises(ValidationError):
@@ -373,9 +351,7 @@ class TestEncodingUnicode:
         with pytest.raises(ValidationError):
             store.create_api_key(bad, name="n", key_hash="h", role="reader")
         with pytest.raises(ValidationError):
-            store.record_audit(
-                actor=bad, action="a", resource="r", outcome="denied"
-            )
+            store.record_audit(actor=bad, action="a", resource="r", outcome="denied")
         # reads/mutations on absent ids stay honest, not erroring
         assert store.get_dataset(bad) is None
         assert store.get_experiment(bad) is None
@@ -387,9 +363,7 @@ class TestEncodingUnicode:
         assert store.delete_trace_ids([bad]) == {"traces": 0}
         store.close()
 
-    def test_surrogate_inside_attributes_roundtrips_as_json(
-        self, tmp_path: Path
-    ) -> None:
+    def test_surrogate_inside_attributes_roundtrips_as_json(self, tmp_path: Path) -> None:
         """Attributes ride json.dumps escapes — '\\ud800' is valid JSON
         and stays storable. Only raw-bound TEXT columns reject lone
         surrogates (the API/pipeline reject them earlier anyway)."""
@@ -401,9 +375,7 @@ class TestEncodingUnicode:
         assert loaded.spans[0].attributes["odd"] == "x\ud800"
         store.close()
 
-    def test_pipeline_rejects_surrogate_before_any_write(
-        self, tmp_path: Path
-    ) -> None:
+    def test_pipeline_rejects_surrogate_before_any_write(self, tmp_path: Path) -> None:
         store = SQLiteTraceStore(tmp_path / "s5.db")
         pipe = IngestPipeline(store)
         with pytest.raises(ValidationError, match="lone surrogate"):
@@ -439,9 +411,7 @@ class TestFilePermissions:
         assert loaded.data_dir == data_dir
 
     @_CHMOD_NEEDED
-    def test_unwritable_parent_fails_with_typed_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_unwritable_parent_fails_with_typed_error(self, tmp_path: Path) -> None:
         locked = tmp_path / "locked"
         locked.mkdir()
         os.chmod(locked, 0o555)  # noqa: S103 — the test needs a read-only dir
@@ -452,9 +422,7 @@ class TestFilePermissions:
             os.chmod(locked, 0o755)  # noqa: S103 — restore so tmp cleanup works
 
     @_CHMOD_NEEDED
-    def test_db_in_readonly_dir_rw_open_fails_but_probe_reads(
-        self, tmp_path: Path
-    ) -> None:
+    def test_db_in_readonly_dir_rw_open_fails_but_probe_reads(self, tmp_path: Path) -> None:
         locked = tmp_path / "rod"
         locked.mkdir()
         store = SQLiteTraceStore(locked / "d.db")
@@ -484,15 +452,9 @@ class TestSqliteWAL:
         store = SQLiteTraceStore(tmp_path / "w.db")
         jm = store._conn.execute("PRAGMA journal_mode").fetchone()[0]
         assert jm == "wal"
-        assert (
-            store._conn.execute("PRAGMA synchronous").fetchone()[0] == 1
-        )  # NORMAL
-        assert (
-            store._conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
-        )
-        assert (
-            store._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
-        )
+        assert store._conn.execute("PRAGMA synchronous").fetchone()[0] == 1  # NORMAL
+        assert store._conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+        assert store._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         store.close()
 
     def test_reader_sees_precommit_snapshot(self, tmp_path: Path) -> None:
@@ -534,9 +496,7 @@ class TestSqliteWAL:
         assert store.stats()["schema_version"] == SCHEMA_VERSION
         store.close()
 
-    def test_readonly_open_missing_db_clean_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_readonly_open_missing_db_clean_error(self, tmp_path: Path) -> None:
         with pytest.raises(sqlite3.OperationalError):
             SQLiteTraceStore(tmp_path / "nope" / "lens.db", readonly=True)
         # probe must not materialize anything — no dirs, no files
@@ -591,9 +551,7 @@ class TestSqliteWAL:
         assert probe.stats()["traces"] == 1
         probe.close()
 
-    def test_readonly_with_uri_special_chars_in_name(
-        self, tmp_path: Path
-    ) -> None:
+    def test_readonly_with_uri_special_chars_in_name(self, tmp_path: Path) -> None:
         """'?' and '%' must stay literal — an unencoded path would be
         parsed as URI query and silently open a different file. On
         Windows '?' can't exist in a filename at all, so the literal-'%'
@@ -666,9 +624,7 @@ class TestConcurrency:
 
 
 class TestBusyTimeout:
-    def test_held_write_lock_fails_bounded_not_hangs(
-        self, tmp_path: Path
-    ) -> None:
+    def test_held_write_lock_fails_bounded_not_hangs(self, tmp_path: Path) -> None:
         """busy_timeout is a bound, not a deadlock: a contended write
         waits ~timeout then raises OperationalError, and the store is
         usable the moment the holder commits."""
@@ -713,9 +669,7 @@ class TestCloseAndShutdown:
         assert store2.upsert_trace(_mk_trace()) == (0, 0, 1)
         store2.close()
 
-    def test_close_is_idempotent_and_use_after_close_is_typed(
-        self, tmp_path: Path
-    ) -> None:
+    def test_close_is_idempotent_and_use_after_close_is_typed(self, tmp_path: Path) -> None:
         store = SQLiteTraceStore(tmp_path / "d.db")
         store.close()
         store.close()  # double close is a no-op, not an error
@@ -741,9 +695,7 @@ class TestCloseAndShutdown:
 
 
 class TestJsonEdges:
-    def test_huge_ints_in_attributes_roundtrip(
-        self, tmp_path: Path
-    ) -> None:
+    def test_huge_ints_in_attributes_roundtrip(self, tmp_path: Path) -> None:
         attrs = {"big": 2**100, "neg": -(2**100), "nested": {"v": 2**80}}
         store = SQLiteTraceStore(tmp_path / "j.db")
         store.upsert_trace(_mk_trace(attributes=attrs))
@@ -774,9 +726,7 @@ class TestJsonEdges:
         assert store.list_traces(limit=-5, offset=-3) == []
         store.close()
 
-    def test_non_finite_floats_persist_as_null(
-        self, tmp_path: Path
-    ) -> None:
+    def test_non_finite_floats_persist_as_null(self, tmp_path: Path) -> None:
         """NaN/±inf have no JSON literal — _json_finite stores them as
         null so json_valid() stays 1 (attrs, events AND links)."""
         t0 = _T0
@@ -787,9 +737,7 @@ class TestJsonEdges:
             start_time=t0,
             end_time=t0 + timedelta(milliseconds=1),
             attributes={"nan": float("nan"), "pinf": float("inf")},
-            events=[
-                SpanEvent(name="e", time=t0, attributes={"v": float("-inf")})
-            ],
+            events=[SpanEvent(name="e", time=t0, attributes={"v": float("-inf")})],
             links=[
                 SpanLink(
                     trace_id="f" * 32,
@@ -822,9 +770,7 @@ class TestJsonEdges:
         assert loaded.resource_attributes == {"r": None}
         store.close()
 
-    def test_deep_but_bounded_attribute_nesting(
-        self, tmp_path: Path
-    ) -> None:
+    def test_deep_but_bounded_attribute_nesting(self, tmp_path: Path) -> None:
         """Well inside the app's 512-level guard, nested attrs must
         round-trip — the store itself has no depth limit."""
         leaf: dict[str, Any] = {}
@@ -844,9 +790,7 @@ class TestJsonEdges:
         assert cur["end"] is True
         store.close()
 
-    def test_like_metacharacters_match_literally(
-        self, tmp_path: Path
-    ) -> None:
+    def test_like_metacharacters_match_literally(self, tmp_path: Path) -> None:
         """q/tool filters are LIKE-escaped: '%', '_' and '\\' are literal
         characters, never wildcards injected from user input."""
         store = SQLiteTraceStore(tmp_path / "j5.db")
@@ -890,9 +834,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
 
 
 class TestEnvConfig:
-    def test_env_db_wins_over_toml(
-        self, tmp_path: Path, clean_env: pytest.MonkeyPatch
-    ) -> None:
+    def test_env_db_wins_over_toml(self, tmp_path: Path, clean_env: pytest.MonkeyPatch) -> None:
         data_dir = tmp_path / DEFAULT_DIR_NAME
         data_dir.mkdir()
         (data_dir / "config.toml").write_text(
@@ -959,23 +901,17 @@ class TestEnvConfig:
         # coercion, not a config error
         assert load_config(tmp_path).auth_reads is False
 
-    def test_auth_mode_env_validated(
-        self, tmp_path: Path, clean_env: pytest.MonkeyPatch
-    ) -> None:
+    def test_auth_mode_env_validated(self, tmp_path: Path, clean_env: pytest.MonkeyPatch) -> None:
         clean_env.setenv("FORGE_LENS_AUTH_MODE", "bogus")
         with pytest.raises(ValueError, match="auth_mode"):
             load_config(tmp_path)
 
-    def test_capture_env_validated(
-        self, tmp_path: Path, clean_env: pytest.MonkeyPatch
-    ) -> None:
+    def test_capture_env_validated(self, tmp_path: Path, clean_env: pytest.MonkeyPatch) -> None:
         clean_env.setenv("FORGE_LENS_CAPTURE", "everything")
         with pytest.raises(ValueError, match="FORGE_LENS_CAPTURE"):
             load_config(tmp_path)
 
-    def test_env_db_expanduser(
-        self, tmp_path: Path, clean_env: pytest.MonkeyPatch
-    ) -> None:
+    def test_env_db_expanduser(self, tmp_path: Path, clean_env: pytest.MonkeyPatch) -> None:
         clean_env.setenv("HOME", str(tmp_path))
         clean_env.setenv("USERPROFILE", str(tmp_path))
         clean_env.setenv("FORGE_LENS_DB", "~/env-tilde.db")
@@ -998,8 +934,7 @@ class TestEnvConfig:
         data_dir = tmp_path / DEFAULT_DIR_NAME
         data_dir.mkdir()
         (data_dir / "config.toml").write_text(
-            '[lens]\nproject_id = "p1"\nfuture_option = "x"\n'
-            "unknown_int = 5\n"
+            '[lens]\nproject_id = "p1"\nfuture_option = "x"\nunknown_int = 5\n'
         )
         cfg = load_config(tmp_path)
         assert cfg.project_id == "p1"  # unknown keys ignored, not errors
@@ -1033,9 +968,7 @@ class TestEnvConfig:
         # explicit project_dir → data_dir under it, no XDG lookup
         cfg = load_config(tmp_path)
         assert cfg.data_dir == tmp_path / DEFAULT_DIR_NAME
-        assert cfg.resolved_db_path == (
-            tmp_path / DEFAULT_DIR_NAME / "lens.db"
-        )
+        assert cfg.resolved_db_path == (tmp_path / DEFAULT_DIR_NAME / "lens.db")
         # no project_dir → cwd-relative (cwd at load_config call time)
         other = tmp_path / "other"
         other.mkdir()
@@ -1136,18 +1069,10 @@ class TestApiEdges:
         assert r.status_code == 404
 
     def test_int64_and_enum_query_bounds(self, api_client) -> None:
-        assert api_client.get(
-            "/v1/traces", params={"offset": 2**63}
-        ).status_code == 422
-        assert api_client.get(
-            "/v1/traces", params={"min_total_tokens": -1}
-        ).status_code == 422
-        assert api_client.get(
-            "/v1/traces", params={"status": "bogus"}
-        ).status_code == 422
-        assert api_client.get(
-            "/v1/traces", params={"since": "not-a-date"}
-        ).status_code == 422
+        assert api_client.get("/v1/traces", params={"offset": 2**63}).status_code == 422
+        assert api_client.get("/v1/traces", params={"min_total_tokens": -1}).status_code == 422
+        assert api_client.get("/v1/traces", params={"status": "bogus"}).status_code == 422
+        assert api_client.get("/v1/traces", params={"since": "not-a-date"}).status_code == 422
         # limit is clamped, not rejected
         r = api_client.get("/v1/traces", params={"limit": 10**30})
         assert r.status_code == 200

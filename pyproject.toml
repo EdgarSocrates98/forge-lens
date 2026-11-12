@@ -18,9 +18,11 @@ classifiers = [
 ]
 keywords = ["observability", "opentelemetry", "openinference", "agents", "llm", "tracing"]
 dependencies = [
+    "pyyaml>=6.0",  # vendored _forge_obsidian
     "pydantic>=2.7",
     "typer>=0.12",
     "rich>=13.7",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -76,6 +78,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# vendored forge_obsidian engine — byte-parity; linted in the canonical repo.
+"src/forge_lens/_forge_obsidian/**" = ["ALL"]
 # Vendored shared bootstrap — canonical copy in forge-doctor-api is the lint target.
 "scripts/forge_bootstrap.py" = ["ALL"]
 # Lab emitter parses its own just-written junit artifact — not untrusted input.
@@ -114,4 +118,4 @@ packages = ["forge_lens"]
 strict = true
 warn_unreachable = true
 # Vendored Forge UI kit — mesma razão da exclusão de lint.
-exclude = ["forge_lens.ui"]
+exclude = ["forge_lens.ui", "forge_lens._forge_obsidian"]

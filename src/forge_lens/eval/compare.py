@@ -79,9 +79,7 @@ def _wilson_ci(p: float, n: int) -> tuple[float, float] | None:
     z2 = _Z_CRIT * _Z_CRIT
     denom = 1.0 + z2 / n
     center = (p + z2 / (2 * n)) / denom
-    margin = (_Z_CRIT / denom) * math.sqrt(
-        p * (1 - p) / n + z2 / (4 * n * n)
-    )
+    margin = (_Z_CRIT / denom) * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n))
     return (
         round(max(0.0, center - margin), 6),
         round(min(1.0, center + margin), 6),
@@ -100,11 +98,7 @@ def _score_samples(report: EvalReport, key: str) -> list[float]:
     out: list[float] = []
     for tid in sorted(report.results):
         for r in report.results[tid]:
-            if (
-                r.evaluator == evaluator
-                and r.metric == metric
-                and r.score is not None
-            ):
+            if r.evaluator == evaluator and r.metric == metric and r.score is not None:
                 out.append(r.score)
     return sorted(out)
 
@@ -151,9 +145,7 @@ def _mann_whitney(xs: list[float], ys: list[float]) -> tuple[float, float] | Non
         return None  # all tied — ranks carry no information
     diff = u1 - mean_u
     # continuity correction toward the mean
-    z = 0.0 if diff == 0 else (
-        (diff - math.copysign(0.5, diff)) / math.sqrt(var)
-    )
+    z = 0.0 if diff == 0 else ((diff - math.copysign(0.5, diff)) / math.sqrt(var))
     p = math.erfc(abs(z) / math.sqrt(2))
     return u1, p
 
@@ -187,9 +179,7 @@ def compare_runs(a: EvalReport, b: EvalReport) -> dict[str, Any]:
             mean_a=mean_a,
             mean_b=mean_b,
             delta=(
-                round(mean_b - mean_a, 6)
-                if mean_a is not None and mean_b is not None
-                else None
+                round(mean_b - mean_a, 6) if mean_a is not None and mean_b is not None else None
             ),
             pass_rate_a=sa.get("pass_rate"),
             pass_rate_b=sb.get("pass_rate"),
@@ -208,16 +198,12 @@ def compare_runs(a: EvalReport, b: EvalReport) -> dict[str, Any]:
             if n_a < _MIN_SAMPLE or n_b < _MIN_SAMPLE:
                 row.significance = "insufficient_data"
             else:
-                res = _z_test(
-                    row.pass_rate_a or 0.0, n_a, row.pass_rate_b or 0.0, n_b
-                )
+                res = _z_test(row.pass_rate_a or 0.0, n_a, row.pass_rate_b or 0.0, n_b)
                 if res is None:
                     row.significance = "not_computable"
                 else:
                     row.p_value = round(res[1], 6)
-                    row.significance = (
-                        "not_significant" if abs(res[0]) < _Z_CRIT else "significant"
-                    )
+                    row.significance = "not_significant" if abs(res[0]) < _Z_CRIT else "significant"
         else:  # continuous — rank test over the raw score samples
             row.test = "mann_whitney_u"
             xs = _score_samples(a, key)
@@ -230,9 +216,7 @@ def compare_runs(a: EvalReport, b: EvalReport) -> dict[str, Any]:
                     row.significance = "not_computable"
                 else:
                     row.p_value = round(res[1], 6)
-                    row.significance = (
-                        "significant" if res[1] < _ALPHA else "not_significant"
-                    )
+                    row.significance = "significant" if res[1] < _ALPHA else "not_significant"
         deltas.append(row)
     tested = sum(1 for d in deltas if d.p_value is not None)
     return {
@@ -242,8 +226,7 @@ def compare_runs(a: EvalReport, b: EvalReport) -> dict[str, Any]:
         # honest multiplicity note — no correction is applied; when k>1
         # tests ran, the family-wise error rate exceeds alpha
         "multiple_comparisons": (
-            f"{tested} tests at alpha={_ALPHA} unadjusted — "
-            "interpret jointly with care"
+            f"{tested} tests at alpha={_ALPHA} unadjusted — interpret jointly with care"
             if tested > 1
             else None
         ),
@@ -269,9 +252,7 @@ def apply_gate(result: dict[str, Any], gate: dict[str, Any]) -> dict[str, Any]:
     silently. Unknown metric keys are themselves a failure (a gate on a
     metric that wasn't evaluated is a misconfigured gate)."""
     failures: list[dict[str, Any]] = []
-    by_key = {
-        f"{d['evaluator']}/{d['metric']}": d for d in result.get("deltas", [])
-    }
+    by_key = {f"{d['evaluator']}/{d['metric']}": d for d in result.get("deltas", [])}
     metrics_spec = gate.get("metrics") or {}
     if not isinstance(metrics_spec, dict):
         return {
@@ -284,53 +265,57 @@ def apply_gate(result: dict[str, Any], gate: dict[str, Any]) -> dict[str, Any]:
             continue
         d = by_key.get(key)
         if d is None:
-            failures.append({
-                "metric": key,
-                "reason": "metric not evaluated — cannot gate on unmeasured evidence",
-            })
+            failures.append(
+                {
+                    "metric": key,
+                    "reason": "metric not evaluated — cannot gate on unmeasured evidence",
+                }
+            )
             continue
         min_b = spec.get("min_pass_rate_b")
         if min_b is not None:
             try:
                 min_b_f = float(min_b)
             except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"{key}.min_pass_rate_b must be a number"
-                ) from exc
+                raise ValueError(f"{key}.min_pass_rate_b must be a number") from exc
             if not math.isfinite(min_b_f):
                 raise ValueError(f"{key}.min_pass_rate_b must be finite")
             pr_b = d.get("pass_rate_b")
             if pr_b is None or pr_b < min_b_f:
-                failures.append({
-                    "metric": key,
-                    "reason": "pass_rate_b below minimum",
-                    "observed": pr_b,
-                    "required": min_b_f,
-                })
+                failures.append(
+                    {
+                        "metric": key,
+                        "reason": "pass_rate_b below minimum",
+                        "observed": pr_b,
+                        "required": min_b_f,
+                    }
+                )
         max_drop = spec.get("max_drop")
         if max_drop is not None:
             try:
                 max_drop_f = float(max_drop)
             except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"{key}.max_drop must be a number"
-                ) from exc
+                raise ValueError(f"{key}.max_drop must be a number") from exc
             if not math.isfinite(max_drop_f):
                 raise ValueError(f"{key}.max_drop must be finite")
             pa, pb = d.get("pass_rate_a"), d.get("pass_rate_b")
             if pa is None or pb is None:
-                failures.append({
-                    "metric": key,
-                    "reason": "max_drop unmeasured — pass rate missing on one or both sides",
-                    "observed": None,
-                })
+                failures.append(
+                    {
+                        "metric": key,
+                        "reason": "max_drop unmeasured — pass rate missing on one or both sides",
+                        "observed": None,
+                    }
+                )
             elif (pa - pb) > max_drop_f:
-                failures.append({
-                    "metric": key,
-                    "reason": "pass_rate dropped more than allowed",
-                    "observed_drop": round(pa - pb, 6),
-                    "max_drop": max_drop_f,
-                })
+                failures.append(
+                    {
+                        "metric": key,
+                        "reason": "pass_rate dropped more than allowed",
+                        "observed_drop": round(pa - pb, 6),
+                        "max_drop": max_drop_f,
+                    }
+                )
     fosr = gate.get("fail_on_significant_regression")
     if fosr is not None and not isinstance(fosr, bool):
         raise ValueError("fail_on_significant_regression must be a boolean")
@@ -341,12 +326,14 @@ def apply_gate(result: dict[str, Any], gate: dict[str, Any]) -> dict[str, Any]:
                 and d.get("delta") is not None
                 and d["delta"] < 0
             ):
-                failures.append({
-                    "metric": f"{d['evaluator']}/{d['metric']}",
-                    "reason": "statistically significant regression",
-                    "delta": d["delta"],
-                    "p_value": d.get("p_value"),
-                })
+                failures.append(
+                    {
+                        "metric": f"{d['evaluator']}/{d['metric']}",
+                        "reason": "statistically significant regression",
+                        "delta": d["delta"],
+                        "p_value": d.get("p_value"),
+                    }
+                )
     return {
         "gate_passed": not failures,
         "failures": sorted(

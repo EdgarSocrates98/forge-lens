@@ -24,9 +24,7 @@ _DOC = _REPO / "docs" / "reference" / "mcp-tools.md"
 
 
 def _load() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "gen_mcp_matrix", _SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("gen_mcp_matrix", _SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -38,9 +36,7 @@ def test_doc_is_in_sync_with_generator() -> None:
     """Regenerate to memory and compare bytes — the committed doc is
     either current generator output or the test fails."""
     gen = _load()
-    assert _DOC.exists(), (
-        "docs/reference/mcp-tools.md ausente — rode gen_mcp_matrix.py"
-    )
+    assert _DOC.exists(), "docs/reference/mcp-tools.md ausente — rode gen_mcp_matrix.py"
     assert _DOC.read_text(encoding="utf-8") == gen.render()
 
 

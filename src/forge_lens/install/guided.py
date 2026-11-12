@@ -100,8 +100,12 @@ def run_guided_install() -> int:
 
     # --- review (real dry-run plan) --------------------------------------------
     plan = lifecycle.install(
-        target, profile=profile, source=source, files=files,
-        ts_ns=0, dry_run=True,
+        target,
+        profile=profile,
+        source=source,
+        files=files,
+        ts_ns=0,
+        dry_run=True,
     )
     if not plan.get("ok"):
         print(_c(ctx, "31", f"plan failed: {plan.get('error', '?')}"))
@@ -134,8 +138,12 @@ def run_guided_install() -> int:
     import time
 
     out = lifecycle.install(
-        target, profile=profile, source=source, files=files,
-        ts_ns=time.time_ns(), dry_run=False,
+        target,
+        profile=profile,
+        source=source,
+        files=files,
+        ts_ns=time.time_ns(),
+        dry_run=False,
     )
     ok = bool(out.get("ok"))
     color = "32" if ok else "31"
@@ -154,8 +162,10 @@ def run_guided_install() -> int:
         + _c(ctx, "32" if hok else "33", "healthy" if hok else "degraded")
     )
     for c in doc.get("checks", []):
-        mark = _c(ctx, "32", "✓" if ctx.unicode else "v") if c.get("ok") else _c(
-            ctx, "31", "✗" if ctx.unicode else "x"
+        mark = (
+            _c(ctx, "32", "✓" if ctx.unicode else "v")
+            if c.get("ok")
+            else _c(ctx, "31", "✗" if ctx.unicode else "x")
         )
         print(f"    {mark} {c.get('check', '?')}")
 

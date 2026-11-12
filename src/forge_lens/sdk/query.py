@@ -113,9 +113,7 @@ class LensClient:
     def _url(self, path: str, params: dict[str, Any] | None) -> str:
         url = f"{self.endpoint}{_API_PREFIX}{path}"
         if params:
-            qs = urllib.parse.urlencode(
-                {k: v for k, v in params.items() if v is not None}
-            )
+            qs = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
             if qs:
                 url = f"{url}?{qs}"
         return url
@@ -158,17 +156,13 @@ class LensClient:
         try:
             return json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise QueryError(
-                f"{method} {path} failed: response is not JSON"
-            ) from exc
+            raise QueryError(f"{method} {path} failed: response is not JSON") from exc
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         result: dict[str, Any] = self._request("GET", path, params=params)
         return result
 
-    def _get_list(
-        self, path: str, params: dict[str, Any] | None = None
-    ) -> list[dict[str, Any]]:
+    def _get_list(self, path: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = self._request("GET", path, params=params)
         return result
 
@@ -250,14 +244,10 @@ class LensClient:
             },
         )
 
-    def get_trace(
-        self, trace_id: str, *, project_id: str | None = None
-    ) -> dict[str, Any]:
+    def get_trace(self, trace_id: str, *, project_id: str | None = None) -> dict[str, Any]:
         """``GET /v1/traces/{id}`` → full ``Trace`` contract; a missing
         trace surfaces as ``QueryError`` with ``status_code == 404``."""
-        return self._get(
-            f"/traces/{_seg(trace_id)}", {"project_id": self._pid(project_id)}
-        )
+        return self._get(f"/traces/{_seg(trace_id)}", {"project_id": self._pid(project_id)})
 
     def list_sessions(
         self,
@@ -295,9 +285,7 @@ class LensClient:
 
     # -- per-trace intelligence / investigation --------------------------
 
-    def trace_graph(
-        self, trace_id: str, *, project_id: str | None = None
-    ) -> dict[str, Any]:
+    def trace_graph(self, trace_id: str, *, project_id: str | None = None) -> dict[str, Any]:
         """``GET /v1/graph/traces/{id}`` → ``ExecutionGraph``."""
         return self._get(
             f"/graph/traces/{_seg(trace_id)}",
@@ -344,9 +332,7 @@ class LensClient:
             {"project_id": self._pid(project_id), "limit": limit},
         )
 
-    def trace_cost(
-        self, trace_id: str, *, project_id: str | None = None
-    ) -> dict[str, Any]:
+    def trace_cost(self, trace_id: str, *, project_id: str | None = None) -> dict[str, Any]:
         """``GET /v1/traces/{id}/cost`` → derived cost report +
         ``pricing_source`` + ``waste[]``."""
         return self._get(
@@ -354,9 +340,7 @@ class LensClient:
             {"project_id": self._pid(project_id)},
         )
 
-    def trace_failure(
-        self, trace_id: str, *, project_id: str | None = None
-    ) -> dict[str, Any]:
+    def trace_failure(self, trace_id: str, *, project_id: str | None = None) -> dict[str, Any]:
         """``GET /v1/traces/{id}/failure`` → deterministic failure
         classification with evidence."""
         return self._get(
@@ -364,9 +348,7 @@ class LensClient:
             {"project_id": self._pid(project_id)},
         )
 
-    def trace_replay(
-        self, trace_id: str, *, project_id: str | None = None
-    ) -> dict[str, Any]:
+    def trace_replay(self, trace_id: str, *, project_id: str | None = None) -> dict[str, Any]:
         """``GET /v1/traces/{id}/replay`` → recorded timeline (never
         re-executes agent code)."""
         return self._get(
@@ -374,9 +356,7 @@ class LensClient:
             {"project_id": self._pid(project_id)},
         )
 
-    def trace_incident(
-        self, trace_id: str, *, project_id: str | None = None
-    ) -> dict[str, Any]:
+    def trace_incident(self, trace_id: str, *, project_id: str | None = None) -> dict[str, Any]:
         """``GET /v1/traces/{id}/incident`` → versioned incident bundle
         (failure + graph + cost + waste + replay in one payload)."""
         return self._get(
@@ -384,9 +364,7 @@ class LensClient:
             {"project_id": self._pid(project_id)},
         )
 
-    def trace_security(
-        self, trace_id: str, *, project_id: str | None = None
-    ) -> dict[str, Any]:
+    def trace_security(self, trace_id: str, *, project_id: str | None = None) -> dict[str, Any]:
         """``GET /v1/traces/{id}/security`` → MCP/tool-call observations
         (observer mode, evidence only)."""
         return self._get(
@@ -394,9 +372,7 @@ class LensClient:
             {"project_id": self._pid(project_id)},
         )
 
-    def trace_eval(
-        self, trace_id: str, *, project_id: str | None = None
-    ) -> dict[str, Any]:
+    def trace_eval(self, trace_id: str, *, project_id: str | None = None) -> dict[str, Any]:
         """``GET /v1/traces/{id}/eval`` → default evaluator battery →
         ``{trace_id, results}``."""
         return self._get(
@@ -404,9 +380,7 @@ class LensClient:
             {"project_id": self._pid(project_id)},
         )
 
-    def trace_efficiency(
-        self, trace_id: str, *, project_id: str | None = None
-    ) -> dict[str, Any]:
+    def trace_efficiency(self, trace_id: str, *, project_id: str | None = None) -> dict[str, Any]:
         """``GET /v1/traces/{id}/efficiency`` → tokens/tools/retries
         roll-up for one trace."""
         return self._get(
@@ -424,9 +398,7 @@ class LensClient:
             {"project_id": self._pid(project_id)},
         )
 
-    def trace_correlate(
-        self, trace_id: str, *, project_id: str | None = None
-    ) -> dict[str, Any]:
+    def trace_correlate(self, trace_id: str, *, project_id: str | None = None) -> dict[str, Any]:
         """``GET /v1/traces/{id}/correlate`` → temporal co-occurrence
         signals (non-causal; see ``classification``/``caveat`` fields)."""
         return self._get(
@@ -453,18 +425,12 @@ class LensClient:
 
     # -- datasets ---------------------------------------------------------
 
-    def list_datasets(
-        self, *, project_id: str | None = None
-    ) -> list[dict[str, Any]]:
+    def list_datasets(self, *, project_id: str | None = None) -> list[dict[str, Any]]:
         """``GET /v1/datasets`` → bare array (this route has no
         ``items`` envelope, unlike the paginated roll-ups)."""
-        return self._get_list(
-            "/datasets", {"project_id": self._pid(project_id)}
-        )
+        return self._get_list("/datasets", {"project_id": self._pid(project_id)})
 
-    def get_dataset(
-        self, dataset_id: str, *, project_id: str | None = None
-    ) -> dict[str, Any]:
+    def get_dataset(self, dataset_id: str, *, project_id: str | None = None) -> dict[str, Any]:
         """``GET /v1/datasets/{id}`` → dataset metadata; 404 → QueryError."""
         return self._get(
             f"/datasets/{_seg(dataset_id)}",

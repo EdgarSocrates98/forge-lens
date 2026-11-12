@@ -118,9 +118,7 @@ def _invoke(args: list[str], db: Path | None = None) -> Any:
 
 
 def test_traces_list_offset(seeded_db: Path) -> None:
-    all_ids = json.loads(
-        _invoke(["traces", "list", "--json"], seeded_db).output
-    )
+    all_ids = json.loads(_invoke(["traces", "list", "--json"], seeded_db).output)
     assert len(all_ids) == 3
     page = _invoke(["traces", "list", "--offset", "2", "--json"], seeded_db)
     assert page.exit_code == 0, page.output
@@ -155,9 +153,7 @@ def test_analyze_list_shows_all_specialists() -> None:
 
 
 def test_analyze_happy_path(seeded_db: Path) -> None:
-    r = _invoke(
-        ["analyze", "trace_investigator", "a" * 32, "--json"], seeded_db
-    )
+    r = _invoke(["analyze", "trace_investigator", "a" * 32, "--json"], seeded_db)
     assert r.exit_code == 0, r.output
     out = json.loads(r.output)
     assert out["specialist"] == "trace_investigator"
@@ -221,18 +217,21 @@ def test_audit_rejects_bad_paging(seeded_db: Path) -> None:
 
 # -- experiments -------------------------------------------------------------
 
-_EXP_COHORTS = json.dumps(
-    {"a": {"trace_ids": ["a" * 32]}, "b": {"trace_ids": ["c" * 32]}}
-)
+_EXP_COHORTS = json.dumps({"a": {"trace_ids": ["a" * 32]}, "b": {"trace_ids": ["c" * 32]}})
 
 
 def test_experiments_create_list_show(seeded_db: Path) -> None:
     r = _invoke(
         [
-            "experiments", "create", "exp1",
-            "--name", "smoke",
-            "--evaluators-json", '[{"name": "error_free"}]',
-            "--cohorts-json", _EXP_COHORTS,
+            "experiments",
+            "create",
+            "exp1",
+            "--name",
+            "smoke",
+            "--evaluators-json",
+            '[{"name": "error_free"}]',
+            "--cohorts-json",
+            _EXP_COHORTS,
         ],
         seeded_db,
     )
@@ -262,9 +261,13 @@ def test_experiments_create_validation(seeded_db: Path) -> None:
     for spec in bad_specs:
         r = _invoke(
             [
-                "experiments", "create", "bad",
-                "--evaluators-json", spec,
-                "--cohorts-json", _EXP_COHORTS,
+                "experiments",
+                "create",
+                "bad",
+                "--evaluators-json",
+                spec,
+                "--cohorts-json",
+                _EXP_COHORTS,
             ],
             seeded_db,
         )
@@ -280,9 +283,13 @@ def test_experiments_create_validation(seeded_db: Path) -> None:
     for cohorts in bad_cohorts:
         r = _invoke(
             [
-                "experiments", "create", "bad",
-                "--evaluators-json", '[{"name": "error_free"}]',
-                "--cohorts-json", cohorts,
+                "experiments",
+                "create",
+                "bad",
+                "--evaluators-json",
+                '[{"name": "error_free"}]',
+                "--cohorts-json",
+                cohorts,
             ],
             seeded_db,
         )
@@ -291,10 +298,15 @@ def test_experiments_create_validation(seeded_db: Path) -> None:
     # --dataset-version requires --dataset-id
     r = _invoke(
         [
-            "experiments", "create", "bad",
-            "--dataset-version", "v1",
-            "--evaluators-json", '[{"name": "error_free"}]',
-            "--cohorts-json", _EXP_COHORTS,
+            "experiments",
+            "create",
+            "bad",
+            "--dataset-version",
+            "v1",
+            "--evaluators-json",
+            '[{"name": "error_free"}]',
+            "--cohorts-json",
+            _EXP_COHORTS,
         ],
         seeded_db,
     )
@@ -303,10 +315,15 @@ def test_experiments_create_validation(seeded_db: Path) -> None:
     # --metadata-json must be an object
     r = _invoke(
         [
-            "experiments", "create", "bad",
-            "--metadata-json", "[1]",
-            "--evaluators-json", '[{"name": "error_free"}]',
-            "--cohorts-json", _EXP_COHORTS,
+            "experiments",
+            "create",
+            "bad",
+            "--metadata-json",
+            "[1]",
+            "--evaluators-json",
+            '[{"name": "error_free"}]',
+            "--cohorts-json",
+            _EXP_COHORTS,
         ],
         seeded_db,
     )
@@ -316,10 +333,13 @@ def test_experiments_create_validation(seeded_db: Path) -> None:
 def test_experiments_run_persists_result(seeded_db: Path) -> None:
     _invoke(
         [
-            "experiments", "create", "exp1",
+            "experiments",
+            "create",
+            "exp1",
             "--evaluators-json",
             '[{"name": "error_free"}, {"name": "tool_success"}]',
-            "--cohorts-json", _EXP_COHORTS,
+            "--cohorts-json",
+            _EXP_COHORTS,
         ],
         seeded_db,
     )
@@ -331,9 +351,7 @@ def test_experiments_run_persists_result(seeded_db: Path) -> None:
     assert out["report"]["a"]["trace_ids"] == ["a" * 32]
     assert out["report"]["b"]["trace_ids"] == ["c" * 32]
 
-    shown = json.loads(
-        _invoke(["experiments", "show", "exp1", "--json"], seeded_db).output
-    )
+    shown = json.loads(_invoke(["experiments", "show", "exp1", "--json"], seeded_db).output)
     assert len(shown["runs"]) == 1
     assert shown["runs"][0]["report"] == out["report"]
 
@@ -341,16 +359,23 @@ def test_experiments_run_persists_result(seeded_db: Path) -> None:
 def test_experiments_run_gate(seeded_db: Path) -> None:
     _invoke(
         [
-            "experiments", "create", "exp1",
-            "--evaluators-json", '[{"name": "error_free"}]',
-            "--cohorts-json", _EXP_COHORTS,
+            "experiments",
+            "create",
+            "exp1",
+            "--evaluators-json",
+            '[{"name": "error_free"}]',
+            "--cohorts-json",
+            _EXP_COHORTS,
         ],
         seeded_db,
     )
     r = _invoke(
         [
-            "experiments", "run", "exp1",
-            "--gate-json", '{"max_regressions": 0}',
+            "experiments",
+            "run",
+            "exp1",
+            "--gate-json",
+            '{"max_regressions": 0}',
             "--json",
         ],
         seeded_db,
@@ -369,8 +394,11 @@ def test_experiments_run_missing(seeded_db: Path) -> None:
 def test_experiments_run_missing_cohort_trace(seeded_db: Path) -> None:
     _invoke(
         [
-            "experiments", "create", "ghost",
-            "--evaluators-json", '[{"name": "error_free"}]',
+            "experiments",
+            "create",
+            "ghost",
+            "--evaluators-json",
+            '[{"name": "error_free"}]',
             "--cohorts-json",
             json.dumps(
                 {
@@ -389,19 +417,19 @@ def test_experiments_run_missing_cohort_trace(seeded_db: Path) -> None:
 def test_experiments_run_bad_gate_json(seeded_db: Path) -> None:
     _invoke(
         [
-            "experiments", "create", "exp1",
-            "--evaluators-json", '[{"name": "error_free"}]',
-            "--cohorts-json", _EXP_COHORTS,
+            "experiments",
+            "create",
+            "exp1",
+            "--evaluators-json",
+            '[{"name": "error_free"}]',
+            "--cohorts-json",
+            _EXP_COHORTS,
         ],
         seeded_db,
     )
-    r = _invoke(
-        ["experiments", "run", "exp1", "--gate-json", "{bad"], seeded_db
-    )
+    r = _invoke(["experiments", "run", "exp1", "--gate-json", "{bad"], seeded_db)
     assert r.exit_code == 2
-    r = _invoke(
-        ["experiments", "run", "exp1", "--gate-json", "[1]"], seeded_db
-    )
+    r = _invoke(["experiments", "run", "exp1", "--gate-json", "[1]"], seeded_db)
     assert r.exit_code == 2
 
 
@@ -416,9 +444,7 @@ _RULE = {
 }
 
 
-def test_alerts_lifecycle(
-    seeded_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_alerts_lifecycle(seeded_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # alerts commands resolve data_dir from cwd — isolate in tmp_path
     monkeypatch.chdir(tmp_path)
 
@@ -426,9 +452,7 @@ def test_alerts_lifecycle(
     assert r.exit_code == 0
     assert "no alert rules" in r.output
 
-    r = runner.invoke(
-        app, ["alerts", "save", "--rule-json", json.dumps(_RULE)]
-    )
+    r = runner.invoke(app, ["alerts", "save", "--rule-json", json.dumps(_RULE)])
     assert r.exit_code == 0, r.output
     rules_file = tmp_path / ".forge-lens" / "alert-rules.json"
     assert rules_file.exists()
@@ -438,9 +462,7 @@ def test_alerts_lifecycle(
     rules = json.loads(r.output)
     assert [x["rule_id"] for x in rules] == ["err-rate"]
 
-    r = runner.invoke(
-        app, ["alerts", "evaluate", "--db", str(seeded_db), "--json"]
-    )
+    r = runner.invoke(app, ["alerts", "evaluate", "--db", str(seeded_db), "--json"])
     assert r.exit_code == 0, r.output
     out = json.loads(r.output)
     assert out["evaluated"] == 1
@@ -455,17 +477,11 @@ def test_alerts_lifecycle(
 
 
 def test_alerts_save_rejects_bad_rule(tmp_path: Path) -> None:
-    r = runner.invoke(
-        app, ["alerts", "save", "--rule-json", "{not json"]
-    )
+    r = runner.invoke(app, ["alerts", "save", "--rule-json", "{not json"])
     assert r.exit_code == 2
-    r = runner.invoke(
-        app, ["alerts", "save", "--rule-json", '{"x": 1}']
-    )
+    r = runner.invoke(app, ["alerts", "save", "--rule-json", '{"x": 1}'])
     assert r.exit_code == 2
-    r = runner.invoke(
-        app, ["alerts", "save", "--rule-json", "[1]"]
-    )
+    r = runner.invoke(app, ["alerts", "save", "--rule-json", "[1]"])
     assert r.exit_code == 2
 
 
@@ -479,9 +495,7 @@ def test_alerts_evaluate_no_rules(
     seeded_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(
-        app, ["alerts", "evaluate", "--db", str(seeded_db), "--json"]
-    )
+    r = runner.invoke(app, ["alerts", "evaluate", "--db", str(seeded_db), "--json"])
     assert r.exit_code == 0
     out = json.loads(r.output)
     assert out == {"fired": [], "evaluated": 0, "project_id": "default"}
@@ -491,20 +505,14 @@ def test_alerts_evaluate_no_rules(
 
 
 def test_eval_suggest_recurring_across_two_traces(seeded_db: Path) -> None:
-    r = _invoke(
-        ["eval-suggest", "a" * 32, "b" * 32, "--json"], seeded_db
-    )
+    r = _invoke(["eval-suggest", "a" * 32, "b" * 32, "--json"], seeded_db)
     assert r.exit_code == 0, r.output
     out = json.loads(r.output)
     assert out["suggestions"]
     # same failure category across 2 distinct traces → recurring
-    recurring = [
-        s for s in out["suggestions"] if s["evidence"].get("recurring")
-    ]
+    recurring = [s for s in out["suggestions"] if s["evidence"].get("recurring")]
     assert recurring, out
-    assert any(
-        s["name"] == "tool_success" for s in out["suggestions"]
-    )
+    assert any(s["name"] == "tool_success" for s in out["suggestions"])
 
 
 def test_eval_suggest_missing_trace_exits_2(seeded_db: Path) -> None:
@@ -531,9 +539,7 @@ def test_intel_efficiency(seeded_db: Path) -> None:
 
 
 def test_intel_efficiency_tool_filter(seeded_db: Path) -> None:
-    r = _invoke(
-        ["intel", "efficiency", "--tool", "shell", "--json"], seeded_db
-    )
+    r = _invoke(["intel", "efficiency", "--tool", "shell", "--json"], seeded_db)
     assert r.exit_code == 0
     out = json.loads(r.output)
     assert out["traces"] == 3
@@ -555,9 +561,12 @@ def test_intel_correlate(seeded_db: Path) -> None:
 def test_intel_regress(seeded_db: Path) -> None:
     r = _invoke(
         [
-            "intel", "regress",
-            "--a-json", json.dumps(["a" * 32]),
-            "--b-json", json.dumps(["c" * 32]),
+            "intel",
+            "regress",
+            "--a-json",
+            json.dumps(["a" * 32]),
+            "--b-json",
+            json.dumps(["c" * 32]),
             "--json",
         ],
         seeded_db,
@@ -573,9 +582,12 @@ def test_intel_regress_missing_and_bad_ids(seeded_db: Path) -> None:
     # missing trace ids are tolerated + reported (API parity), not fatal
     r = _invoke(
         [
-            "intel", "regress",
-            "--a-json", json.dumps(["0" * 32, "a" * 32]),
-            "--b-json", json.dumps(["c" * 32]),
+            "intel",
+            "regress",
+            "--a-json",
+            json.dumps(["0" * 32, "a" * 32]),
+            "--b-json",
+            json.dumps(["c" * 32]),
             "--json",
         ],
         seeded_db,
@@ -592,10 +604,14 @@ def test_intel_regress_missing_and_bad_ids(seeded_db: Path) -> None:
     ):
         r = _invoke(
             [
-                "intel", "regress",
-                "--a-json", json.dumps(["a" * 32]),
-                "--b-json", json.dumps(["c" * 32]),
-                opt, val,
+                "intel",
+                "regress",
+                "--a-json",
+                json.dumps(["a" * 32]),
+                "--b-json",
+                json.dumps(["c" * 32]),
+                opt,
+                val,
             ],
             seeded_db,
         )
@@ -608,9 +624,12 @@ def test_intel_regress_missing_and_bad_ids(seeded_db: Path) -> None:
 def test_eval_evaluator_and_params(seeded_db: Path) -> None:
     r = _invoke(
         [
-            "eval", "a" * 32,
-            "--evaluator", "has_span",
-            "--params-json", '{"name": "tool shell"}',
+            "eval",
+            "a" * 32,
+            "--evaluator",
+            "has_span",
+            "--params-json",
+            '{"name": "tool shell"}',
             "--json",
         ],
         seeded_db,
@@ -628,9 +647,12 @@ def test_eval_evaluator_and_params(seeded_db: Path) -> None:
 def test_eval_repeatable_evaluator(seeded_db: Path) -> None:
     r = _invoke(
         [
-            "eval", "a" * 32,
-            "--evaluator", "tool_call_count",
-            "--evaluator", "error_free",
+            "eval",
+            "a" * 32,
+            "--evaluator",
+            "tool_call_count",
+            "--evaluator",
+            "error_free",
             "--json",
         ],
         seeded_db,
@@ -651,13 +673,9 @@ def test_eval_invalid_evaluator_lists_registry(seeded_db: Path) -> None:
 
 
 def test_eval_params_json_must_be_object(seeded_db: Path) -> None:
-    r = _invoke(
-        ["eval", "a" * 32, "--params-json", "[1]"], seeded_db
-    )
+    r = _invoke(["eval", "a" * 32, "--params-json", "[1]"], seeded_db)
     assert r.exit_code == 2
-    r = _invoke(
-        ["eval", "a" * 32, "--params-json", "{bad"], seeded_db
-    )
+    r = _invoke(["eval", "a" * 32, "--params-json", "{bad"], seeded_db)
     assert r.exit_code == 2
 
 

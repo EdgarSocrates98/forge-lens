@@ -86,9 +86,7 @@ def _risky_trace() -> Trace:
 
 
 @pytest.fixture
-def seeded_db(
-    tmp_path: Path, synthetic_trace: Trace, monkeypatch: pytest.MonkeyPatch
-) -> Path:
+def seeded_db(tmp_path: Path, synthetic_trace: Trace, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Closed store on disk — each command reopens it via ``--db``.
 
     The chdir keeps any stray ``.forge-lens/config.toml`` or
@@ -102,11 +100,18 @@ def seeded_db(
     store.upsert_trace(_loop_trace())
     store.upsert_trace(_risky_trace())
     store.upsert_dataset(
-        "ds-1", project_id="default", name="demo", task="answer questions",
-        metadata={"owner": "evals"}, now_ns=1_000,
+        "ds-1",
+        project_id="default",
+        name="demo",
+        task="answer questions",
+        metadata={"owner": "evals"},
+        now_ns=1_000,
     )
     store.upsert_dataset_version(
-        "ds-1", "v1", project_id="default", description="first",
+        "ds-1",
+        "v1",
+        project_id="default",
+        description="first",
         cases=[{"case_id": "c1"}, {"case_id": "c2"}],
     )
     store.close()
@@ -169,9 +174,7 @@ def test_stats_human_and_json(seeded_db: Path, synthetic_trace: Trace) -> None:
 
 def test_stats_project_scope(seeded_db: Path) -> None:
     """--project scopes the roll-up exactly like the API's project_id."""
-    r = runner.invoke(
-        app, ["stats", "--db", str(seeded_db), "--project", "other", "--json"]
-    )
+    r = runner.invoke(app, ["stats", "--db", str(seeded_db), "--project", "other", "--json"])
     assert r.exit_code == 0, r.output
     out = json.loads(r.output)
     assert out["project_id"] == "other"
@@ -186,9 +189,7 @@ def test_datasets_list_empty(empty_db: Path) -> None:
     r = runner.invoke(app, ["datasets", "list", "--db", str(empty_db)])
     assert r.exit_code == 0, r.output
     assert "no datasets recorded" in r.output
-    r = runner.invoke(
-        app, ["datasets", "list", "--db", str(empty_db), "--json"]
-    )
+    r = runner.invoke(app, ["datasets", "list", "--db", str(empty_db), "--json"])
     assert json.loads(r.output) == []
 
 
@@ -198,24 +199,18 @@ def test_datasets_list_and_show(seeded_db: Path) -> None:
     assert "ds-1" in r.output
     assert "demo" in r.output
 
-    r = runner.invoke(
-        app, ["datasets", "list", "--db", str(seeded_db), "--json"]
-    )
+    r = runner.invoke(app, ["datasets", "list", "--db", str(seeded_db), "--json"])
     items = json.loads(r.output)
     assert [d["dataset_id"] for d in items] == ["ds-1"]
 
-    r = runner.invoke(
-        app, ["datasets", "show", "ds-1", "--db", str(seeded_db)]
-    )
+    r = runner.invoke(app, ["datasets", "show", "ds-1", "--db", str(seeded_db)])
     assert r.exit_code == 0, r.output
     assert "demo" in r.output
     assert "answer questions" in r.output
     assert "v1" in r.output
     assert "2 case(s)" in r.output
 
-    r = runner.invoke(
-        app, ["datasets", "show", "ds-1", "--db", str(seeded_db), "--json"]
-    )
+    r = runner.invoke(app, ["datasets", "show", "ds-1", "--db", str(seeded_db), "--json"])
     out = json.loads(r.output)
     assert out["dataset_id"] == "ds-1"
     assert out["metadata"]["owner"] == "evals"
@@ -224,9 +219,7 @@ def test_datasets_list_and_show(seeded_db: Path) -> None:
 
 
 def test_datasets_show_missing_exits_2(empty_db: Path) -> None:
-    r = runner.invoke(
-        app, ["datasets", "show", "nope", "--db", str(empty_db)]
-    )
+    r = runner.invoke(app, ["datasets", "show", "nope", "--db", str(empty_db)])
     assert r.exit_code == 2
     assert "not found" in r.output
 
@@ -235,9 +228,7 @@ def test_datasets_show_missing_exits_2(empty_db: Path) -> None:
 
 
 def test_failure_human_and_json(seeded_db: Path, synthetic_trace: Trace) -> None:
-    r = runner.invoke(
-        app, ["failure", synthetic_trace.trace_id, "--db", str(seeded_db)]
-    )
+    r = runner.invoke(app, ["failure", synthetic_trace.trace_id, "--db", str(seeded_db)])
     assert r.exit_code == 0, r.output
     assert "failed=True" in r.output
     # synthetic_trace's tool span errors with "timeout"
@@ -259,18 +250,14 @@ def test_loops_human_and_json(seeded_db: Path) -> None:
     assert r.exit_code == 0, r.output
     assert "repeated_identical_tool" in r.output
 
-    r = runner.invoke(
-        app, ["loops", LOOP_TID, "--db", str(seeded_db), "--json"]
-    )
+    r = runner.invoke(app, ["loops", LOOP_TID, "--db", str(seeded_db), "--json"])
     out = json.loads(r.output)
     assert out["trace_id"] == LOOP_TID
     kinds = {f["kind"] for f in out["findings"]}
     assert "repeated_identical_tool" in kinds
     # a clean trace reports no findings rather than inventing one
     clean = json.loads(
-        runner.invoke(
-            app, ["loops", RISKY_TID, "--db", str(seeded_db), "--json"]
-        ).output
+        runner.invoke(app, ["loops", RISKY_TID, "--db", str(seeded_db), "--json"]).output
     )
     assert clean["findings"] == []
 
@@ -280,25 +267,21 @@ def test_loops_repeat_threshold_flag(seeded_db: Path) -> None:
     4-call run is a finding at the default of 3 but not at 5."""
     r = runner.invoke(
         app,
-        ["loops", LOOP_TID, "--db", str(seeded_db),
-         "--repeat-threshold", "5", "--json"],
+        ["loops", LOOP_TID, "--db", str(seeded_db), "--repeat-threshold", "5", "--json"],
     )
     assert r.exit_code == 0, r.output
     assert json.loads(r.output)["findings"] == []
 
 
 def test_efficiency_human_and_json(seeded_db: Path, synthetic_trace: Trace) -> None:
-    r = runner.invoke(
-        app, ["efficiency", synthetic_trace.trace_id, "--db", str(seeded_db)]
-    )
+    r = runner.invoke(app, ["efficiency", synthetic_trace.trace_id, "--db", str(seeded_db)])
     assert r.exit_code == 0, r.output
     assert "tools=1" in r.output
     assert "llm=1" in r.output
 
     r = runner.invoke(
         app,
-        ["efficiency", synthetic_trace.trace_id, "--db", str(seeded_db),
-         "--json"],
+        ["efficiency", synthetic_trace.trace_id, "--db", str(seeded_db), "--json"],
     )
     out = json.loads(r.output)
     assert out["trace_id"] == synthetic_trace.trace_id
@@ -310,15 +293,11 @@ def test_efficiency_human_and_json(seeded_db: Path, synthetic_trace: Trace) -> N
 
 
 def test_recommendations_human_and_json(seeded_db: Path) -> None:
-    r = runner.invoke(
-        app, ["recommendations", LOOP_TID, "--db", str(seeded_db)]
-    )
+    r = runner.invoke(app, ["recommendations", LOOP_TID, "--db", str(seeded_db)])
     assert r.exit_code == 0, r.output
     assert "redundant_tool_calls" in r.output
 
-    r = runner.invoke(
-        app, ["recommendations", LOOP_TID, "--db", str(seeded_db), "--json"]
-    )
+    r = runner.invoke(app, ["recommendations", LOOP_TID, "--db", str(seeded_db), "--json"])
     out = json.loads(r.output)
     assert out["trace_id"] == LOOP_TID
     kinds = {rec["kind"] for rec in out["recommendations"]}
@@ -326,31 +305,23 @@ def test_recommendations_human_and_json(seeded_db: Path) -> None:
 
 
 def test_security_human_and_json(seeded_db: Path) -> None:
-    r = runner.invoke(
-        app, ["security", RISKY_TID, "--db", str(seeded_db)]
-    )
+    r = runner.invoke(app, ["security", RISKY_TID, "--db", str(seeded_db)])
     assert r.exit_code == 0, r.output
     assert "risky_tool" in r.output
 
-    r = runner.invoke(
-        app, ["security", RISKY_TID, "--db", str(seeded_db), "--json"]
-    )
+    r = runner.invoke(app, ["security", RISKY_TID, "--db", str(seeded_db), "--json"])
     out = json.loads(r.output)
     assert out["trace_id"] == RISKY_TID
     assert out["mode"] == "observer"
     kinds = {o["kind"] for o in out["observations"]}
     assert "risky_tool" in kinds
     # the clean synthetic trace produces no observations
-    r = runner.invoke(
-        app, ["security", "a" * 32, "--db", str(seeded_db)]
-    )
+    r = runner.invoke(app, ["security", "a" * 32, "--db", str(seeded_db)])
     assert "no security observations" in r.output
 
 
 def test_replay_human_and_json(seeded_db: Path, synthetic_trace: Trace) -> None:
-    r = runner.invoke(
-        app, ["replay", synthetic_trace.trace_id, "--db", str(seeded_db)]
-    )
+    r = runner.invoke(app, ["replay", synthetic_trace.trace_id, "--db", str(seeded_db)])
     assert r.exit_code == 0, r.output
     assert "3 span(s)" in r.output
     assert "span_start" in r.output
@@ -381,9 +352,7 @@ def test_replay_human_and_json(seeded_db: Path, synthetic_trace: Trace) -> None:
         ["replay"],
     ],
 )
-def test_per_trace_commands_missing_trace_exit_2(
-    seeded_db: Path, cmd: list[str]
-) -> None:
+def test_per_trace_commands_missing_trace_exit_2(seeded_db: Path, cmd: list[str]) -> None:
     """A 404-style lookup is a clean message, never a traceback — same
     behavior for every per-trace analysis command."""
     r = runner.invoke(app, [*cmd, "f" * 32, "--db", str(seeded_db)])
@@ -418,9 +387,7 @@ def test_import_otel_round_trip(tmp_path: Path, otlp_payload: dict) -> None:
     assert "b" * 32 in r.output
 
 
-def test_import_otel_marks_provenance_imported(
-    tmp_path: Path, otlp_payload: dict
-) -> None:
+def test_import_otel_marks_provenance_imported(tmp_path: Path, otlp_payload: dict) -> None:
     from forge_lens.contracts.provenance import Provenance
 
     db = tmp_path / "lens.db"
@@ -433,9 +400,7 @@ def test_import_otel_marks_provenance_imported(
         trace = store.get_trace("b" * 32)
         assert trace is not None
         assert trace.provenance == Provenance.IMPORTED
-        assert all(
-            s.provenance == Provenance.IMPORTED for s in trace.spans
-        )
+        assert all(s.provenance == Provenance.IMPORTED for s in trace.spans)
     finally:
         store.close()
 
@@ -443,9 +408,7 @@ def test_import_otel_marks_provenance_imported(
 def test_import_otel_malformed_json_exits_2(tmp_path: Path) -> None:
     f = tmp_path / "bad.json"
     f.write_text("{not json at all")
-    r = runner.invoke(
-        app, ["import-otel", str(f), "--db", str(tmp_path / "x.db")]
-    )
+    r = runner.invoke(app, ["import-otel", str(f), "--db", str(tmp_path / "x.db")])
     assert r.exit_code == 2
     assert "invalid JSON" in r.output
     assert "Traceback" not in r.output
@@ -454,8 +417,7 @@ def test_import_otel_malformed_json_exits_2(tmp_path: Path) -> None:
 def test_import_otel_missing_file_exits_2(tmp_path: Path) -> None:
     r = runner.invoke(
         app,
-        ["import-otel", str(tmp_path / "nope.json"),
-         "--db", str(tmp_path / "x.db")],
+        ["import-otel", str(tmp_path / "nope.json"), "--db", str(tmp_path / "x.db")],
     )
     assert r.exit_code == 2
     assert "file not found" in r.output
@@ -465,22 +427,16 @@ def test_import_otel_non_object_exits_2(tmp_path: Path) -> None:
     """The API rejects non-object bodies 422 — the CLI answers exit 2."""
     f = tmp_path / "arr.json"
     f.write_text(json.dumps([1, 2, 3]))
-    r = runner.invoke(
-        app, ["import-otel", str(f), "--db", str(tmp_path / "x.db")]
-    )
+    r = runner.invoke(app, ["import-otel", str(f), "--db", str(tmp_path / "x.db")])
     assert r.exit_code == 2
     assert "JSON object" in r.output
 
 
-def test_import_otel_quarantine_warnings(
-    tmp_path: Path, otlp_payload: dict
-) -> None:
+def test_import_otel_quarantine_warnings(tmp_path: Path, otlp_payload: dict) -> None:
     """A malformed span is quarantined + reported as a warning while the
     good span still imports — the batch is not rejected wholesale."""
     payload = otlp_payload
-    spans: list[dict[str, Any]] = payload["resourceSpans"][0][
-        "scopeSpans"
-    ][0]["spans"]
+    spans: list[dict[str, Any]] = payload["resourceSpans"][0]["scopeSpans"][0]["spans"]
     spans.append({"name": "no-ids"})  # missing traceId/spanId
     db = tmp_path / "lens.db"
     f = tmp_path / "otlp.json"
@@ -499,9 +455,7 @@ def test_import_otel_enforces_payload_bound(
     API's _read_capped_body."""
     cfg_dir = tmp_path / ".forge-lens"
     cfg_dir.mkdir()
-    (cfg_dir / "config.toml").write_text(
-        "[lens]\nmax_payload_bytes = 64\n"
-    )
+    (cfg_dir / "config.toml").write_text("[lens]\nmax_payload_bytes = 64\n")
     f = tmp_path / "big.json"
     f.write_text(json.dumps({"resourceSpans": [], "pad": "x" * 512}))
     monkeypatch.chdir(tmp_path)

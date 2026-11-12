@@ -95,9 +95,7 @@ def test_scale_ingest_single_trace(scale_corpus: SeededCorpus, bench: BenchRepor
     sibling project so the seeded corpus keeps its exact counts.
     """
     n, label = scale_corpus.traces, scale_label(scale_corpus.traces)
-    pipeline = IngestPipeline(
-        scale_corpus.store, LensConfig(capture=CaptureLevel.FULL)
-    )
+    pipeline = IngestPipeline(scale_corpus.store, LensConfig(capture=CaptureLevel.FULL))
     lat: list[float] = []
     for j in range(SINGLE_PROBES):
         trace = make_bench_trace(n + j, project_id=f"{scale_corpus.project_id}-probe")
@@ -190,9 +188,7 @@ def test_scale_read_latency(scale_corpus: SeededCorpus, bench: BenchReport) -> N
     assert len(bounded) == 100  # traces mid..mid+99 inclusive
 
 
-def test_scale_rollups_and_point_reads(
-    scale_corpus: SeededCorpus, bench: BenchReport
-) -> None:
+def test_scale_rollups_and_point_reads(scale_corpus: SeededCorpus, bench: BenchReport) -> None:
     store, pid = scale_corpus.store, scale_corpus.project_id
     n, label = scale_corpus.traces, scale_label(scale_corpus.traces)
 
@@ -234,9 +230,7 @@ def test_scale_session_graph(scale_corpus: SeededCorpus, bench: BenchReport) -> 
     graph = _timed_median(
         bench,
         f"scale.graph.session[{label}]",
-        lambda: build_session_graph(
-            "session-07", scale_corpus.project_id, session_traces
-        ),
+        lambda: build_session_graph("session-07", scale_corpus.project_id, session_traces),
         traces=len(session_traces),
     )
     assert len(graph.nodes) == n // SESSION_COUNT
@@ -290,9 +284,7 @@ def test_scale_eval(scale_corpus: SeededCorpus, bench: BenchReport) -> None:
     assert any(s["n"] > 0 for s in report.summary.values())
 
 
-def test_scale_wal_concurrent_readers(
-    scale_corpus: SeededCorpus, bench: BenchReport
-) -> None:
+def test_scale_wal_concurrent_readers(scale_corpus: SeededCorpus, bench: BenchReport) -> None:
     """WAL concurrency note: N reader connections during live writes.
 
     Three reader stores (separate SQLite connections on the same WAL
@@ -325,17 +317,13 @@ def test_scale_wal_concurrent_readers(
                 rows = rstore.list_traces(project_id=pid, limit=50)
                 read_lat.append(time.perf_counter() - t0)
                 if len(rows) != expected_page:
-                    errors.append(
-                        AssertionError(f"page {len(rows)} != {expected_page}")
-                    )
+                    errors.append(AssertionError(f"page {len(rows)} != {expected_page}"))
                 if rstore.get_trace(trace_id_of(0), project_id=pid) is None:
                     errors.append(AssertionError("get_trace(trace-0) miss"))
         except BaseException as exc:  # surfaced to the assertion below
             errors.append(exc)
 
-    threads = [
-        threading.Thread(target=_reader, args=(r,), daemon=True) for r in readers
-    ]
+    threads = [threading.Thread(target=_reader, args=(r,), daemon=True) for r in readers]
     for t in threads:
         t.start()
     time.sleep(0.05)  # let readers get inside their loop before writes
@@ -343,9 +331,7 @@ def test_scale_wal_concurrent_readers(
     pipeline = IngestPipeline(store, LensConfig(capture=CaptureLevel.FULL))
     write_lat: list[float] = []
     for j in range(WAL_WRITES):
-        trace = make_bench_trace(
-            n + SINGLE_PROBES + j, project_id=f"{pid}-walprobe"
-        )
+        trace = make_bench_trace(n + SINGLE_PROBES + j, project_id=f"{pid}-walprobe")
         t0 = time.perf_counter()
         pipeline.ingest([trace])
         write_lat.append(time.perf_counter() - t0)

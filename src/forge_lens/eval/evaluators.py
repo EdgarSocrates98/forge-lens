@@ -48,9 +48,7 @@ def _result(
     )
 
 
-def _error_free(
-    trace: Trace, params: dict[str, Any], now: datetime | None
-) -> EvaluationResult:
+def _error_free(trace: Trace, params: dict[str, Any], now: datetime | None) -> EvaluationResult:
     errs = [s.span_id for s in trace.spans if s.status.code.value == "error"]
     return _result(
         "error_free",
@@ -62,9 +60,7 @@ def _error_free(
     )
 
 
-def _latency_budget(
-    trace: Trace, params: dict[str, Any], now: datetime | None
-) -> EvaluationResult:
+def _latency_budget(trace: Trace, params: dict[str, Any], now: datetime | None) -> EvaluationResult:
     # `max_duration_ms` is the canonical name; `budget_ms` stays accepted
     # — it is what the CLI (`--budget-ms`) and pre-existing specs emit
     if "max_duration_ms" in params:
@@ -77,9 +73,7 @@ def _latency_budget(
     # wire value the caller typed as a number is the only valid shape
     # (same convention as token_budget)
     if isinstance(raw, (bool, str)) or not isinstance(raw, (int, float)):
-        raise TypeError(
-            f"max_duration_ms must be a number, got {type(raw).__name__}"
-        )
+        raise TypeError(f"max_duration_ms must be a number, got {type(raw).__name__}")
     budget = float(raw)
     if not math.isfinite(budget):
         raise ValueError("max_duration_ms must be finite")
@@ -134,21 +128,15 @@ def _latency_budget(
     )
 
 
-def _token_budget(
-    trace: Trace, params: dict[str, Any], now: datetime | None
-) -> EvaluationResult:
+def _token_budget(trace: Trace, params: dict[str, Any], now: datetime | None) -> EvaluationResult:
     raw_budget = params["max_total_tokens"]
     # bool is a subclass of int — True would silently become budget 1;
     # strings parse fine through int() but a wire string is not a
     # number the caller verified; dicts/lists would fail int() anyway.
     # All are invalid params → no verdict (same convention as
     # latency_budget and _count_bound).
-    if isinstance(raw_budget, (bool, str)) or not isinstance(
-        raw_budget, (int, float)
-    ):
-        raise TypeError(
-            f"max_total_tokens must be a number, got {type(raw_budget).__name__}"
-        )
+    if isinstance(raw_budget, (bool, str)) or not isinstance(raw_budget, (int, float)):
+        raise TypeError(f"max_total_tokens must be a number, got {type(raw_budget).__name__}")
     if isinstance(raw_budget, float) and (
         not math.isfinite(raw_budget) or not raw_budget.is_integer()
     ):
@@ -170,9 +158,7 @@ def _token_budget(
             # a producer reporting only the aggregate still counts, and a
             # contradictory `total_tokens=0` with nonzero parts counts the
             # parts (over-counting is the safe direction for budgets)
-            total += u.total_tokens or (
-                (u.input_tokens or 0) + (u.output_tokens or 0)
-            )
+            total += u.total_tokens or ((u.input_tokens or 0) + (u.output_tokens or 0))
     unknown = len(trace.spans) - known
     details = {
         "total_tokens": str(total),
@@ -188,13 +174,15 @@ def _token_budget(
     return _result("token_budget", "within_token_budget", score, trace, now, details)
 
 
-def _tool_success(
-    trace: Trace, params: dict[str, Any], now: datetime | None
-) -> EvaluationResult:
+def _tool_success(trace: Trace, params: dict[str, Any], now: datetime | None) -> EvaluationResult:
     tools = [s for s in trace.spans if s.kind is SpanKind.TOOL]
     if not tools:
         return _result(
-            "tool_success", "tool_success_rate", None, trace, now,
+            "tool_success",
+            "tool_success_rate",
+            None,
+            trace,
+            now,
             {"reason": "no tool spans in trace"},
         )
     bad = [s.span_id for s in tools if s.status.code.value == "error"]
@@ -212,9 +200,7 @@ def _tool_success(
     )
 
 
-def _has_span(
-    trace: Trace, params: dict[str, Any], now: datetime | None
-) -> EvaluationResult:
+def _has_span(trace: Trace, params: dict[str, Any], now: datetime | None) -> EvaluationResult:
     name = params.get("name")
     kind = params.get("kind")
     # malformed filters must not degrade to a silent "span absent" — a
@@ -224,15 +210,13 @@ def _has_span(
         raise TypeError(f"name must be a string, got {type(name).__name__}")
     if kind is not None:
         if not isinstance(kind, str):
-            raise TypeError(
-                f"kind must be a string, got {type(kind).__name__}"
-            )
+            raise TypeError(f"kind must be a string, got {type(kind).__name__}")
         if kind not in _SPAN_KIND_VALUES:
             raise ValueError(f"kind must be a known span kind, got {kind!r}")
     hits = [
-        s for s in trace.spans
-        if (name is None or s.name == name)
-        and (kind is None or s.kind.value == kind)
+        s
+        for s in trace.spans
+        if (name is None or s.name == name) and (kind is None or s.kind.value == kind)
     ]
     return _result(
         "has_span",
@@ -264,9 +248,7 @@ def _observed_value(trace: Trace, field: str) -> tuple[Any, str | None, bool]:
     return None, None, False
 
 
-def _exact_match(
-    trace: Trace, params: dict[str, Any], now: datetime | None
-) -> EvaluationResult:
+def _exact_match(trace: Trace, params: dict[str, Any], now: datetime | None) -> EvaluationResult:
     field = params["field"]  # KeyError → evaluator_error
     if not isinstance(field, str) or not field:
         raise TypeError("field must be a non-empty string")
@@ -300,9 +282,7 @@ def _exact_match(
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
-def _token_f1(
-    trace: Trace, params: dict[str, Any], now: datetime | None
-) -> EvaluationResult:
+def _token_f1(trace: Trace, params: dict[str, Any], now: datetime | None) -> EvaluationResult:
     """Bag-of-tokens F1 between an expected string and an observed field.
 
     Continuous metric — precision/recall when the expected answer is
@@ -326,16 +306,13 @@ def _token_f1(
     exp = Counter(_WORD_RE.findall(expected.lower()))
     obs = Counter(_WORD_RE.findall(observed.lower()))
     if not exp and not obs:
-        return _result("token_f1", "field_token_f1", 1.0, trace, now,
-                       {"field": field, "reason": "both empty"})
+        return _result(
+            "token_f1", "field_token_f1", 1.0, trace, now, {"field": field, "reason": "both empty"}
+        )
     common = sum((exp & obs).values())
     precision = common / sum(obs.values()) if obs else 0.0
     recall = common / sum(exp.values()) if exp else 0.0
-    f1 = (
-        2 * precision * recall / (precision + recall)
-        if precision + recall
-        else 0.0
-    )
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
     return _result(
         "token_f1",
         "field_token_f1",
@@ -351,14 +328,10 @@ def _token_f1(
     )
 
 
-def _allowed_tools(
-    trace: Trace, params: dict[str, Any], now: datetime | None
-) -> EvaluationResult:
+def _allowed_tools(trace: Trace, params: dict[str, Any], now: datetime | None) -> EvaluationResult:
     """Tool-use validation — every TOOL span name ⊆ ``allowed``."""
     allowed = params.get("allowed")
-    if not isinstance(allowed, list) or not all(
-        isinstance(t, str) for t in allowed
-    ):
+    if not isinstance(allowed, list) or not all(isinstance(t, str) for t in allowed):
         raise TypeError("allowed must be a list of tool names")
     allowed_set = set(allowed)
     tools = [s for s in trace.spans if s.kind is SpanKind.TOOL]
@@ -438,9 +411,7 @@ def _output_field(params: dict[str, Any]) -> str:
     return raw
 
 
-def _contains(
-    trace: Trace, params: dict[str, Any], now: datetime | None
-) -> EvaluationResult:
+def _contains(trace: Trace, params: dict[str, Any], now: datetime | None) -> EvaluationResult:
     """Literal-substring check against the trace's observed output."""
     text = params["text"]
     if not isinstance(text, str):
@@ -476,9 +447,7 @@ def _contains(
     )
 
 
-def _regex(
-    trace: Trace, params: dict[str, Any], now: datetime | None
-) -> EvaluationResult:
+def _regex(trace: Trace, params: dict[str, Any], now: datetime | None) -> EvaluationResult:
     """Regex search against the trace's observed output — an invalid
     pattern is a malformed spec (evaluator_error), never a crash."""
     pattern = params["pattern"]
@@ -548,15 +517,9 @@ def _tool_call_count(
         raise ValueError(f"min ({lo}) must be ≤ max ({hi})")
     tool = params.get("tool")
     if tool is not None and (not isinstance(tool, str) or not tool):
-        raise TypeError(
-            f"tool must be a non-empty string, got {type(tool).__name__}"
-        )
+        raise TypeError(f"tool must be a non-empty string, got {type(tool).__name__}")
     tools = [s for s in trace.spans if s.kind is SpanKind.TOOL]
-    counted = (
-        tools
-        if tool is None
-        else [s for s in tools if s.attributes.get("tool.name") == tool]
-    )
+    counted = tools if tool is None else [s for s in tools if s.attributes.get("tool.name") == tool]
     count = len(counted)
     return _result(
         "tool_call_count",
@@ -616,22 +579,17 @@ def _check_schema_node(node: Any, path: str, depth: int) -> None:
     ``evaluator_error``, so a malformed schema is a reported spec bug,
     not a crash and never a silently-relaxed check."""
     if depth > _MAX_SCHEMA_DEPTH:
-        raise ValueError(
-            f"schema nesting exceeds {_MAX_SCHEMA_DEPTH} levels at {path}"
-        )
+        raise ValueError(f"schema nesting exceeds {_MAX_SCHEMA_DEPTH} levels at {path}")
     if not isinstance(node, dict):
         raise TypeError(f"schema at {path} must be an object")
     unknown = sorted(set(node) - _SCHEMA_KEYWORDS)
     if unknown:
-        raise ValueError(
-            f"unsupported schema keyword(s) at {path}: {', '.join(unknown)}"
-        )
+        raise ValueError(f"unsupported schema keyword(s) at {path}: {', '.join(unknown)}")
     if "type" in node:
         tname = node["type"]
         if not isinstance(tname, str) or tname not in _JSON_SCHEMA_TYPES:
             raise ValueError(
-                f"schema type at {path} must be one of "
-                f"{sorted(_JSON_SCHEMA_TYPES)}, got {tname!r}"
+                f"schema type at {path} must be one of {sorted(_JSON_SCHEMA_TYPES)}, got {tname!r}"
             )
     if "required" in node:
         req = node["required"]
@@ -682,9 +640,7 @@ def _schema_type_ok(value: Any, tname: str) -> bool:
         # bool is a subclass of int — True is not a number; NaN/inf are
         # not representable JSON numbers and honestly fail the check
         return (
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and math.isfinite(value)
+            isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
         )
     # integer — JSON has a single number type; an integral float counts
     return (isinstance(value, int) and not isinstance(value, bool)) or (
@@ -692,9 +648,7 @@ def _schema_type_ok(value: Any, tname: str) -> bool:
     )
 
 
-def _check_instance(
-    value: Any, schema: dict[str, Any], path: str, violations: list[str]
-) -> None:
+def _check_instance(value: Any, schema: dict[str, Any], path: str, violations: list[str]) -> None:
     """Apply a validated schema node to an instance, collecting
     ``path: message`` violations. Kind-gated like real JSON Schema:
     ``properties``/``required`` only bind dicts, ``items`` only lists."""
@@ -702,9 +656,7 @@ def _check_instance(
         return
     tname = schema.get("type")
     if tname is not None and not _schema_type_ok(value, tname):
-        violations.append(
-            f"{path}: expected {tname}, got {_json_type_name(value)}"
-        )
+        violations.append(f"{path}: expected {tname}, got {_json_type_name(value)}")
         return  # wrong kind — nested checks would only repeat that fact
     if isinstance(value, dict):
         for key in schema.get("required", []):
@@ -776,11 +728,7 @@ def _schema_validation(
     }
     if violations:
         shown = sorted(violations)
-        suffix = (
-            f"; … truncated at {_MAX_VIOLATIONS}"
-            if len(violations) >= _MAX_VIOLATIONS
-            else ""
-        )
+        suffix = f"; … truncated at {_MAX_VIOLATIONS}" if len(violations) >= _MAX_VIOLATIONS else ""
         details["violations"] = "; ".join(shown) + suffix
     return _result(
         "schema_validation",
@@ -865,9 +813,7 @@ def _evidence_coverage(
     )
 
 
-def _human_review(
-    trace: Trace, params: dict[str, Any], now: datetime | None
-) -> EvaluationResult:
+def _human_review(trace: Trace, params: dict[str, Any], now: datetime | None) -> EvaluationResult:
     """Human-review queue marker — always ``score=None``.
 
     A deterministic engine cannot decide a rubric; the result exists to
@@ -895,8 +841,11 @@ def _canonical_item(item: Any) -> str:
     """Canonical comparison form for expected/observed items — stable
     across dict key order; ``1``/``1.0``/``"1"`` stay distinct."""
     return json.dumps(
-        item, sort_keys=True, separators=(",", ":"),
-        ensure_ascii=True, default=str,
+        item,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        default=str,
     )
 
 
@@ -932,9 +881,7 @@ def _tool_names(trace: Trace) -> set[str]:
     """Semantic tool names actually invoked — ``tool.name`` attribute
     when observed, else the span name (same convention as allowed_tools)."""
     return {
-        str(s.attributes.get("tool.name") or s.name)
-        for s in trace.spans
-        if s.kind is SpanKind.TOOL
+        str(s.attributes.get("tool.name") or s.name) for s in trace.spans if s.kind is SpanKind.TOOL
     }
 
 
@@ -961,9 +908,7 @@ def _precision_recall(
     if not isinstance(tool_sel, bool):
         raise TypeError(f"tool must be a boolean, got {type(tool_sel).__name__}")
     has_field = params.get("field") is not None
-    if has_field and (
-        not isinstance(params["field"], str) or not params["field"]
-    ):
+    if has_field and (not isinstance(params["field"], str) or not params["field"]):
         raise TypeError("field must be a non-empty string")
     if has_field == tool_sel:
         raise ValueError("declare exactly one mode: 'field' or 'tool'")
@@ -999,11 +944,7 @@ def _precision_recall(
     fn = len(set(exp_map) - set(obs_map))
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
-    f1 = (
-        2 * precision * recall / (precision + recall)
-        if precision + recall
-        else 0.0
-    )
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
     details.update(
         {
             "precision": f"{precision:.6f}",
@@ -1011,12 +952,8 @@ def _precision_recall(
             "tp": str(tp),
             "fp": str(fp),
             "fn": str(fn),
-            "missing": ",".join(
-                sorted(exp_map[k] for k in set(exp_map) - set(obs_map))
-            ),
-            "extra": ",".join(
-                sorted(obs_map[k] for k in set(obs_map) - set(exp_map))
-            ),
+            "missing": ",".join(sorted(exp_map[k] for k in set(exp_map) - set(obs_map))),
+            "extra": ",".join(sorted(obs_map[k] for k in set(obs_map) - set(exp_map))),
         }
     )
     if not obs_map:
@@ -1083,9 +1020,7 @@ def _claims_grounded(
     for s in trace.spans:
         if source_attr in s.attributes:
             value = s.attributes[source_attr]
-            sources.append(
-                (s.span_id, value if isinstance(value, str) else _canonical_item(value))
-            )
+            sources.append((s.span_id, value if isinstance(value, str) else _canonical_item(value)))
     if source_attr in trace.resource_attributes:
         value = trace.resource_attributes[source_attr]
         sources.append(

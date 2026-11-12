@@ -67,7 +67,7 @@ def _errors_cell(name: str, schema: dict[str, Any]) -> str:
     footnoted below the table."""
     if "trace_id" in schema.get("required", []):
         if name == "lens.get_trace":
-            return "trace ausente → `{\"trace\": null}`"
+            return 'trace ausente → `{"trace": null}`'
         return "trace ausente → `isError` (`trace not found`)"
     return "—"
 
@@ -120,12 +120,13 @@ def render() -> str:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     mode = ap.add_mutually_exclusive_group()
-    mode.add_argument("--stdout", action="store_true",
-                      help="imprime em vez de escrever o arquivo")
-    mode.add_argument("--check", action="store_true",
-                      help="compara com o arquivo; exit 1 se diferente")
-    ap.add_argument("--out", type=Path, default=OUT_PATH,
-                    help="caminho de saída (default: %(default)s)")
+    mode.add_argument("--stdout", action="store_true", help="imprime em vez de escrever o arquivo")
+    mode.add_argument(
+        "--check", action="store_true", help="compara com o arquivo; exit 1 se diferente"
+    )
+    ap.add_argument(
+        "--out", type=Path, default=OUT_PATH, help="caminho de saída (default: %(default)s)"
+    )
     ns = ap.parse_args(argv)
 
     doc = render()
@@ -135,8 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     if ns.check:
         current = ns.out.read_text(encoding="utf-8") if ns.out.exists() else None
         if current != doc:
-            print(f"{ns.out}: fora de sincronia — rode "
-                  f"scripts/gen_mcp_matrix.py", file=sys.stderr)
+            print(f"{ns.out}: fora de sincronia — rode scripts/gen_mcp_matrix.py", file=sys.stderr)
             return 1
         return 0
     ns.out.write_text(doc, encoding="utf-8")

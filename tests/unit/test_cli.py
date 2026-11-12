@@ -74,9 +74,7 @@ def test_ingest_list_show(tmp_path: Path, synthetic_trace) -> None:
 def test_traces_show_not_found(tmp_path: Path) -> None:
     db = tmp_path / "lens.db"
     runner.invoke(app, ["init", str(tmp_path)])  # creates dirs
-    r = runner.invoke(
-        app, ["traces", "show", "0" * 32, "--db", str(db)]
-    )
+    r = runner.invoke(app, ["traces", "show", "0" * 32, "--db", str(db)])
     # exit 2 — not-found, uniform with every other trace-id command
     assert r.exit_code == 2
 
@@ -96,9 +94,7 @@ def test_version() -> None:
     assert r.output.strip() != ""
 
 
-def test_traces_show_deep_tree_no_recursion_error(
-    tmp_path: Path, synthetic_trace
-) -> None:
+def test_traces_show_deep_tree_no_recursion_error(tmp_path: Path, synthetic_trace) -> None:
     """A chain deeper than the recursion limit must render iteratively."""
     from datetime import timedelta
 
@@ -169,9 +165,7 @@ def test_ingest_rejects_unknown_format(tmp_path: Path) -> None:
     assert "unknown --format" in result.output
 
 
-def test_cli_otlp_import_marks_provenance_imported(
-    tmp_path: Path, otlp_payload: dict
-) -> None:
+def test_cli_otlp_import_marks_provenance_imported(tmp_path: Path, otlp_payload: dict) -> None:
     """File imports carry IMPORTED provenance — the store didn't observe
     the execution itself."""
     from forge_lens.contracts.provenance import Provenance
@@ -190,16 +184,15 @@ def test_cli_otlp_import_marks_provenance_imported(
     store.close()
 
 
-def test_serve_binds_from_endpoint_config(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
+def test_serve_binds_from_endpoint_config(tmp_path: Path, monkeypatch, capsys) -> None:
     """cfg.endpoint is live config: serve derives its default bind from
     it, and --host/--port still override."""
     import uvicorn
 
     calls: list[tuple[str, int]] = []
     monkeypatch.setattr(
-        uvicorn, "run",
+        uvicorn,
+        "run",
         lambda app, host, port, **kw: calls.append((host, port)),
     )
     (tmp_path / ".forge-lens").mkdir()
@@ -214,9 +207,7 @@ def test_serve_binds_from_endpoint_config(
     assert calls == [("10.1.2.3", 8888)]
 
     # explicit flag wins over endpoint config
-    result = CliRunner().invoke(
-        app, ["serve", "--db", str(tmp_path / "x.db"), "--port", "9000"]
-    )
+    result = CliRunner().invoke(app, ["serve", "--db", str(tmp_path / "x.db"), "--port", "9000"])
     assert calls[-1] == ("10.1.2.3", 9000)
 
 
@@ -272,28 +263,23 @@ def test_ingest_malformed_json_uses_formatted_error(tmp_path: Path) -> None:
     assert "Traceback" not in r.output
 
 
-def test_serve_schemeless_endpoint_parses_host_port(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_serve_schemeless_endpoint_parses_host_port(tmp_path: Path, monkeypatch) -> None:
     """`endpoint = "localhost:7777"` (no scheme) must read as host:port —
     urlsplit alone would treat `localhost` as the *scheme*."""
     import uvicorn
 
     calls: list[tuple[str, int]] = []
     monkeypatch.setattr(
-        uvicorn, "run",
+        uvicorn,
+        "run",
         lambda app, host, port, **kw: calls.append((host, port)),
     )
     (tmp_path / ".forge-lens").mkdir()
-    (tmp_path / ".forge-lens" / "config.toml").write_text(
-        '[lens]\nendpoint = "localhost:8888"\n'
-    )
+    (tmp_path / ".forge-lens" / "config.toml").write_text('[lens]\nendpoint = "localhost:8888"\n')
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(app, ["serve"])
     assert result.exit_code == 0, result.output
     assert calls == [("localhost", 8888)]
-
-
 
 
 def test_ingest_enforces_payload_bound(tmp_path: Path, monkeypatch) -> None:
@@ -301,9 +287,7 @@ def test_ingest_enforces_payload_bound(tmp_path: Path, monkeypatch) -> None:
     must not be silently skipped on the file path."""
     cfg_dir = tmp_path / ".forge-lens"
     cfg_dir.mkdir()
-    (cfg_dir / "config.toml").write_text(
-        "[lens]\nproject_id = \"p1\"\nmax_payload_bytes = 64\n"
-    )
+    (cfg_dir / "config.toml").write_text('[lens]\nproject_id = "p1"\nmax_payload_bytes = 64\n')
     f = tmp_path / "big.json"
     f.write_text(json.dumps({"traces": [], "pad": "x" * 512}))
     monkeypatch.chdir(tmp_path)
@@ -320,15 +304,11 @@ def test_ingest_fills_source_from_envelope(tmp_path: Path, synthetic_trace) -> N
 
     t = synthetic_trace.model_copy(deep=True)
     t.source.system = "unknown"
-    env = TraceIngest(
-        traces=[t], source=TraceSource(system="file-importer")
-    )
+    env = TraceIngest(traces=[t], source=TraceSource(system="file-importer"))
     f = tmp_path / "t.json"
     f.write_text(env.model_dump_json())
     db = tmp_path / "lens.db"
-    result = CliRunner().invoke(
-        app, ["ingest", str(f), "--db", str(db)]
-    )
+    result = CliRunner().invoke(app, ["ingest", str(f), "--db", str(db)])
     assert result.exit_code == 0, result.output
     store = SQLiteTraceStore(db)
     try:
@@ -342,9 +322,7 @@ def test_doctor_does_not_create_or_mutate_db(tmp_path: Path) -> None:
     """A health check must not create a store or write into one."""
     db = tmp_path / ".forge-lens" / "lens.db"
     # no db at all → doctor reports "not created", creates nothing
-    result = CliRunner().invoke(
-        app, ["doctor", str(tmp_path), "--db", str(db)]
-    )
+    result = CliRunner().invoke(app, ["doctor", str(tmp_path), "--db", str(db)])
     assert result.exit_code in (0, 1)
     assert not db.exists()
     assert not (tmp_path / ".forge-lens").exists()
@@ -354,9 +332,7 @@ def test_doctor_does_not_create_or_mutate_db(tmp_path: Path) -> None:
 
     SQLiteTraceStore(db).close()
     before = db.read_bytes()
-    result = CliRunner().invoke(
-        app, ["doctor", str(tmp_path), "--db", str(db)]
-    )
+    result = CliRunner().invoke(app, ["doctor", str(tmp_path), "--db", str(db)])
     assert result.exit_code == 0
     assert db.read_bytes() == before
 
