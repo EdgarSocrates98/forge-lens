@@ -118,4 +118,4 @@ packages = ["forge_lens"]
 strict = true
 warn_unreachable = true
 # Vendored Forge UI kit — mesma razão da exclusão de lint.
-exclude = ["forge_lens.ui"]
+exclude = ["forge_lens.ui", "forge_lens._forge_obsidian"]
