@@ -1338,7 +1338,9 @@ def test_environment_contract_variables(fb: Any, tmp_path: Path) -> None:
     # lf-0018 (spec FASE 7): the executor triple is posix|windows|git-bash —
     # under Git Bash (MSYSTEM set) nt reports 'git-bash', matching the
     # canonical test contract.
-    expected = "posix" if os.name != "nt" else ("git-bash" if os.environ.get("MSYSTEM") else "windows")
+    expected = "posix" if os.name != "nt" else (
+        "git-bash" if os.environ.get("MSYSTEM") else "windows"
+    )
     assert doc["execution_environment"] == expected
 
 
