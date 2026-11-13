@@ -1335,7 +1335,11 @@ def test_environment_contract_variables(fb: Any, tmp_path: Path) -> None:
     assert values["FORGE_LENS_HOME"] == str((tmp_path / "repo").resolve())
     assert values["FORGE_LENS_VENV"] == str(venv.resolve())
     assert values["FORGE_LENS_LAUNCHER"] == str((tmp_path / "shim").resolve())
-    assert doc["execution_environment"] == ("windows" if os.name == "nt" else "posix")
+    # lf-0018 (spec FASE 7): the executor triple is posix|windows|git-bash —
+    # under Git Bash (MSYSTEM set) nt reports 'git-bash', matching the
+    # canonical test contract.
+    expected = "posix" if os.name != "nt" else ("git-bash" if os.environ.get("MSYSTEM") else "windows")
+    assert doc["execution_environment"] == expected
 
 
 def test_environment_contract_dist_drops_home(fb: Any, tmp_path: Path) -> None:
