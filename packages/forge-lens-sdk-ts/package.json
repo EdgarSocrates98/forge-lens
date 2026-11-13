@@ -1,6 +1,6 @@
 {
   "name": "@forge-lens/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Zero-dependency TypeScript SDK for Forge Lens agentic observability.",
   "license": "MIT",
   "type": "module",
