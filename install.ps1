@@ -1,10 +1,21 @@
-# Forge account install — wheel runtime + user-scoped environment.
+# Forge account install - wheel runtime + user-scoped environment.
 # Persists HKCU variables and can refresh current session when dot-sourced.
 # The default installs a built wheel (no checkout dependence). Pass --editable
 # for the development flow (CLI tied to this checkout).
+#
+# Presentation: the animated UI lives in scripts/forge_bootstrap.py (stderr);
+# this wrapper styles only its own pre/post messages via Write-Host colors
+# (native - works in Windows Terminal, conhost and VS Code alike).
 $ErrorActionPreference = "Stop"
 $isDotSourced = $MyInvocation.InvocationName -eq "."
 $oldLocation = Get-Location
+
+function Write-ForgeLine {
+    param([string]$Mark, [string]$Color, [string]$Text)
+    $plain = -not $Host.UI.SupportsVirtualTerminal -or $env:NO_COLOR -or $env:CI -or $env:FORGE_NO_UI
+    if ($plain) { Write-Host $Text } else { Write-Host "  $Mark " -ForegroundColor $Color -NoNewline; Write-Host $Text }
+}
+
 try {
     Set-Location -LiteralPath $PSScriptRoot
     $py = $null
@@ -17,13 +28,13 @@ try {
             break
         }
     }
-    if (-not $py) { throw "install: no Python executable on PATH (need >=3.11)" }
+    if (-not $py) { throw "install: FORGE-PYTHON-NOT-FOUND - no Python executable on PATH (need >=3.11); remedy: install Python and reopen the terminal, or pass --python <exe>" }
     $installArgs = @("--persist-env", "--allow-download") + $args
     & $py @pyArgs scripts/forge_bootstrap.py @installArgs
     $status = $LASTEXITCODE
     if ($status -eq 0) {
         if ($args -contains "--dry-run") {
-            Write-Host "Install plan complete. No files, variables or registry entries were written."
+            Write-ForgeLine "o" "Yellow" "plan only - no files, variables or registry entries were written."
             return
         }
         # Bootstrap writes HKCU. Copy canonical variables into this process too;
@@ -36,12 +47,12 @@ try {
             if ($userEnv.Contains($name)) { Set-Item -Path ("Env:" + $name) -Value ([string]$userEnv[$name]) }
         }
         $envFile = Join-Path $(if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $HOME ".config" }) "forjas\env.sh"
-        Write-Host "Install complete. User variables persisted in HKCU:\Environment."
-        Write-Host "Open a new terminal. Git Bash environment file: $envFile"
-        Write-Host "Dot-source to refresh current PowerShell session: .\install.ps1"
+        Write-ForgeLine ">" "Green" "user variables persisted in HKCU:\Environment"
+        Write-ForgeLine ">" "Green" "open a new terminal - Git Bash env file: $envFile"
+        Write-ForgeLine ">" "Green" "refresh this session: . .\install.ps1"
     }
 } catch {
-    Write-Error $_
+    Write-ForgeLine "x" "Red" "install: $_"
     $status = 2
 } finally {
     Set-Location $oldLocation

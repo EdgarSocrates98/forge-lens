@@ -33,11 +33,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import venv
 from pathlib import Path
 from typing import Any
 
-_BOOTSTRAP_VERSION = "1.1.0"
+_BOOTSTRAP_VERSION = "1.2.0"
 SCHEMA_MANIFEST = "forge/InstallationManifest/v1"
 SCHEMA_RECEIPT = "forge/InstallReceipt/v1"
 FORGE_HOME = ".forge"
@@ -55,7 +57,270 @@ class Refusal(Exception):
 
 
 def _log(msg: str) -> None:
-    print(f"[forge-bootstrap] {msg}", flush=True)
+    # stderr: stdout is reserved for the machine-readable JSON report so
+    # `./install.sh | jq` and the Windows wrapper's kind/detail extraction
+    # always see a pure document.
+    print(f"[forge-bootstrap] {msg}", file=sys.stderr, flush=True)
+
+
+# --------------------------------------------------------------------------
+# Presentation layer — stderr only; stdout stays the JSON receipt contract
+# --------------------------------------------------------------------------
+
+_STAGE_LABELS = {
+    "resolve-python": "resolving python",
+    "create-venv": "creating environment",
+    "install-runtime": "installing runtime",
+    "write-launcher": "writing launcher",
+    "persist-environment": "persisting environment",
+    "smoke": "smoke verification",
+    "register": "registering install",
+}
+
+# FORGE-* kind → one-line remediation. Wrapper-emitted kinds are included so
+# a refusal surfaced through either layer still lands on actionable text.
+_REFUSAL_REMEDIES = {
+    "FORGE-INSTALL-NO-CONFIG": "run inside a Forge checkout — forge.json must sit at its root",
+    "FORGE-INSTALL-BAD-CONFIG": "fix forge.json (needs forge_id, package, distribution, cli, python)",
+    "FORGE-INSTALL-PYTHON-INCOMPATIBLE": (
+        "install a matching Python, pass --python <exe>, set FORGE_PYTHON, "
+        "or add --allow-download to let uv fetch one"
+    ),
+    "FORGE-INSTALL-VENV-FAILED": "remove the half-created .venv under the install root and re-run",
+    "FORGE-INSTALL-RUNTIME-FAILED": (
+        "see the pip error above; for offline runs prefer a published --dist "
+        "or a wheelhouse on the pip index"
+    ),
+    "FORGE-INSTALL-CLI-MISSING": "the package installed but exposes no console script — check pyproject [project.scripts]",
+    "FORGE-ENV-PERSISTENCE-FAILED": "re-run without --persist-env, or fix the HKCU/env-file target shown",
+    "FORGE-INSTALL-VERIFY-FAILED": "the CLI installed but `--version` failed — run it once to see the real error",
+    "FORGE-INSTALL-DIST-INVALID": "pass a valid spec: name==1.2.3, name[extra]==1.2.3 or name@URL",
+    "FORGE-INSTALL-DIST-URL": "direct URLs are opt-in — repeat with --allow-url only if the origin is trusted",
+    "FORGE-INSTALL-DIST-MISMATCH": "--dist must match the distribution declared in forge.json",
+    "FORGE-INSTALL-MODE-CONFLICT": "choose either --dist (published) or --editable (checkout), not both",
+    "FORGE-INSTALL-BOOTSTRAP-FAILED": "the bootstrap crashed untyped — the traceback above is the evidence",
+    "FORGE-PYTHON-NOT-FOUND": "install Python and reopen the shell, or pass --python <exe>",
+    "FORGE-PYTHON-UNEXECUTABLE": "fix --python/FORGE_PYTHON, or unset it to use the PATH scan",
+    "FORGE-SHELL-UNAVAILABLE": "use ./install.windows.sh inside Git Bash, or install.ps1 under PowerShell",
+}
+
+
+def _enable_windows_vt() -> None:
+    """Flip ENABLE_VIRTUAL_TERMINAL_PROCESSING on console handles so ANSI
+    lands in legacy conhost too; no-op (and never fatal) elsewhere."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        k32 = ctypes.windll.kernel32
+        for fd in (-11, -12):  # STD_OUTPUT_HANDLE, STD_ERROR_HANDLE
+            handle = k32.GetStdHandle(fd)
+            mode = ctypes.c_ulong()
+            if k32.GetConsoleMode(handle, ctypes.byref(mode)):
+                k32.SetConsoleMode(handle, mode.value | 0x0004)
+    except Exception:  # pragma: no cover — best effort on exotic hosts
+        pass
+
+
+def _ui_forced() -> str | None:
+    """FORGE_BOOTSTRAP_UI escape hatch: 'always' forces the rich UI (tests,
+    forced pipes), 'never'/'plain' forces it off. Anything else → auto."""
+    v = os.environ.get("FORGE_BOOTSTRAP_UI", "").strip().lower()
+    if v in ("always", "on", "rich", "1", "yes", "true"):
+        return "always"
+    if v in ("never", "off", "plain", "0", "no", "false"):
+        return "never"
+    return None
+
+
+class _Ux:
+    """Human-facing install presentation on stderr.
+
+    Rich mode (interactive terminal): banner, numbered stepper with a live
+    braille spinner + elapsed time, dim detail lines, and a closing panel
+    with next steps or the typed refusal + remedy. Plain/auto-off mode:
+    silent — the JSON report on stdout remains the only contract.
+    """
+
+    _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    _SPINNER_ASCII = "|/-\\"
+
+    def __init__(self, enabled: bool):
+        self.enabled = enabled
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._spin_thread: threading.Thread | None = None
+        self._t0 = 0.0
+        self._glyphs = self._pick_glyphs()
+        if enabled:
+            _enable_windows_vt()
+
+    def _pick_glyphs(self) -> dict[str, str]:
+        enc = (getattr(sys.stderr, "encoding", None) or "").lower()
+        uni = "utf" in enc or os.environ.get("WT_SESSION") or os.environ.get("MSYSTEM")
+        if uni:
+            return {
+                "ok": "✓", "fail": "✗", "pending": "○", "bullet": "·",
+                "em": "◆", "arrow": "→", "rule": "─", "spin": self._SPINNER,
+            }
+        return {
+            "ok": "OK", "fail": "X", "pending": "o", "bullet": "-",
+            "em": "*", "arrow": "->", "rule": "-", "spin": self._SPINNER_ASCII,
+        }
+
+    # -- primitives ---------------------------------------------------------
+
+    def _c(self, code: str, text: str) -> str:
+        return f"\x1b[{code}m{text}\x1b[0m"
+
+    def _w(self, text: str = "") -> None:
+        sys.stderr.write(text + "\n")
+        sys.stderr.flush()
+
+    def _live(self, text: str) -> None:
+        sys.stderr.write("\r\x1b[K" + text)
+        sys.stderr.flush()
+
+    # -- top-level blocks ---------------------------------------------------
+
+    def banner(self, forge_id: str, cli: str, method: str, python_spec: str, dry_run: bool) -> None:
+        if not self.enabled:
+            return
+        g, c = self._glyphs, self._c
+        scope = "plan only" if dry_run else "user scope"
+        self._w("")
+        self._w(f"  {c('38;5;208;1', g['em'] + ' FORJAS')} {c('2', g['bullet'])} {c('1', forge_id)}")
+        self._w(
+            f"  {c('2', f'install · {method} · {scope} · python {python_spec}')}"
+        )
+        self._w(f"  {c('2', g['rule'] * 54)}")
+
+    def step_start(self, i: int, n: int, label: str) -> None:
+        if not self.enabled:
+            return
+        self._t0 = time.monotonic()
+        self._stop.clear()
+        self._spin_thread = threading.Thread(
+            target=self._spin, args=(i, n, label), daemon=True
+        )
+        self._spin_thread.start()
+
+    def _spin(self, i: int, n: int, label: str) -> None:
+        g, c = self._glyphs, self._c
+        k = 0
+        while not self._stop.wait(0.09):
+            frame = g["spin"][k % len(g["spin"])]
+            elapsed = time.monotonic() - self._t0
+            with self._lock:
+                self._live(
+                    f"  {c('38;5;208', frame)} {c('2', f'[{i}/{n}]')} {label} {c('2', f'{elapsed:4.1f}s')}"
+                )
+            k += 1
+
+    def step_done(self, i: int, n: int, label: str, *, ok: bool, note: str = "") -> None:
+        if not self.enabled:
+            return
+        self._stop.set()
+        if self._spin_thread is not None:
+            self._spin_thread.join(timeout=0.5)
+            self._spin_thread = None
+        g, c = self._glyphs, self._c
+        dt = time.monotonic() - self._t0
+        mark = c("32", g["ok"]) if ok else c("31", g["fail"])
+        with self._lock:
+            self._w(f"\r\x1b[K  {mark} {c('2', f'[{i}/{n}]')} {label} {c('2', f'{dt:5.1f}s')}")
+            if note:
+                self._w(f"      {c('2', note)}")
+
+    def step_planned(self, i: int, n: int, label: str) -> None:
+        if not self.enabled:
+            return
+        g, c = self._glyphs, self._c
+        self._w(f"  {c('33', g['pending'])} {c('2', f'[{i}/{n}]')} {label} {c('2', 'planned')}")
+
+    def step_skipped(self, i: int, n: int, label: str) -> None:
+        if not self.enabled:
+            return
+        g, c = self._glyphs, self._c
+        self._w(f"  {c('2', g['pending'])} {c('2', f'[{i}/{n}]')} {c('2', label + ' skipped')}")
+
+    def detail(self, msg: str) -> None:
+        """Sub-line under the active step — the channel every stage log uses."""
+        if not self.enabled:
+            _log(msg)
+            return
+        g, c = self._glyphs, self._c
+        with self._lock:
+            self._w(f"\r\x1b[K      {c('2', g['bullet'] + ' ' + msg)}")
+
+    def summary(self, rows: list[tuple[str, str]], next_hint: str | None, *, dry_run: bool) -> None:
+        if not self.enabled:
+            return
+        g, c = self._glyphs, self._c
+        self._w(f"  {c('2', g['rule'] * 54)}")
+        if dry_run:
+            self._w(f"  {c('33', g['pending'])} {c('1', 'install plan')} {c('2', '— nothing was written')}")
+        else:
+            self._w(f"  {c('32', g['ok'])} {c('1', 'install complete')}")
+        self._w("")
+        for key, value in rows:
+            self._w(f"    {c('36', key.ljust(9))} {value}")
+        if next_hint:
+            self._w("")
+            self._w(f"    {c('33', 'next')}  {next_hint}")
+        self._w(f"  {c('2', g['rule'] * 54)}")
+        self._w("")
+
+    def refusal(self, kind: str, detail: str) -> None:
+        if not self.enabled:
+            return
+        g, c = self._glyphs, self._c
+        self._w("")
+        self._w(f"  {c('31', g['fail'])} {c('1;31', 'install refused')} {c('2', g['rule'])} {c('31', kind)}")
+        for chunk in _wrap(detail, 58) or [detail]:
+            self._w(f"    {c('2', chunk)}")
+        remedy = _REFUSAL_REMEDIES.get(kind)
+        if remedy:
+            self._w(f"    {c('33', 'remedy')}  {remedy}")
+        self._w(f"    {c('2', 'receipt: ' + str(forge_home() / INSTALLATIONS))}")
+        self._w("")
+
+    def close(self) -> None:
+        self._stop.set()
+        if self._spin_thread is not None:
+            self._spin_thread.join(timeout=0.5)
+            self._spin_thread = None
+
+
+def _wrap(text: str, width: int) -> list[str]:
+    """textwrap-lite (avoids importing textwrap for two lines of use)."""
+    words, lines, cur = text.split(), [], ""
+    for w in words:
+        if cur and len(cur) + 1 + len(w) > width:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = f"{cur} {w}".strip()
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _ui_enabled(args) -> bool:
+    # Explicit per-invocation flags outrank environment hints.
+    if args.quiet or args.plain:
+        return False
+    forced = _ui_forced()
+    if forced:
+        return forced == "always"
+    if os.environ.get("NO_COLOR") is not None or os.environ.get("FORGE_NO_UI"):
+        return False
+    if os.environ.get("TERM", "") == "dumb":
+        return False
+    if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+        return False
+    return sys.stderr.isatty()
 
 
 def _sha(b: bytes) -> str:
@@ -428,18 +693,16 @@ def install_package(
     if editable:
         cmd.append("-e")
     cmd.append(req)
-    try:
-        r = _run(cmd, timeout=900)
-        if r.returncode != 0:
-            offline_hint = (
-                "" if allow_download else (" — retry with --allow-download if deps are missing")
-            )
-            raise Refusal(
-                "FORGE-INSTALL-RUNTIME-FAILED",
-                f"pip install failed{offline_hint}: {r.stderr.strip()[-400:]}",
-            )
-    finally:
-        shutil.rmtree(whl_dir, ignore_errors=True)
+    r = _run(cmd, timeout=900)
+    if r.returncode != 0:
+        offline_hint = (
+            "" if allow_download else (" — retry with --allow-download if deps are missing")
+        )
+        raise Refusal(
+            "FORGE-INSTALL-RUNTIME-FAILED",
+            f"pip install failed{offline_hint}: {r.stderr.strip()[-400:]}",
+        )
+    shutil.rmtree(whl_dir, ignore_errors=True)
 
 
 # --------------------------------------------------------------------------
@@ -459,14 +722,14 @@ def write_launcher(cli: str, venv: Path, no_launcher: bool, log) -> Path | None:
     d = shim_dir()
     d.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
-        # newline="" keeps the bytes exact — text mode would turn the
-        # .cmd's \r\n into \r\r\n and CRLF the sh shim Git Bash needs.
-        (d / f"{cli}.cmd").write_text(f'@echo off\r\n"{real}" %*\r\n', newline="", encoding="utf-8")
-        (d / cli).write_text(f'#!/bin/sh\nexec "{real}" "$@"\n', newline="", encoding="utf-8")
+        # write_bytes: text mode would translate \n -> \r\n and corrupt the
+        # CRLF .cmd into \r\r\n; the sh shim must stay pure LF for Git Bash.
+        (d / f"{cli}.cmd").write_bytes(f'@echo off\r\n"{real}" %*\r\n'.encode())
+        (d / cli).write_bytes(f'#!/bin/sh\nexec "{real}" "$@"\n'.encode())
         path = d / f"{cli}.cmd"
     else:
         path = d / cli
-        path.write_text(f'#!/bin/sh\nexec "{real}" "$@"\n')
+        path.write_bytes(f'#!/bin/sh\nexec "{real}" "$@"\n'.encode())
         path.chmod(0o755)
     log(f"launcher {path}")
     return path
@@ -546,12 +809,22 @@ def _shell_label() -> str:
     return Path(os.environ.get("SHELL", "")).name.lower().removesuffix(".exe") or "posix"
 
 
+def _posix_home() -> Path:
+    """Home for shell-init files: the ``HOME`` env var is authoritative
+    (POSIX convention, and what Git Bash actually sets). ``Path.home()``
+    ignores ``HOME`` on Windows, which would write the real user's rc
+    files when a caller — tests, or a profile that remaps HOME —
+    overrides it."""
+    return Path(os.environ["HOME"]) if os.environ.get("HOME") else Path.home()
+
+
 def _posix_env_paths() -> tuple[Path, Path]:
-    config_home = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+    home = _posix_home()
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME") or (home / ".config"))
     env_file = config_home / ENV_DIR_NAME / ENV_FILE_NAME
     shell = Path(os.environ.get("SHELL", "/bin/sh")).name.lower().removesuffix(".exe")
     rc_name = {"bash": ".bashrc", "zsh": ".zshrc"}.get(shell, ".profile")
-    return env_file, Path.home() / rc_name
+    return env_file, home / rc_name
 
 
 def _is_git_bash() -> bool:
@@ -854,6 +1127,7 @@ def register(
     hosts: dict,
     environment: dict[str, Any] | None = None,
     installation_method: str | None = None,
+    log=_log,
 ) -> Path:
     doc = {
         "schema": SCHEMA_MANIFEST,
@@ -898,7 +1172,7 @@ def register(
         doc["install_command"] = list(cfg["install_command"])
     path = forge_home() / INSTALLATIONS / f"{cfg['forge_id']}.json"
     _atomic_write(path, (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode())
-    _log(f"registered {path}")
+    log(f"registered {path}")
     return path
 
 
@@ -998,100 +1272,68 @@ def run(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument(
+        "--plain",
+        action="store_true",
+        help="disable the rich UI — same output as a non-TTY run (CI-safe)",
+    )
+    ap.add_argument(
+        "--json",
+        action="store_true",
+        help="always emit the JSON report on stdout, even on an interactive TTY",
+    )
     args = ap.parse_args(argv)
+
+    ui = _Ux(_ui_enabled(args))
+    # The JSON report is the machine contract: it goes to stdout whenever a
+    # parser might be listening (pipes, tests, the Windows tee log) — only a
+    # human watching the terminal live gets the panel instead.
+    emit_json = args.json or not sys.stdout.isatty()
+
+    def emit_refusal(kind: str, detail: str) -> int:
+        doc = {"status": "failed", "error": {"kind": kind, "detail": detail}}
+        if emit_json:
+            print(json.dumps(doc, indent=2))
+        ui.refusal(kind, detail)
+        return 2
 
     def log(m: str) -> None:
         if not args.quiet:
-            _log(m)
+            ui.detail(m)
 
     repo = Path(args.repo).resolve()
     try:
         cfg = load_config(repo)
     except Refusal as exc:
-        print(
-            json.dumps(
-                {"status": "failed", "error": {"kind": exc.kind, "detail": exc.detail}}, indent=2
-            )
-        )
-        return 2
+        return emit_refusal(exc.kind, exc.detail)
 
     extras = [e.strip() for e in args.extras.split(",") if e.strip()] or cfg.get("extras", [])
     install_root = (
         Path(args.install_dir) if args.install_dir else forge_home() / INSTALLS / cfg["forge_id"]
     ).resolve()
     if args.dist is not None and not args.dist.strip():
-        print(
-            json.dumps(
-                {
-                    "status": "failed",
-                    "error": {
-                        "kind": "FORGE-INSTALL-DIST-INVALID",
-                        "detail": "--dist recebeu um spec vazio",
-                    },
-                },
-                indent=2,
-            )
-        )
-        return 2
+        return emit_refusal("FORGE-INSTALL-DIST-INVALID", "--dist recebeu um spec vazio")
     if args.dist and args.editable:
-        print(
-            json.dumps(
-                {
-                    "status": "failed",
-                    "error": {
-                        "kind": "FORGE-INSTALL-MODE-CONFLICT",
-                        "detail": "--dist e --editable sao mutuamente exclusivos",
-                    },
-                },
-                indent=2,
-            )
+        return emit_refusal(
+            "FORGE-INSTALL-MODE-CONFLICT", "--dist e --editable sao mutuamente exclusivos"
         )
-        return 2
     if args.dist:
         if "@" in args.dist and not args.allow_url:
-            print(
-                json.dumps(
-                    {
-                        "status": "failed",
-                        "error": {
-                            "kind": "FORGE-INSTALL-DIST-URL",
-                            "detail": (
-                                f"--dist {redact_url_userinfo(args.dist)!r} usa referencia "
-                                "direta a URL; repita com --allow-url se a origem for confiavel"
-                            ),
-                        },
-                    },
-                    indent=2,
-                )
+            return emit_refusal(
+                "FORGE-INSTALL-DIST-URL",
+                f"--dist {redact_url_userinfo(args.dist)!r} usa referencia "
+                "direta a URL; repita com --allow-url se a origem for confiavel",
             )
-            return 2
         try:
             spec_name, _ = split_dist_spec(args.dist)
         except Refusal as exc:
-            print(
-                json.dumps(
-                    {"status": "failed", "error": {"kind": exc.kind, "detail": exc.detail}},
-                    indent=2,
-                )
-            )
-            return 2
+            return emit_refusal(exc.kind, exc.detail)
         if canonical_dist_name(spec_name) != canonical_dist_name(cfg["distribution"]):
-            print(
-                json.dumps(
-                    {
-                        "status": "failed",
-                        "error": {
-                            "kind": "FORGE-INSTALL-DIST-MISMATCH",
-                            "detail": (
-                                f"--dist {redact_url_userinfo(args.dist)!r} nao corresponde a "
-                                f"distribution={cfg['distribution']!r} do forge.json"
-                            ),
-                        },
-                    },
-                    indent=2,
-                )
+            return emit_refusal(
+                "FORGE-INSTALL-DIST-MISMATCH",
+                f"--dist {redact_url_userinfo(args.dist)!r} nao corresponde a "
+                f"distribution={cfg['distribution']!r} do forge.json",
             )
-            return 2
     source: dict[str, Any] = (
         {
             "kind": "pypi",
@@ -1140,18 +1382,37 @@ def run(argv: list[str] | None = None) -> int:
         "created_at": _now(),
     }
 
+    method = (
+        f"dist {args.dist!r}" if args.dist else ("editable" if args.editable else "wheel")
+    )
+    ui.banner(cfg["forge_id"], cfg["cli"], method, cfg["python"], args.dry_run)
+
+    _step_i = 0
+    _step_n = 6 + (1 if args.persist_env else 0)
+
     def stage(name: str, fn) -> Any:
+        nonlocal _step_i
+        _step_i += 1
+        label = _STAGE_LABELS.get(name, name)
         if args.dry_run:
             report["stages"].append({"stage": name, "status": "planned"})
+            ui.step_planned(_step_i, _step_n, label)
             return None
+        ui.step_start(_step_i, _step_n, label)
         try:
             out = fn()
+            ui.step_done(_step_i, _step_n, label, ok=True)
             report["stages"].append({"stage": name, "status": "done"})
             return out
         except Refusal as exc:
+            ui.step_done(_step_i, _step_n, label, ok=False)
             report["stages"].append(
                 {"stage": name, "status": "refused", "kind": exc.kind, "detail": exc.detail}
             )
+            raise
+        except Exception:
+            # untyped crash — still close the step line honestly
+            ui.step_done(_step_i, _step_n, label, ok=False)
             raise
 
     try:
@@ -1213,7 +1474,9 @@ def run(argv: list[str] | None = None) -> int:
         )
         if args.persist_env:
             if args.dry_run:
+                _step_i += 1
                 report["stages"].append({"stage": "persist-environment", "status": "planned"})
+                ui.step_planned(_step_i, _step_n, _STAGE_LABELS["persist-environment"])
             else:
                 environment = stage(
                     "persist-environment",
@@ -1248,6 +1511,7 @@ def run(argv: list[str] | None = None) -> int:
                 # (pypi-wheel), wheel construida do checkout (wheel) ou
                 # editable presa ao checkout (git-checkout).
                 installation_method=install_method,
+                log=log,
             ),
         )
         report["status"] = "planned" if args.dry_run else "completed"
@@ -1257,14 +1521,29 @@ def run(argv: list[str] | None = None) -> int:
         guide = _path_guidance()
         if guide:
             report["path_guidance"] = guide
-            log(f"NOTE: {guide}")
-        print(json.dumps(report, indent=2, sort_keys=True))
+            if not ui.enabled:
+                log(f"NOTE: {guide}")
+        if emit_json:
+            print(json.dumps(report, indent=2, sort_keys=True))
+        rows: list[tuple[str, str]] = [
+            ("cli", f"{cfg['cli']} {version}"),
+            ("runtime", str(venv_dir or (install_root / '.venv'))),
+            ("launcher", str(shim or (shim_dir() / cfg['cli']))),
+            ("root", str(install_root)),
+            ("receipt", str(forge_home() / INSTALLATIONS / f'.{cfg["forge_id"]}-bootstrap.json')),
+        ]
+        if environment.get("shell_init"):
+            rows.append(("env", str(environment["shell_init"])))
+        ui.summary(rows, guide, dry_run=args.dry_run)
         return 0
     except Refusal as exc:
         report["error"] = {"kind": exc.kind, "detail": exc.detail}
-        print(json.dumps(report, indent=2, sort_keys=True))
+        if emit_json:
+            print(json.dumps(report, indent=2, sort_keys=True))
+        ui.refusal(exc.kind, exc.detail)
         return 2
     finally:
+        ui.close()
         if not args.dry_run:
             write_receipt(cfg, report)
 
