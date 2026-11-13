@@ -11,6 +11,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 
 ## [Unreleased]
 
+### Added
+
+- Documented the verified the-forge -> forge-lens ingest path in
+  `docs/architecture/interoperability.md`: `theforge telemetry export` emits
+  the OTLP `ExportTraceServiceRequest` that `forge-lens ingest` accepts —
+  correlation ids surface as `session.id`, deterministic sha256 span ids
+  dedupe on re-ingest, file provenance stays `imported`.
+
 ## [0.2.3] - 2026-11-12
 
 Cycle 2.7 patch release: federated SDD contracts, forge-context kind taxonomy, Obsidian export verbs, CI hardening and generated-artifact refresh.

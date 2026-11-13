@@ -20,7 +20,7 @@
   contra `TraceIngest` ou OTLP — porta de importação de traces de outras
   ferramentas (Claude Code, agentes próprios) via adaptadores futuros.
 
-## Integrações Forge (preparação, ciclo 10)
+## Integrações Forge
 
 - Sem dependência de código dos repos Forge; integração = **artefatos**:
   export de `Trace`/`Evidence`/`EvaluationResult` em contrato v1 +
@@ -28,6 +28,28 @@
 - MCP: instrumentação só onde existir ponto real de instrumentação
   (cliente/servidor/gateway) — nunca claim de interceptação universal
   (ver `docs/reference/mcp.md`).
+
+### the-forge → forge-lens (verificado e2e)
+
+`theforge telemetry export` re-deriva um `ExportTraceServiceRequest` OTLP
+dos artefatos `RunTelemetry/v1` persistidos (`.forge/runs/<id>/telemetry.json`)
+mais os recibos de `.forge/orchestrations/`:
+
+```bash
+theforge telemetry export --correlation <corr> --out otlp.json
+forge-lens ingest otlp.json
+forge-lens traces list --session <corr>   # session.id carrega o correlation_id
+```
+
+O documento é determinístico (`traceId`/`spanId` são sha256 de ids estáveis:
+correlation id, run id, span id — re-exportar produz bytes idênticos,
+re-ingerir deduplica por `(project, trace, span)`). A provenance do ingest de
+arquivo é `imported` — o estado honesto para evidência re-derivada, nunca
+promovida a `observed`. Estrutura: recibo de orquestração vira a raiz
+`theforge.orchestrate`; cada run vira `theforge.<kind>`; spans locais do
+`RunTelemetry` aninham com `theforge.run_id` por atributo. `parent_run` fora
+da exportação marca `MISSING_PARENT` até o pai ser ingerido — nunca id
+inventado.
 
 ## Não-objetivos de interop
 
