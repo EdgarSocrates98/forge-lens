@@ -3,6 +3,12 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 `Unreleased` acumula mudanças até o próximo tag.
 
+## [0.2.4] — 2026-11-13
+
+### Changed
+
+- Unified platform release: version bump + VERSION_DUMP.unified-release.json.
+
 ## [Unreleased]
 
 ## [0.2.3] - 2026-11-12
