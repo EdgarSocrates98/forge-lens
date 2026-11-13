@@ -58,7 +58,7 @@ types = ["mypy>=1.13"]
 audit = ["pip-audit>=2.7"]
 
 [build-system]
-requires = ["uv_build>=0.8.0,<0.13"]
+requires = ["uv_build>=0.8.0,<0.14"]
 build-backend = "uv_build"
 
 # The PyPI distribution is `forge-lens-fl` but the import package stays
