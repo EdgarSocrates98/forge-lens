@@ -1170,12 +1170,6 @@ def register(
         # resolved by the delegator) for forges whose package boundary
         # forbids an in-package install engine.
         doc["install_command"] = list(cfg["install_command"])
-    # --- divergence patch (cycle16 wave-09) — begin ----------------------
-    # Backport of the install-2.1 register-propagation block the canonical
-    # the-forge variant carries at installkit/forge_bootstrap.py register().
-    # This vendored copy tracks the forge-doctor-api 1.2.0 line, which
-    # lacks it; wave-12 fixes the canonical there and a later re-sync
-    # drops this patch. Kept verbatim so the delta is exactly this block.
     if cfg.get("installation_kind"):
         # Declared install kind (install-2.1) — content|service|control-tool,
         # validated by the registry manifest schema, never fabricated.
@@ -1195,7 +1189,6 @@ def register(
     if cfg.get("depends_on"):
         # Declared install-order dependencies (forge_ids installed first).
         doc["depends_on"] = [str(d) for d in cfg["depends_on"]]
-    # --- divergence patch (cycle16 wave-09) — end ------------------------
     path = forge_home() / INSTALLATIONS / f"{cfg['forge_id']}.json"
     _atomic_write(path, (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode())
     log(f"registered {path}")
