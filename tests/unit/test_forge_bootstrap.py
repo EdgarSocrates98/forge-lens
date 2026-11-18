@@ -1315,6 +1315,73 @@ def test_write_receipt_hidden_bootstrap_file(fb: Any, forge_home: Path) -> None:
     assert json.loads(path.read_text(encoding="utf-8")) == receipt
 
 
+def test_register_propagates_install_2_1_declarations(
+    fb: Any, forge_home: Path, tmp_path: Path
+) -> None:
+    """install-2.1 divergence patch: installation_kind/install/depends_on
+    declared in forge.json land verbatim in the registry manifest."""
+    cfg = {
+        "forge_id": "forge-lens",
+        "package": "forge_lens",
+        "distribution": "forge-lens",
+        "cli": "forge-lens",
+        "python": ">=3.11",
+        "installation_kind": "service",
+        "install": {
+            "operations": ["apply", "status"],
+            "flags": ["--yes"],
+            "hosts": ["claude"],
+            "scopes": ["project", "workspace"],
+            "profiles": ["recommended"],
+            "approval": "--yes",
+        },
+        "depends_on": ["forge-agent-bridge"],
+    }
+    path = fb.register(**_register_kwargs(cfg, tmp_path))
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert doc["installation_kind"] == "service"
+    assert doc["install"] == cfg["install"]
+    assert doc["depends_on"] == ["forge-agent-bridge"]
+
+
+def test_register_rejects_unknown_installation_kind(
+    fb: Any, forge_home: Path, tmp_path: Path
+) -> None:
+    """A kind outside content|service|control-tool is a config refusal,
+    not a silently-persisted value."""
+    cfg = {
+        "forge_id": "forge-lens",
+        "package": "forge_lens",
+        "distribution": "forge-lens",
+        "cli": "forge-lens",
+        "python": ">=3.11",
+        "installation_kind": "middleware",
+    }
+    import pytest
+
+    with pytest.raises(fb.Refusal, match="FORGE-INSTALL-BAD-CONFIG"):
+        fb.register(**_register_kwargs(cfg, tmp_path))
+
+
+def test_register_without_install_2_1_keys_omits_them(
+    fb: Any, forge_home: Path, tmp_path: Path
+) -> None:
+    """Older forge.json files (no install-2.1 keys) still register — the
+    block is opt-in, never fabricated."""
+    cfg = {
+        "forge_id": "forge-lens",
+        "package": "forge_lens",
+        "distribution": "forge-lens",
+        "cli": "forge-lens",
+        "python": ">=3.11",
+    }
+    path = fb.register(**_register_kwargs(cfg, tmp_path))
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert "installation_kind" not in doc
+    assert "install" not in doc
+    assert "depends_on" not in doc
+
+
 # --------------------------------------------------------------------------
 # environment contract + shell persistence
 # --------------------------------------------------------------------------

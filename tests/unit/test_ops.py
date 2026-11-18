@@ -724,7 +724,7 @@ def test_uninstall_corrupt_receipt_no_crash(tmp_path: Path) -> None:
 
     write_receipt(tmp_path, {"files": [1, {"x": 1}, None, "a.txt"]})
     (tmp_path / "a.txt").write_text("x")
-    out = uninstall(tmp_path, ts_ns=1)
+    out = uninstall(tmp_path, ts_ns=1, approved=True)
     assert out["removed"] == ["a.txt"]  # junk entries skipped
 
 

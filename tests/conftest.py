@@ -35,6 +35,22 @@ def tmp_store(tmp_path: Path) -> SQLiteTraceStore:
     store.close()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_forge_home(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Redirect the account install layer (``~/.forge``) into a per-test
+    tmp dir — install-status assertions stay deterministic whether or
+    not the host machine has a real forge-lens account install. Tests
+    that need a specific account state set the same env var (or the
+    dedicated fixtures in test_install_surface/test_forge_bootstrap),
+    which override this default. Kept outside ``tmp_path`` so tests
+    asserting exact directory listings are unaffected."""
+    home = tmp_path_factory.mktemp("forge-home")
+    (home / ".forge" / "installations").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("FORGE_HOME_OVERRIDE", str(home))
+
+
 @pytest.fixture
 def synthetic_trace() -> Trace:
     """A deterministic small trace: agent → llm + tool."""

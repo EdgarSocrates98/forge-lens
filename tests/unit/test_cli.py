@@ -338,7 +338,8 @@ def test_doctor_does_not_create_or_mutate_db(tmp_path: Path) -> None:
 
 
 def test_install_lifecycle_verbs(tmp_path: Path) -> None:
-    """`install` writes a receipt; status/doctor read it; uninstall removes it."""
+    """`install` writes a canonical receipt; status/doctor verify real
+    state; uninstall removes tracked files (gated by --yes)."""
     d = tmp_path / ".forge-lens"
 
     dry = runner.invoke(app, ["install", "--data-dir", str(d), "--dry-run"])
@@ -348,13 +349,18 @@ def test_install_lifecycle_verbs(tmp_path: Path) -> None:
 
     applied = runner.invoke(
         app,
-        ["install", "--data-dir", str(d), "--file", "artifacts/x.db"],
+        ["install", "--data-dir", str(d), "--file", "artifacts/x.db", "--yes"],
     )
     assert applied.exit_code == 0
     receipt = json.loads(applied.output)["receipt"]
-    assert receipt["files"] == ["artifacts/x.db"]
+    assert receipt["schema"] == "forge/InstallReceipt/v1"
+    assert receipt["operation"] == "install"
+    assert receipt["status"] == "completed"
+    assert receipt["managed_files"] == ["artifacts/x.db", "config.toml"]
 
-    bad = runner.invoke(app, ["install", "--data-dir", str(d), "--profile", "bogus"])
+    bad = runner.invoke(
+        app, ["install", "--data-dir", str(d), "--profile", "bogus", "--yes"]
+    )
     assert bad.exit_code == 1
     assert "profile must be one of" in bad.output
 
@@ -366,7 +372,7 @@ def test_install_lifecycle_verbs(tmp_path: Path) -> None:
     assert doc.exit_code == 0
     assert json.loads(doc.output)["ok"] is True
 
-    un = runner.invoke(app, ["install", "uninstall", "--data-dir", str(d)])
+    un = runner.invoke(app, ["install", "uninstall", "--data-dir", str(d), "--yes"])
     assert un.exit_code == 0
     st2 = runner.invoke(app, ["install", "status", "--data-dir", str(d)])
-    assert json.loads(st2.output)["receipt"]["action"] == "uninstall"
+    assert json.loads(st2.output)["receipt"]["operation"] == "uninstall"

@@ -991,18 +991,20 @@ def test_install_verbs_smoke(tmp_path: Path) -> None:
     assert r.exit_code == 1
     assert json.loads(r.stdout)["ok"] is False
 
-    r = runner.invoke(app, ["install", "--data-dir", str(d), "--profile", "minimal"])
+    r = runner.invoke(
+        app, ["install", "--data-dir", str(d), "--profile", "minimal", "--yes"]
+    )
     assert r.exit_code == 0
     r = runner.invoke(app, ["install", "status", "--data-dir", str(d)])
     assert json.loads(r.stdout)["installed"] is True
 
-    r = runner.invoke(app, ["install", "uninstall", "--data-dir", str(d)])
+    r = runner.invoke(app, ["install", "uninstall", "--data-dir", str(d), "--yes"])
     assert r.exit_code == 0
     out = json.loads(r.stdout)
     assert "removed" in out
     assert "prior_receipt" in out
     r = runner.invoke(app, ["install", "status", "--data-dir", str(d)])
-    assert json.loads(r.stdout)["receipt"]["action"] == "uninstall"
+    assert json.loads(r.stdout)["receipt"]["operation"] == "uninstall"
 
 
 def test_install_apply_is_not_a_subcommand(tmp_path: Path) -> None:
