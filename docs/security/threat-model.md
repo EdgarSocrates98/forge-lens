@@ -87,6 +87,13 @@ Cada item abaixo tem teste que reproduz o ataque e verifica o veredito
   credenciais mas ficam imunes ao e-mail-mask: mascarar chave de join
   quebraria correlação silenciosamente (regra uniforme de `sanitize_trace`
   e `redact_export`).
+- **Mutação de instalação exige aprovação** (install-2.1): `install` e
+  `install uninstall` só escrevem com `--yes` ou confirmação interativa
+  default **Não**; `--no-input` nunca aprova e `--dry-run` nunca escreve.
+  `uninstall` aplica containment por path resolvido — só remove arquivos
+  rastreados dentro do data-dir, e a camada de conta
+  (`~/.forge/installations`, venv, launcher) é observada, jamais
+  modificada, pelo lifecycle CLI.
 
 ## Resíduos aceitos
 

@@ -277,34 +277,54 @@ se o DB não existir ou `pricing_file` for inválido. Tools em
 
 ## `forge-lens install-status [--data-dir <path>]`
 
-Lê o receipt de instalação (`install/receipt.json`) sem criar
+Estado real de instalação (`status` + `doctor` combinados) sem criar
 diretórios — operação read-only.
 
 ## `forge-lens install`
 
-Ciclo de vida do receipt de instalação (auditável, local-first). O
-instalador portátil real é `install.sh`/`install.ps1` na raiz do repo —
-estes verbos gerenciam o receipt em `<data-dir>/install/`:
+Ciclo de vida de instalação project/workspace-scope (Install 2.1) —
+prepara o state dir local e grava um receipt canônico
+`forge/InstallReceipt/v1` em `<data-dir>/install/receipts/` +
+ponteiro `install/receipt.json`. O runtime de conta
+(venv/launcher/registry `~/.forge`) é do instalador portátil
+`install.sh`/`install.ps1` — estes verbos observam essa camada, nunca
+a escrevem:
 
 ```bash
-forge-lens install [--profile minimal|recommended|full]
+forge-lens install [--scope project|workspace] [--root <path>]
+                   [--profile minimal|recommended|full]
                    [--source pypi|wheel|git|zip|local|gitless|offline]
-                   [--file <managed-file>]... [--dry-run]
+                   [--file <managed-file>]...
+                   [--host <h>] [--components <csv>]
+                   [--gateway-profile <g>]
+                   [--dry-run] [--yes|-y|--no-input] [--json]
                    [--data-dir <path>]
-forge-lens install status    [--data-dir <path>]   # receipt lido
-forge-lens install doctor    [--data-dir <path>]   # health; exit 1 se falha
-forge-lens install uninstall [--data-dir <path>]   # remove arquivos rastreados
+forge-lens install status    [--root <path>|--data-dir <path>]
+forge-lens install doctor    [--root <path>|--data-dir <path>] # exit 1 se check obrigatório falha
+forge-lens install uninstall [--root <path>|--data-dir <path>] [--yes|-y|--no-input]
 ```
 
-`install` sem subcomando grava o receipt (`--dry-run` só imprime);
-`uninstall` remove apenas arquivos dentro do data-dir contidos no
-receipt (containment por path resolvido) e deixa um receipt de
-`uninstall` — a remoção é provável, não silenciosa.
+`install` sem subcomando aplica (`--dry-run` só imprime o plano e não
+escreve nada). `--root` mapeia o data-dir para `<root>/.forge-lens` —
+é a forma que o orquestrador do the-forge delega (`install_command`
++ `--scope/--root/--host/--profile/--yes`); flags sem significado para
+o lens (`--host`, `--components`, `--gateway-profile`) são aceitas
+verbatim e registradas em `flags_recorded_not_applicable`.
+
+Mutação exige aprovação: `--yes` ou confirmação interativa com default
+Não; sem isso o verbo sai 1 com `FORGE-INSTALL-PLAN-NOT-APPROVED` e
+nada é escrito. `--scope user` sai 1 com
+`FORGE-INSTALL-SCOPE-UNSUPPORTED` (camada do bootstrap).
+`status`/`doctor` verificam estado real nas duas camadas — um receipt
+sozinho reporta `receipt_recorded`/`UNVERIFIED`, nunca `installed`.
+`uninstall` remove apenas arquivos rastreados dentro do data-dir
+(containment por path resolvido) e grava um receipt `uninstall` com a
+fronteira de escopo — o runtime de conta não é tocado.
 
 Escopo das flags: `--data-dir` no grupo liga o verbo `install` sem
-subcomando; `status`/`doctor`/`uninstall` ligam o próprio `--data-dir`
-— passe a flag depois do verbo (`forge-lens install status --data-dir
-X`), não antes.
+subcomando; `status`/`doctor`/`uninstall` ligam o próprio
+`--data-dir`/`--root` — passe a flag depois do verbo
+(`forge-lens install status --data-dir X`), não antes.
 
 ## Instalador portátil (`install.sh` / `install.ps1`)
 

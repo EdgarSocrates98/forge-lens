@@ -33,6 +33,28 @@ Leia os `[FAIL]` — cada linha diz o check e o detalhe. Comum: `data dir`
 inexistente (rode `forge-lens init`) e DB corrompido (restaure do backup
 ou recomece — é um arquivo único).
 
+## `install` sai 1 com `FORGE-INSTALL-PLAN-NOT-APPROVED`
+
+Falta a aprovação da mutação — passe `--yes` (não-interativo) ou responda
+`y` na confirmação (default é **Não**; Enter vazio não instala).
+`--no-input` sem `--yes` nunca aprova.
+
+## `install` sai 1 com `FORGE-INSTALL-SCOPE-UNSUPPORTED`
+
+`--scope user` não é superfície do lifecycle CLI — o runtime de conta
+(venv, launcher, registry `~/.forge`) é instalado por
+`./install.sh`/`install.ps1`. Use `--scope project` (default) ou
+`workspace`.
+
+## `install status` mostra `receipt_recorded` / `unverified`
+
+Há um receipt em `<data-dir>/install/receipt.json` mas o estado que ele
+descreve não existe (`config.toml`/`artifacts/` ausentes, ou a conta sem
+manifesto/venv). Receipt é trilha de auditoria, não prova — `installed`
+só aparece com estado real observado. Re-instale com `forge-lens
+install --yes` ou verifique `~/.forge/installations/forge-lens.json`
+(camada de conta, via `./install.sh`).
+
 ## JSON Schema fora de sincronia
 
 `python -m forge_lens.contracts.jsonschema` regenara `schemas/v1/`; CI
