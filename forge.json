@@ -13,6 +13,47 @@
     "forge-lens",
     "mcp-serve"
   ],
+  "mcp_verify_tool": "lens.capabilities",
+  "installation_kind": "service",
+  "install": {
+    "operations": [
+      "plan",
+      "apply",
+      "status",
+      "doctor",
+      "uninstall",
+      "mcp-verify"
+    ],
+    "flags": [
+      "--scope",
+      "--root",
+      "--host",
+      "--profile",
+      "--components",
+      "--gateway-profile",
+      "--yes",
+      "--no-input",
+      "--dry-run",
+      "--data-dir",
+      "--file",
+      "--source",
+      "--json"
+    ],
+    "hosts": [
+      "claude"
+    ],
+    "scopes": [
+      "project",
+      "workspace"
+    ],
+    "profiles": [
+      "minimal",
+      "recommended",
+      "full"
+    ],
+    "approval": "--yes"
+  },
+  "depends_on": [],
   "install_command": [
     "{python}",
     "-m",
