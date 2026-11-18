@@ -47,7 +47,15 @@
       "read_only": true
     }
   ],
-  "skills": [],
+  "skills": [
+    "forge-lens-context-analysis",
+    "forge-lens-cost-analysis",
+    "forge-lens-evaluate-agent",
+    "forge-lens-graph-explorer",
+    "forge-lens-investigate-failure",
+    "forge-lens-loop-detection",
+    "forge-lens-trace-analysis"
+  ],
   "agents": [
     "lens-trace-analyst",
     "lens-observability-reviewer",
