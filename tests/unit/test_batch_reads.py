@@ -430,11 +430,13 @@ def test_install_receipt_write_failure_is_clean(tmp_path: Path) -> None:
         source="local",
         files=[],
         ts_ns=1,
+        approved=True,
     )
     assert out["ok"] is False
-    assert "receipt write failed" in out["error"]
+    # state-dir init is the first write — it fails before any receipt
+    assert "init failed" in out["error"]
 
-    out = lifecycle.uninstall(blocker, ts_ns=1)
+    out = lifecycle.uninstall(blocker, ts_ns=1, approved=True)
     assert out["ok"] is False
     assert "receipt write failed" in out["error"]
 
@@ -443,12 +445,12 @@ def test_cli_install_uninstall_unwritable_dir_no_traceback(tmp_path: Path) -> No
     runner = CliRunner()
     blocker = tmp_path / "data-dir"
     blocker.write_text("not a directory")
-    r = runner.invoke(cli_app, ["install", "--data-dir", str(blocker)])
+    r = runner.invoke(cli_app, ["install", "--data-dir", str(blocker), "--yes"])
     assert r.exit_code == 1
     assert "Traceback" not in r.output
-    assert "receipt write failed" in r.output
+    assert "init failed" in r.output
 
-    r = runner.invoke(cli_app, ["install", "uninstall", "--data-dir", str(blocker)])
+    r = runner.invoke(cli_app, ["install", "uninstall", "--data-dir", str(blocker), "--yes"])
     assert r.exit_code == 1
     assert "Traceback" not in r.output
     assert "receipt write failed" in r.output
@@ -464,13 +466,14 @@ def test_install_uninstall_happy_path_still_ok(tmp_path: Path) -> None:
         source="local",
         files=["managed/x.txt"],
         ts_ns=1,
+        approved=True,
     )
     assert out["ok"] is True
     managed = d / "managed" / "x.txt"
     managed.parent.mkdir(parents=True, exist_ok=True)
     managed.write_text("payload")
-    out = lifecycle.uninstall(d, ts_ns=2)
+    out = lifecycle.uninstall(d, ts_ns=2, approved=True)
     assert out["ok"] is True
-    assert out["removed"] == ["managed/x.txt"]
-    assert out["prior_receipt"]["action"] == "install"
+    assert out["removed"] == ["config.toml", "managed/x.txt"]
+    assert out["prior_receipt"]["operation"] == "install"
     assert not managed.exists()

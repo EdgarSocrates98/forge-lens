@@ -47,10 +47,13 @@ intel_app = typer.Typer(help="Fleet-level intelligence over stored traces.", no_
 app.add_typer(intel_app, name="intel")
 install_app = typer.Typer(
     help=(
-        "Install lifecycle — record an install receipt, inspect status, "
-        "health-check, or uninstall tracked files. The portable bootstrap "
-        "(install.sh/install.ps1) performs the real install; these verbs "
-        "manage the receipt it leaves under <data-dir>/install/."
+        "Install lifecycle — project/workspace-scope: prepare the local "
+        ".forge-lens/ state dir and write a canonical "
+        "forge/InstallReceipt/v1 receipt; inspect real status; "
+        "health-check; or receipt-scope uninstall. The account runtime "
+        "(venv, launcher, ~/.forge registry) is installed by the "
+        "portable bootstrap (install.sh/install.ps1) — these verbs "
+        "observe that layer, never write it."
     ),
     invoke_without_command=True,
     no_args_is_help=False,
@@ -1495,7 +1498,7 @@ def import_otel(
 def install_status(
     data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
 ) -> None:
-    """Show install receipt / doctor report."""
+    """Show verified install state / install doctor report."""
     import json as _json
 
     from forge_lens.install.lifecycle import doctor, status
@@ -1504,40 +1507,119 @@ def install_status(
     typer.echo(_json.dumps({"status": status(d), "doctor": doctor(d)}, indent=2))
 
 
-def _install_data_dir(data_dir: Path | None) -> Path:
-    return data_dir or Path("./.forge-lens")
+def _install_data_dir(data_dir: Path | None, root: Path | None = None) -> Path:
+    """``--data-dir`` wins; ``--root`` maps to ``<root>/.forge-lens``
+    (the delegation contract); bare install keeps ``./.forge-lens``."""
+    if data_dir is not None:
+        return data_dir
+    if root is not None:
+        return root / ".forge-lens"
+    return Path("./.forge-lens")
+
+
+def _install_approved(yes: bool, no_input: bool, what: str) -> bool:
+    """install-2.1 approval gate: ``--yes`` for non-interactive callers
+    (the orchestrator sends it); on a real TTY a confirm that defaults
+    to **No** — an empty Enter never mutates. ``--no-input`` without
+    ``--yes`` can never approve."""
+    if yes:
+        return True
+    if no_input:
+        return False
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return False
+    return typer.confirm(
+        f"{what} writes to the data dir — proceed?", default=False
+    )
 
 
 @install_app.callback()
 def install_apply(
     ctx: typer.Context,
-    data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    data_dir: Annotated[
+        Path | None,
+        typer.Option("--data-dir", help="State dir (default ./.forge-lens or <root>/.forge-lens)."),
+    ] = None,
+    scope: Annotated[
+        str,
+        typer.Option("--scope", help="project|workspace ('user' is bootstrap-owned)."),
+    ] = "project",
+    root: Annotated[
+        Path | None,
+        typer.Option("--root", help="Target root — data dir defaults to <root>/.forge-lens."),
+    ] = None,
+    host: Annotated[
+        str | None,
+        typer.Option(
+            "--host",
+            help="Accepted verbatim + recorded NOT_APPLICABLE — lens deploys "
+            "no host-side assets at install time.",
+        ),
+    ] = None,
     profile: Annotated[
         str, typer.Option("--profile", help="minimal|recommended|full.")
     ] = "recommended",
     source: Annotated[
         str, typer.Option("--source", help="pypi|wheel|git|zip|local|gitless|offline.")
     ] = "local",
+    components: Annotated[
+        str | None,
+        typer.Option(
+            "--components",
+            help="csv — accepted verbatim + recorded NOT_APPLICABLE "
+            "(no install-time component vocabulary).",
+        ),
+    ] = None,
+    gateway_profile: Annotated[
+        str | None,
+        typer.Option(
+            "--gateway-profile",
+            help="Accepted verbatim + recorded NOT_APPLICABLE "
+            "(lens has no gateway depth semantics).",
+        ),
+    ] = None,
     file: Annotated[
         list[str] | None,
         typer.Option("--file", help="Managed file (relative to data-dir); repeatable."),
     ] = None,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Approve the mutation non-interactively.")
+    ] = False,
+    no_input: Annotated[
+        bool, typer.Option("--no-input", help="Never prompt — requires --yes to mutate.")
+    ] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    json_out: Annotated[
+        bool,
+        typer.Option("--json", help="JSON receipt on stdout (already the default contract)."),
+    ] = False,
 ) -> None:
-    """Record an install receipt (no subcommand = apply)."""
+    """Project/workspace-scope install (no subcommand = apply).
+
+    Prepares the local state dir and writes a canonical
+    ``forge/InstallReceipt/v1`` receipt — the same envelope the-forge's
+    orchestrator discovers under ``<root>/.forge-lens/install/receipts/``.
+    """
     if ctx.invoked_subcommand is not None:
         return
     import time
 
     from forge_lens.install.lifecycle import install
 
+    comps = [c.strip() for c in components.split(",") if c.strip()] if components else None
     out = install(
-        _install_data_dir(data_dir),
+        _install_data_dir(data_dir, root),
+        scope=scope,
+        root=root,
+        host=host,
         profile=profile,
         source=source,
+        components=comps,
+        gateway_profile=gateway_profile,
         files=list(file or []),
         ts_ns=time.time_ns(),
         dry_run=dry_run,
+        approved=_install_approved(yes, no_input, "install"),
     )
     typer.echo(json.dumps(out, indent=2))
     if not out.get("ok"):
@@ -1547,21 +1629,29 @@ def install_apply(
 @install_app.command("status")
 def install_status_cmd(
     data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    root: Annotated[
+        Path | None,
+        typer.Option("--root", help="Target root — data dir defaults to <root>/.forge-lens."),
+    ] = None,
 ) -> None:
-    """Show the install receipt, if any."""
+    """Verified install state — receipt, project layer, account layer."""
     from forge_lens.install.lifecycle import status
 
-    typer.echo(json.dumps(status(_install_data_dir(data_dir)), indent=2))
+    typer.echo(json.dumps(status(_install_data_dir(data_dir, root)), indent=2))
 
 
 @install_app.command("doctor")
 def install_doctor_cmd(
     data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    root: Annotated[
+        Path | None,
+        typer.Option("--root", help="Target root — data dir defaults to <root>/.forge-lens."),
+    ] = None,
 ) -> None:
-    """Health-check the install receipt and data dir."""
+    """Health-check the install — state dir, receipt, account runtime."""
     from forge_lens.install.lifecycle import doctor
 
-    out = doctor(_install_data_dir(data_dir))
+    out = doctor(_install_data_dir(data_dir, root))
     typer.echo(json.dumps(out, indent=2))
     if not out.get("ok"):
         raise typer.Exit(1)
@@ -1570,13 +1660,32 @@ def install_doctor_cmd(
 @install_app.command("uninstall")
 def install_uninstall_cmd(
     data_dir: Annotated[Path | None, typer.Option("--data-dir")] = None,
+    root: Annotated[
+        Path | None,
+        typer.Option("--root", help="Target root — data dir defaults to <root>/.forge-lens."),
+    ] = None,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Approve the mutation non-interactively.")
+    ] = False,
+    no_input: Annotated[
+        bool, typer.Option("--no-input", help="Never prompt — requires --yes to mutate.")
+    ] = False,
 ) -> None:
-    """Remove tracked files and write an uninstall receipt."""
+    """Remove tracked files and write an uninstall receipt.
+
+    Receipt-scope only: the account runtime (venv, launcher, registry
+    manifest, account env) is owned by the portable bootstrap and is
+    never removed by this verb.
+    """
     import time
 
     from forge_lens.install.lifecycle import uninstall
 
-    out = uninstall(_install_data_dir(data_dir), ts_ns=time.time_ns())
+    out = uninstall(
+        _install_data_dir(data_dir, root),
+        ts_ns=time.time_ns(),
+        approved=_install_approved(yes, no_input, "uninstall"),
+    )
     typer.echo(json.dumps(out, indent=2))
     if not out.get("ok"):
         raise typer.Exit(1)

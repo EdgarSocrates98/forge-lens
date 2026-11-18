@@ -64,6 +64,25 @@ Tempos armazenados como unix-nanos inteiros (`INTEGER NOT NULL` onde o
 contrato exige) — conversão por aritmética inteira, sem floats; o store
 não lê relógio (`first_seen`/`last_seen` derivam dos dados da trace).
 
+## Layout do data-dir (camada de instalação project/workspace)
+
+`<data-dir>/` (default `./.forge-lens`, ou `<root>/.forge-lens` quando o
+orquestrador delega com `--root`):
+
+- `config.toml` — configuração do projeto (criada por `init`/`install`,
+  nunca sobrescrita).
+- `artifacts/` — DB(s) SQLite e artefatos por projeto.
+- `install/receipts/<op>-<ts>.json` — histórico de receipts canônicos
+  `forge/InstallReceipt/v1` (o orquestrador do the-forge descobre o mais
+  recente aqui).
+- `install/receipt.json` — ponteiro "latest" com o mesmo documento,
+  lido por `status`/`uninstall`.
+
+A camada de **conta** (`~/.forge/installations/forge-lens.json`,
+`~/.forge/installs/forge-lens/`, launcher) é escrita só pelo bootstrap
+portátil — o lifecycle CLI a observa, nunca escreve. Detalhes do
+contrato em `docs/installation/standalone.md`.
+
 ## Retenção
 
 Ver `docs/security/retention.md` — política configurável planejada;

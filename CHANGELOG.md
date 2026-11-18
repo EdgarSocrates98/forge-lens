@@ -19,6 +19,46 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
   correlation ids surface as `session.id`, deterministic sha256 span ids
   dedupe on re-ingest, file provenance stays `imported`.
 
+- **Install 2.1 (cycle16 wave-09)** — forge-lens as an interoperable
+  Service Forge:
+  - `forge.json` declares `installation_kind: "service"`, a typed
+    `install` surface (operations/flags/hosts/scopes/profiles/
+    `approval: --yes`), `mcp_verify_tool: lens.capabilities` and
+    `depends_on: []`. The vendored bootstrap propagates the new fields
+    into `~/.forge/installations/forge-lens.json` via a clearly-marked
+    temporary divergence patch (canonical fix lands in wave-12).
+  - `forge-lens install` accepts the orchestrator's delegation argv
+    (`--scope/--root/--host/--profile/--components/--gateway-profile/
+    --yes/--no-input/--json`) — no more exit-2 on standard flags.
+    Flags without lens meaning are recorded verbatim in
+    `flags_recorded_not_applicable`, never faked into behavior.
+  - Receipts are canonical `forge/InstallReceipt/v1`
+    (`operation/status/verification/checks/managed_files`), written to
+    `install/receipts/<op>-<ts>.json` (orchestrator-discoverable) plus
+    the `receipt.json` latest-pointer.
+  - Mutations are approval-gated: `--yes` or interactive confirm
+    defaulting to **No**; refusal is the named
+    `FORGE-INSTALL-PLAN-NOT-APPROVED`. Dry-run writes nothing.
+  - `status`/`doctor` verify real state on both layers — the receipt
+    scope (`<data-dir>`) and the account runtime
+    (`~/.forge/installations/forge-lens.json` + venv + launcher, owned
+    by the portable bootstrap and only ever observed by the CLI). A
+    receipt alone reports `receipt_recorded`/`UNVERIFIED`, never
+    `installed`; missing account runtime is `UNVERIFIED`, not `FAIL`.
+  - `--scope user` is refused honestly
+    (`FORGE-INSTALL-SCOPE-UNSUPPORTED`) — the account layer belongs to
+    `install.sh`/`install.ps1`. `uninstall` removes only
+    receipt-tracked files; the `scope_boundary` field states that the
+    account runtime survives.
+  - Profiles `minimal|recommended|full` are declared equivalent (no
+    profile-gated components exist) — §5.4 declared-equivalence, with
+    the requested profile preserved in `profile_semantics`.
+  - `forge.agentic.json` skills roster populated (7 `kind: skill`
+    resources now listed); duplicate `PyYAML` dependency removed;
+    `ui/kit.py` + `ui/i18n.py` re-synced to the canonical the-forge kit
+    (modulo `forge_lens` package rename — `approve_plan` now defaults
+    to No).
+
 ## [0.2.3] - 2026-11-12
 
 Cycle 2.7 patch release: federated SDD contracts, forge-context kind taxonomy, Obsidian export verbs, CI hardening and generated-artifact refresh.

@@ -101,6 +101,7 @@ def run_guided_install() -> int:
     # --- review (real dry-run plan) --------------------------------------------
     plan = lifecycle.install(
         target,
+        scope="project",
         profile=profile,
         source=source,
         files=files,
@@ -131,7 +132,7 @@ def run_guided_install() -> int:
     if len(files) > 10:
         print(f"    … {len(files) - 10} more")
 
-    if not confirm(i18n.t("confirm_q", ctx.language), default=True, ctx=ctx):
+    if not confirm(i18n.t("confirm_q", ctx.language), default=False, ctx=ctx):
         return 130
 
     # --- apply (real governed install) ------------------------------------------
@@ -139,11 +140,15 @@ def run_guided_install() -> int:
 
     out = lifecycle.install(
         target,
+        scope="project",
         profile=profile,
         source=source,
         files=files,
         ts_ns=time.time_ns(),
         dry_run=False,
+        # The wizard's explicit confirm IS the interactive approval —
+        # the same gate --yes satisfies on the flag path.
+        approved=True,
     )
     ok = bool(out.get("ok"))
     color = "32" if ok else "31"
@@ -162,11 +167,13 @@ def run_guided_install() -> int:
         + _c(ctx, "32" if hok else "33", "healthy" if hok else "degraded")
     )
     for c in doc.get("checks", []):
-        mark = (
-            _c(ctx, "32", "✓" if ctx.unicode else "v")
-            if c.get("ok")
-            else _c(ctx, "31", "✗" if ctx.unicode else "x")
-        )
+        st = c.get("status")
+        if st in ("PASS", "NOT_APPLICABLE"):
+            mark = _c(ctx, "32", "✓" if ctx.unicode else "v")
+        elif st == "UNVERIFIED":
+            mark = _c(ctx, "33", "?")
+        else:
+            mark = _c(ctx, "31", "✗" if ctx.unicode else "x")
         print(f"    {mark} {c.get('check', '?')}")
 
     print("  next: forge-lens install doctor · forge-lens install-status")
