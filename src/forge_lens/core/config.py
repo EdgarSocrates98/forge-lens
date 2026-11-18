@@ -181,9 +181,11 @@ def load_config(project_dir: Path | None = None) -> LensConfig:
     return base
 
 
-def init_project(project_dir: Path, project_id: str) -> Path:
-    """Create ``.forge-lens/`` with a starter config. Returns config path."""
-    data_dir = project_dir / DEFAULT_DIR_NAME
+def ensure_state_dir(data_dir: Path, project_id: str) -> Path:
+    """Create ``data_dir`` + ``artifacts/`` and a starter ``config.toml``
+    when absent — the shared state-prep behind ``init`` and
+    ``install``. Returns the config path. Existing config is never
+    overwritten."""
     data_dir.mkdir(parents=True, exist_ok=True)
     (data_dir / "artifacts").mkdir(exist_ok=True)
     cfg = data_dir / "config.toml"
@@ -204,3 +206,8 @@ def init_project(project_dir: Path, project_id: str) -> Path:
             encoding="utf-8",
         )
     return cfg
+
+
+def init_project(project_dir: Path, project_id: str) -> Path:
+    """Create ``.forge-lens/`` with a starter config. Returns config path."""
+    return ensure_state_dir(project_dir / DEFAULT_DIR_NAME, project_id)
