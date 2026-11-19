@@ -19,6 +19,7 @@ Cycle 09: SSE replay (`/v1/traces/{id}/stream`), measured benchmarks at 1k/10k/1
 Cycle 10: honest host-capability matrix (`/v1/capabilities`), Claude Code JSONL importer (`import-claude`), MCP stdio observer (`mcp-serve`), install lifecycle receipts (`install-status`), 7 skills in `skills/`.
 Cycle 11: CycloneDX SBOM generator (`scripts/gen_sbom.py`), release workflow with OIDC trusted publishing + version gate, `CHANGELOG.md`, `docs/versioning.md`, Studio CI job.
 Cycle 12: efficiency intelligence (`/v1/intel/efficiency`, `/v1/traces/{id}/efficiency`), cohort regression (`/v1/intel/regress`), candidate recommendations (`/v1/traces/{id}/recommendations`), graph centrality/concentration analysis (`/v1/graph/traces/{id}/analysis`).
+Cycle 16.1: `forge/InstallLifecycle/v1` envelope on receipts/health docs (derived closed-state vocabulary — `completed` never means ready), incremental reinstall hash-compare (`managed_hashes` + `reinstall` delta — managed files never rewritten), honest context metadata in `forge.agentic.json` (descriptions mirrored from asset frontmatter, `domain: observability`, tags).
 
 ## Quickstart
 

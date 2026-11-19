@@ -125,6 +125,29 @@ grava um receipt `uninstall`. O runtime de conta (venv, launcher,
 manifesto do registry, `FORGE_LENS_*`) **não é removido** — a fronteira
 fica explícita em `scope_boundary` no recibo.
 
+**Estado de ciclo de vida (`forge/InstallLifecycle/v1`, cycle 16.1):**
+todo receipt e todo documento de saúde (`status`, `doctor`) carrega um
+envelope `lifecycle` — `{schema, state, detail}` derivado da evidência,
+nunca declarado pelo escritor. Vocabulário fechado:
+`planned|blocked|failed|applied|partially_applied|verified|unverified|
+ready|certified`. `status: completed` sozinho nunca é prontidão:
+recibo de plano deriva `planned`, recusa de gate (aprovação/escopo)
+deriva `blocked` (o check `BLOCKED` está no recibo), `completed` +
+`verification.PASS` deriva `verified`, saúde verde deriva `ready`, e
+"sem evidência nesse escopo" é sempre `unverified` — aditivo, leitores
+antigos ignoram.
+
+**Reinstalação incremental (§7.4):** o receipt de `install` grava
+`managed_hashes` (`sha256:` por arquivo gerenciado dentro do data-dir —
+paths que escapam não são hasheados, mesma regra do uninstall) e um
+delta `reinstall` contra o receipt anterior:
+`unchanged|changed|added|missing|removed_from_manifest` +
+`baseline` (`first_install|prior_receipt|prior_receipt_no_hashes`).
+Receipt legado sem hashes → `hash_compare: unavailable`, nunca
+"unchanged" fingido. Arquivos gerenciados **nunca são reescritos** —
+bytes idênticos não são tocados e drift do usuário aparece como
+`changed`, então reinstalar é informativo e preserva estado.
+
 **Saúde real:** `status` cruza as duas camadas (`project` × `account`)
 e reporta `installed|degraded|receipt_recorded|unverified|
 not_installed|uninstalled`; `doctor` roda checks reais (state dir

@@ -13,6 +13,35 @@ Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 
 ### Added
 
+- **Install lifecycle v1 (cycle 16.1 wave-10)** — receipts e documentos
+  de saúde compatíveis com `forge/InstallLifecycle/v1`:
+  - Todo receipt `forge/InstallReceipt/v1` e todo doc
+    `forge/InstallationHealth/v1` (`install status`, `install doctor`)
+    carrega o envelope `lifecycle` `{schema, state, detail}` — estado
+    **derivado** da evidência no vocabulário fechado
+    `planned|blocked|failed|applied|partially_applied|verified|unverified|
+    ready|certified` (as mesmas regras do orquestrador the-forge).
+    `status: completed` nunca implica prontidão; recusas de gate
+    (aprovação/`--scope user`) carregam check `BLOCKED` e derivam
+    `blocked`. Aditivo — recibos legados continuam parseando.
+  - Reinstalação incremental (§7.4): receipts de `install` gravam
+    `managed_hashes` (`sha256:` por arquivo gerenciado dentro do
+    data-dir, mesmo containment do uninstall) e um delta `reinstall`
+    contra o receipt anterior — `unchanged|changed|added|missing|
+    removed_from_manifest` + `baseline`. Recibo legado sem hashes
+    reporta `hash_compare: unavailable`, nunca "unchanged" fingido.
+    Arquivos gerenciados nunca são reescritos; drift aparece como
+    `changed` e bytes do usuário sobrevivem.
+  - `forge-lens doctor` imprime `[info] install lifecycle: <state>`
+    somente-observação — o veredito continua em `install status|doctor`.
+  - Metadados de contexto honestos em `forge.agentic.json`: os recursos
+    `skill`/`agent` agora declaram `description` (espelho verbatim do
+    frontmatter do asset — a fonte de verdade), `domain: observability`
+    e `tags`, alimentando a seleção L2 do orquestrador; testes fixam a
+    sincronia manifesto↔arquivo, a existência de todas as `location`/
+    `packaged_location`, a realidade dos workflows/`mcp_verify_tool`/
+    `host_adapters` e o teto de tamanho do L0 (`AGENTS.md`).
+
 - Documented the verified the-forge -> forge-lens ingest path in
   `docs/architecture/interoperability.md`: `theforge telemetry export` emits
   the OTLP `ExportTraceServiceRequest` that `forge-lens ingest` accepts —
