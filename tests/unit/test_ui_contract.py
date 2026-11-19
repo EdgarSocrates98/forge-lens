@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
+from forge_lens.install.guided import run_guided_install
 from forge_lens.ui.kit import NonInteractive
 from forge_lens.ui.tui import run_tui
-from forge_lens.ui.wizard import run_wizard
 
 
 def test_wizard_is_a_real_tty_gated_surface() -> None:
     with pytest.raises(NonInteractive, match="requires a TTY"):
-        run_wizard()
+        run_guided_install()
 
 
 def test_tui_is_a_real_tty_gated_surface() -> None:
