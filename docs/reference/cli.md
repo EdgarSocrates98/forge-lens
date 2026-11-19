@@ -124,7 +124,10 @@ emite `{"suggestions": [...], "note": ...}`.
 ## `forge-lens doctor [path] [--db]`
 
 Verifica Python ≥3.11, diretório de dados, store legível (schema_version,
-contagens), extras de servidor e import do SDK. Exit 0/1.
+contagens), extras de servidor, import do SDK e `pricing_file` quando
+configurado — e imprime uma linha `[info] install lifecycle: <state>`
+somente-observação (o veredito real fica em `install status|doctor`;
+nunca vira check PASS/FAIL). Exit 0/1.
 
 ## `forge-lens sessions [--db] [--project] [--limit N] [--json]`
 
@@ -320,6 +323,16 @@ sozinho reporta `receipt_recorded`/`UNVERIFIED`, nunca `installed`.
 `uninstall` remove apenas arquivos rastreados dentro do data-dir
 (containment por path resolvido) e grava um receipt `uninstall` com a
 fronteira de escopo — o runtime de conta não é tocado.
+
+Cycle 16.1 (aditivo): todo receipt/documento de saúde carrega um
+envelope `lifecycle` `forge/InstallLifecycle/v1` (`state` derivado:
+`planned|blocked|failed|applied|partially_applied|verified|unverified|
+ready|certified`) e o receipt de install grava `managed_hashes`
+(sha256 por arquivo gerenciado dentro do data-dir) + delta `reinstall`
+(`unchanged|changed|added|missing|removed_from_manifest` contra o
+receipt anterior; `prior_receipt_no_hashes` honesto para recibos
+legados). Arquivos gerenciados nunca são reescritos — ver
+`docs/installation/standalone.md`.
 
 Escopo das flags: `--data-dir` no grupo liga o verbo `install` sem
 subcomando; `status`/`doctor`/`uninstall` ligam o próprio

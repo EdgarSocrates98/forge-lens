@@ -1046,6 +1046,19 @@ def doctor(
         check("sdk importable", True)
     except Exception as exc:
         check("sdk importable", False, str(exc))
+    # observe-only install lifecycle — the verdict comes from
+    # install.status, which never soft-passes on paper; it informs the
+    # report without becoming a pass/fail check of its own
+    try:
+        from forge_lens.install.lifecycle import status as install_status
+
+        istate = install_status(data_dir)
+        typer.echo(
+            f"[info] install lifecycle: {istate['lifecycle']['state']} "
+            f"(project={istate['project']['state']}, account={istate['account']['state']})"
+        )
+    except Exception:
+        typer.echo("[info] install lifecycle: unreadable")
     if cfg.pricing_file:
         try:
             from forge_lens.intel.pricing import PricingRegistry

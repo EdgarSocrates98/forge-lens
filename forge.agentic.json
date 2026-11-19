@@ -81,64 +81,146 @@
       "id": "forge-lens-context-analysis",
       "kind": "skill",
       "location": "skills/forge-lens-context-analysis/SKILL.md",
-      "resource_class": "agentic"
+      "resource_class": "agentic",
+      "description": "Context-window pressure and input-token growth across LLM spans. Use for \"is the context ballooning / will it overflow\".",
+      "domain": "observability",
+      "tags": [
+        "context",
+        "context-window",
+        "tokens",
+        "growth"
+      ]
     },
     {
       "id": "forge-lens-cost-analysis",
       "kind": "skill",
       "location": "skills/forge-lens-cost-analysis/SKILL.md",
-      "resource_class": "agentic"
+      "resource_class": "agentic",
+      "description": "Token/cost/waste analysis of traces — usage coverage, priced spans, waste findings. Use for \"how much did this cost / where is waste\".",
+      "domain": "observability",
+      "tags": [
+        "cost",
+        "tokens",
+        "waste",
+        "pricing"
+      ]
     },
     {
       "id": "forge-lens-evaluate-agent",
       "kind": "skill",
       "location": "skills/forge-lens-evaluate-agent/SKILL.md",
-      "resource_class": "agentic"
+      "resource_class": "agentic",
+      "description": "Run deterministic evaluators and A/B comparisons over traces/datasets. Use for \"is the new version better / run the eval\".",
+      "domain": "observability",
+      "tags": [
+        "eval",
+        "evaluators",
+        "ab-comparison",
+        "datasets"
+      ]
     },
     {
       "id": "forge-lens-graph-explorer",
       "kind": "skill",
       "location": "skills/forge-lens-graph-explorer/SKILL.md",
-      "resource_class": "agentic"
+      "resource_class": "agentic",
+      "description": "Explore execution/session graphs — critical path, centrality, concentration. Use for \"show me the execution structure / what was the critical path\".",
+      "domain": "observability",
+      "tags": [
+        "graph",
+        "critical-path",
+        "centrality",
+        "sessions"
+      ]
     },
     {
       "id": "forge-lens-investigate-failure",
       "kind": "skill",
       "location": "skills/forge-lens-investigate-failure/SKILL.md",
-      "resource_class": "agentic"
+      "resource_class": "agentic",
+      "description": "Classify a failed trace and build an incident bundle. Use for \"why did this run fail / gather failure evidence\".",
+      "domain": "observability",
+      "tags": [
+        "failure",
+        "incident",
+        "classification",
+        "evidence"
+      ]
     },
     {
       "id": "forge-lens-loop-detection",
       "kind": "skill",
       "location": "skills/forge-lens-loop-detection/SKILL.md",
-      "resource_class": "agentic"
+      "resource_class": "agentic",
+      "description": "Detect repeated-identical-tool, retry and no-progress loops in a trace. Use for \"is this agent stuck / looping\".",
+      "domain": "observability",
+      "tags": [
+        "loop",
+        "retry",
+        "no-progress",
+        "stuck"
+      ]
     },
     {
       "id": "forge-lens-trace-analysis",
       "kind": "skill",
       "location": "skills/forge-lens-trace-analysis/SKILL.md",
-      "resource_class": "agentic"
+      "resource_class": "agentic",
+      "description": "Analyze a stored agent trace — spans, errors, timeline, evidence. Use when asked \"what did this agent do / why is it slow\".",
+      "domain": "observability",
+      "tags": [
+        "trace",
+        "spans",
+        "errors",
+        "timeline",
+        "evidence"
+      ]
     },
     {
       "id": "lens-evidence-guard",
       "kind": "agent",
       "location": "src/forge_lens/installation/assets/agents/lens-evidence-guard.md",
       "resource_class": "agentic",
-      "packaged_location": "installation/assets/agents/lens-evidence-guard.md"
+      "packaged_location": "installation/assets/agents/lens-evidence-guard.md",
+      "description": "Verifica integridade, redaction, retenção e classificação de evidências de observabilidade no Forge Lens.",
+      "domain": "observability",
+      "tags": [
+        "evidence",
+        "integrity",
+        "redaction",
+        "retention"
+      ]
     },
     {
       "id": "lens-observability-reviewer",
       "kind": "agent",
       "location": "src/forge_lens/installation/assets/agents/lens-observability-reviewer.md",
       "resource_class": "agentic",
-      "packaged_location": "installation/assets/agents/lens-observability-reviewer.md"
+      "packaged_location": "installation/assets/agents/lens-observability-reviewer.md",
+      "description": "Revisa qualidade de observabilidade, falhas, replay e custo somente a partir das métricas e evidências verificadas pelo Forge Lens.",
+      "domain": "observability",
+      "tags": [
+        "observability",
+        "quality",
+        "review",
+        "metrics"
+      ]
     },
     {
       "id": "lens-trace-analyst",
       "kind": "agent",
       "location": "src/forge_lens/installation/assets/agents/lens-trace-analyst.md",
       "resource_class": "agentic",
-      "packaged_location": "installation/assets/agents/lens-trace-analyst.md"
+      "packaged_location": "installation/assets/agents/lens-trace-analyst.md",
+      "description": "Analisa traces, sessões e spans locais do Forge Lens com limites, correlação e proveniência explícitos.",
+      "domain": "observability",
+      "tags": [
+        "traces",
+        "sessions",
+        "spans",
+        "correlation",
+        "provenance"
+      ]
     },
     {
       "id": "schemas/v1",

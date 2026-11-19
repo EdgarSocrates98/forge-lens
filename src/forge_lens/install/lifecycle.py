@@ -19,6 +19,17 @@ Two install layers, two receipt universes (never conflated):
 
 A receipt is an audit trail, not proof of install: ``status`` reports
 ``receipt_recorded``/``unverified`` when only paper exists.
+
+Cycle 16.1 additions (additive — older parsers keep working):
+
+- every receipt and health doc carries a ``lifecycle`` envelope
+  (``forge/InstallLifecycle/v1``): a derived, closed-vocabulary state —
+  ``status: completed`` alone never claims readiness (§5.3);
+- install receipts record ``managed_hashes`` (sha256 per managed file
+  inside the data dir) and a ``reinstall`` delta — the incremental
+  hash-compare against the prior install receipt (§7.4): what was
+  added/unchanged/changed/missing/dropped from the manifest. Managed
+  files are never rewritten, so user state survives reinstalls.
 """
 
 from __future__ import annotations
@@ -37,6 +48,7 @@ from forge_lens.core.config import ensure_state_dir
 
 SCHEMA_RECEIPT = "forge/InstallReceipt/v1"
 SCHEMA_HEALTH = "forge/InstallationHealth/v1"
+LIFECYCLE_SCHEMA = "forge/InstallLifecycle/v1"
 FORGE_ID = "forge-lens"
 DISTRIBUTION = "forge-lens-fl"
 PROFILES = ("minimal", "recommended", "full")
@@ -87,6 +99,33 @@ _UNINSTALL_BOUNDARY = (
     "(~/.forge/installs/forge-lens, ~/.local/bin/forge-lens, "
     "~/.forge/installations/forge-lens.json, FORGE_LENS_* account env) "
     "is owned by the portable bootstrap and is NOT removed"
+)
+
+# --------------------------------------------------------------------------
+# forge/InstallLifecycle/v1 — derived lifecycle position (cycle 16.1 §5.3)
+#
+# Receipt ``status`` is a coarse operation verdict — ``completed`` means
+# the writer finished, never "production-ready". The lifecycle state is
+# the finer-grained, honest position of the installation, *derived* from
+# the receipt/health evidence, never asserted by the writer itself.
+# Closed vocabulary — the same set the orchestrator derives:
+LIFECYCLE_STATES: tuple[str, ...] = (
+    "planned",  # plan emitted (dry-run); nothing was written
+    "blocked",  # a gate refused the operation (approval, unsupported scope)
+    "failed",  # the operation ran and errored
+    "applied",  # writes executed; verification absent or pending
+    "partially_applied",  # writes executed for a subset only / drift
+    "verified",  # applied AND receipt verification PASS
+    "unverified",  # no proof either way — receipt-only or absent evidence
+    "ready",  # verified AND health checks green
+    "certified",  # ready AND bound to external certification evidence
+)
+_BLOCKED_STATUSES = frozenset({"blocked", "refused", "unsupported"})
+
+_REINSTALL_NOTE = (
+    "install records managed files and prepares state; it never rewrites "
+    "them — config.toml and declared files keep their bytes across "
+    "reinstalls, so unchanged assets are never touched"
 )
 
 
@@ -266,6 +305,7 @@ def _receipt(
         doc["error"] = error
     if extra:
         doc.update(extra)
+    doc["lifecycle"] = receipt_block(doc)
     return doc
 
 
@@ -276,6 +316,193 @@ def _check(name: str, status: str, detail: str = "", *, required: bool = True) -
     if not required:
         out["required"] = False
     return out
+
+
+# --------------------------------------------------------------------------
+# lifecycle derivation — same rules the orchestrator applies, so a lens
+# receipt reads identically on both sides of the delegation boundary
+# --------------------------------------------------------------------------
+
+
+def receipt_state(doc: dict[str, Any]) -> tuple[str, str]:
+    """Derive the ``forge/InstallLifecycle/v1`` state of a
+    ``forge/InstallReceipt/v1`` doc — ``status`` + ``verification`` +
+    ``checks`` → one closed state. A view, never a stored verdict:
+    legacy receipts without ``lifecycle`` still derive."""
+    status = str(doc.get("status") or "")
+    verification = str((doc.get("verification") or {}).get("status") or "")
+    if status == "planned":
+        return "planned", "plan emitted — nothing written"
+    if status in _BLOCKED_STATUSES:
+        return "blocked", f"gate refusal: {status}"
+    if status == "completed":
+        if verification == "PASS":
+            return "verified", "writes executed and receipt checks pass"
+        if verification == "FAIL":
+            return "failed", "writes executed but verification failed"
+        return "applied", f"writes executed; verification {verification or 'absent'}"
+    if status == "failed":
+        # An op that never ran because every check hit a gate is blocked,
+        # not failed — the distinction the binary vocabulary erased.
+        checks = [c for c in doc.get("checks") or [] if isinstance(c, dict)]
+        if checks and all(
+            c.get("status") in ("BLOCKED", "UNVERIFIED", "NOT_APPLICABLE") for c in checks
+        ):
+            return "blocked", "every check gated — nothing applied"
+        return "failed", "operation errored"
+    if status == "unverified" or not status:
+        return "unverified", "no operation evidence"
+    return "unverified", f"status {status!r} outside the known receipt vocabulary"
+
+
+def _lifecycle_block(state: str, detail: str) -> dict[str, Any]:
+    """The ``forge/InstallLifecycle/v1`` envelope added to receipts and
+    health docs — additive, so older parsers keep working."""
+    return {"schema": LIFECYCLE_SCHEMA, "state": state, "detail": detail}
+
+
+def receipt_block(doc: dict[str, Any]) -> dict[str, Any]:
+    state, detail = receipt_state(doc)
+    return _lifecycle_block(state, detail)
+
+
+def _status_lifecycle(doc: dict[str, Any]) -> dict[str, Any]:
+    """Lifecycle view of the ``forge/InstallationHealth/v1`` status doc —
+    ``installed`` (receipt + real state observed) maps to ``verified``;
+    ``ready`` is reserved for green health checks (``doctor``)."""
+    state = str(doc.get("state") or "")
+    table: dict[str, tuple[str, str]] = {
+        "installed": ("verified", "receipt-verified install observed on disk"),
+        "degraded": (
+            "partially_applied",
+            "account runtime incomplete — repairable drift",
+        ),
+        "uninstalled": ("unverified", "uninstall receipt recorded — no active install"),
+        "receipt_recorded": ("unverified", "receipt without the state it describes"),
+        "unverified": ("unverified", "state dir without install evidence"),
+        "not_installed": ("unverified", "no installation evidence at this scope"),
+    }
+    state_, detail = table.get(state, ("unverified", f"install state {state!r} unknown"))
+    return _lifecycle_block(state_, detail)
+
+
+def _doctor_lifecycle(doc: dict[str, Any], data_dir: Path) -> dict[str, Any]:
+    """Lifecycle view of the doctor report — green required checks mean
+    ``ready``; nothing-installed-yet is ``unverified``, never a fake
+    failure; a failed check on real state is ``failed``."""
+    if doc.get("ok"):
+        return _lifecycle_block("ready", "required health checks green")
+    if read_receipt(data_dir) is None and not data_dir.is_dir():
+        return _lifecycle_block(
+            "unverified", "no installation evidence at this scope — nothing to fail"
+        )
+    failed = sorted(
+        str(c.get("check") or "?")
+        for c in doc.get("checks") or []
+        if c.get("required", True) and c.get("status") == "FAIL"
+    )
+    return _lifecycle_block(
+        "failed", f"required check(s) failed: {', '.join(failed) or 'unknown'}"
+    )
+
+
+# --------------------------------------------------------------------------
+# incremental reinstall — sha256 hash-compare against the prior receipt
+# (cycle 16.1 §7.4): identify drift, apply only what changed, preserve
+# user state, report exactly how many managed resources moved.
+# --------------------------------------------------------------------------
+
+
+def _managed_hashes(data_dir: Path, files: list[str]) -> dict[str, str]:
+    """``{rel: sha256:…}`` for managed files that exist inside
+    ``data_dir`` — same resolved-containment rule as ``uninstall``:
+    paths escaping the data dir are never hashed."""
+    base = data_dir.resolve()
+    out: dict[str, str] = {}
+    for f in sorted(files):
+        fp = (data_dir / f).resolve()
+        if not fp.is_relative_to(base) or not fp.is_file():
+            continue
+        try:
+            out[f] = f"sha256:{hashlib.sha256(fp.read_bytes()).hexdigest()}"
+        except OSError:
+            continue  # unreadable — lands in ``missing``
+    return out
+
+
+def _reinstall_delta(
+    prior: dict[str, Any] | None,
+    managed: list[str],
+    hashes: dict[str, str],
+) -> dict[str, Any]:
+    """Compare the prior install receipt's managed set to the current
+    declaration + on-disk bytes. Baselines:
+    ``first_install`` (no prior install receipt), ``prior_receipt``
+    (hash-compare possible), ``prior_receipt_no_hashes`` (legacy receipt —
+    names-only delta, content compare honestly unavailable)."""
+    if prior is None or prior.get("operation") != "install":
+        missing = sorted(f for f in managed if f not in hashes)
+        return {
+            "baseline": "first_install",
+            "prior_receipt_id": None if prior is None else prior.get("receipt_id"),
+            "prior_operation": None if prior is None else prior.get("operation"),
+            "hash_compare": "not_applicable",
+            "unchanged": [],
+            "changed": [],
+            "added": sorted(managed),
+            "missing": missing,
+            "removed_from_manifest": [],
+            "summary": {"added": len(managed), "missing": len(missing)},
+            "user_state_preserved": True,
+            "note": _REINSTALL_NOTE,
+        }
+    prior_files = sorted(str(f) for f in prior.get("managed_files") or [])
+    prior_hashes = prior.get("managed_hashes")
+    now = set(managed)
+    before = set(prior_files)
+    added = sorted(now - before)
+    removed = sorted(before - now)
+    common = sorted(now & before)
+    missing = sorted(f for f in managed if f not in hashes)
+    unchanged: list[str] = []
+    changed: list[str] = []
+    if isinstance(prior_hashes, dict):
+        for f in common:
+            if f not in hashes:
+                continue  # already counted in ``missing``
+            old = prior_hashes.get(f)
+            if old is None:
+                changed.append(f)  # previously absent, now present
+            elif old == hashes[f]:
+                unchanged.append(f)
+            else:
+                changed.append(f)
+        hash_compare = "sha256"
+        baseline = "prior_receipt"
+    else:
+        # legacy receipt recorded names only — content drift is
+        # honestly uncomputable, not "unchanged"
+        hash_compare = "unavailable"
+        baseline = "prior_receipt_no_hashes"
+    return {
+        "baseline": baseline,
+        "prior_receipt_id": prior.get("receipt_id"),
+        "hash_compare": hash_compare,
+        "unchanged": unchanged,
+        "changed": changed,
+        "added": added,
+        "missing": missing,
+        "removed_from_manifest": removed,
+        "summary": {
+            "unchanged": len(unchanged),
+            "changed": len(changed),
+            "added": len(added),
+            "missing": len(missing),
+            "removed_from_manifest": len(removed),
+        },
+        "user_state_preserved": True,
+        "note": _REINSTALL_NOTE,
+    }
 
 
 def _verdict(checks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -364,6 +591,14 @@ def install(
             root=root,
             ts_ns=ts_ns,
             dry_run=dry_run,
+            checks=[
+                _check(
+                    "scope_gate",
+                    "BLOCKED",
+                    f"scope {scope!r} refused — the account runtime is "
+                    "bootstrap-owned, never delegated",
+                )
+            ],
             error={
                 "kind": E_SCOPE,
                 "detail": (
@@ -396,6 +631,13 @@ def install(
             host=host,
             components=components,
             gateway_profile=gateway_profile,
+            checks=[
+                _check(
+                    "approval_gate",
+                    "BLOCKED",
+                    "mutation refused — no --yes, no interactive confirm",
+                )
+            ],
             error={
                 "kind": E_APPROVAL,
                 "detail": (
@@ -407,6 +649,7 @@ def install(
 
     managed = ["config.toml", *(files or [])]
     ignored = _ignored_flags(host, components, gateway_profile)
+    prior = read_receipt(data_dir)
     checks: list[dict[str, Any]] = []
     if dry_run:
         checks.append(
@@ -465,6 +708,12 @@ def install(
         checks.append(_check("receipt_written", "PASS", "canonical receipt persisted"))
         verification = _verdict(checks)
         status_ = "completed" if verification["status"] == "PASS" else "failed"
+    # §7.4 incremental: sha256-compare the prior receipt's managed set to
+    # the bytes on disk right now (after state prep, so config.toml is
+    # hashed for real). The delta proves which managed resources moved —
+    # unchanged ones are listed, never rewritten.
+    hashes = _managed_hashes(data_dir, managed)
+    delta = _reinstall_delta(prior, managed, hashes)
     receipt = _receipt(
         operation="install",
         status=status_,
@@ -482,6 +731,8 @@ def install(
         verification=verification,
         dry_run=dry_run,
         extra={
+            "managed_hashes": hashes,
+            "reinstall": delta,
             "flags_recorded_not_applicable": ignored,
             "profile_semantics": {
                 "requested": profile,
@@ -499,6 +750,7 @@ def install(
         # report through the same {"ok": False} channel as bad input
         receipt["status"] = "failed"
         receipt["error"] = {"kind": E_WRITE, "detail": f"receipt write failed: {exc}"}
+        receipt["lifecycle"] = receipt_block(receipt)
         return _fail(E_WRITE, f"receipt write failed: {exc}", receipt=receipt)
     return {"ok": True, "receipt": receipt, "receipt_path": str(path)}
 
@@ -552,7 +804,7 @@ def status(data_dir: Path) -> dict[str, Any]:
         state = "uninstalled"
     else:
         state = "not_installed"
-    return {
+    doc: dict[str, Any] = {
         "schema": SCHEMA_HEALTH,
         "forge_id": FORGE_ID,
         "installed": installed,
@@ -563,6 +815,8 @@ def status(data_dir: Path) -> dict[str, Any]:
         "receipts": receipts,
         "checked_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    doc["lifecycle"] = _status_lifecycle(doc)
+    return doc
 
 
 def _toml_check(data_dir: Path) -> dict[str, Any]:
@@ -668,13 +922,15 @@ def doctor(data_dir: Path) -> dict[str, Any]:
         )
     required = [c for c in checks if c.get("required", True)]
     ok = all(c["status"] in ("PASS", "NOT_APPLICABLE") for c in required)
-    return {
+    doc: dict[str, Any] = {
         "schema": SCHEMA_HEALTH,
         "forge_id": FORGE_ID,
         "ok": ok,
         "checks": checks,
         "checked_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    doc["lifecycle"] = _doctor_lifecycle(doc, data_dir)
+    return doc
 
 
 def uninstall(data_dir: Path, *, ts_ns: int, approved: bool = False) -> dict[str, Any]:
@@ -693,6 +949,13 @@ def uninstall(data_dir: Path, *, ts_ns: int, approved: bool = False) -> dict[str
             data_dir=data_dir,
             root=None,
             ts_ns=ts_ns,
+            checks=[
+                _check(
+                    "approval_gate",
+                    "BLOCKED",
+                    "mutation refused — no --yes, no interactive confirm",
+                )
+            ],
             error={
                 "kind": E_APPROVAL,
                 "detail": (
