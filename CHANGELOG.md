@@ -3,6 +3,18 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/), SemVer.
 `Unreleased` acumula mudanças até o próximo tag.
 
+## Unreleased — Cycle 16.1.1
+
+### Fixed
+- `setup.sh`: probe de python tolera ausência total (`|| true`) — sob
+  `set -euo pipefail` saía `rc=1` silencioso antes de
+  `FORGE-PYTHON-NOT-FOUND` (defeito vendored; correção canônica no
+  the-forge wave-01).
+- `ui/wizard.py` re-vendored do canônico the-forge (drift silencioso —
+  lens fora de `KIT_PARITY_REPOS`). Regressão:
+  `tests/unit/test_setup_scripts_1611.py` cobre o probe + paridade dos
+  3 arquivos do kit.
+
 ## [0.2.4] — 2026-11-13
 
 ### Changed
